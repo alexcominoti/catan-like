@@ -66,19 +66,20 @@ if (r.ok) { /* r.state, r.events */ } else { /* r.error */ }
 - **Grafo do tabuleiro:** 19 hexes (anéis 1+6+12), 54 vértices, 72 arestas, com
   **IDs estáveis** pré-computados uma vez.
 
-### Implementado na Fase 1
+### Jogo base completo (Fase 1) ✅
 
 Setup em serpente · custos e construção (estrada/vila/cidade) · produção 2d6 com
-escassez do banco · regra do 7 (descarte + bloqueador + roubo) · comércio 4:1 com
-o banco · Estrada Mais Longa (≥5) · Maior Exército (≥3) · vitória (10 pontos).
+escassez do banco · regra do 7 (descarte + bloqueador + roubo) · **cartas de
+progresso** (Cavaleiro, 2 Estradas, +2 Recursos, Monopólio, +1 PV) · **comércio
+marítimo com portos** (4:1 / 3:1 / 2:1) · **comércio entre jogadores** (propor /
+aceitar / fechar) · Estrada Mais Longa (≥5) · Maior Exército (≥3) · vitória (10
+pontos). UI com destaque de alvos válidos, peça-fantasma no hover e ESC cancela.
 
 ### Próximos passos
 
-- Jogar cartas de progresso (Cavaleiro, 2 Estradas, +2 Recursos, Monopólio, +1 PV).
-- Comércio entre jogadores (propor/responder).
-- Portos (2:1 / 3:1).
-- Destaque por hover (peça-fantasma) e atalhos (ESC cancela).
-- Fase 2: servidor `ws` autoritativo + `projectFor` (fog of war).
+- Variantes/refino de UX (atalhos, animações, tema claro).
+- Fase 2: servidor `ws` autoritativo + `projectFor` (fog of war) para jogar de
+  abas/PCs diferentes.
 
 ## Licença
 

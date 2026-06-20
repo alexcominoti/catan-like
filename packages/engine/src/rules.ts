@@ -44,6 +44,21 @@ export function payToBank(
   }
 }
 
+/**
+ * Melhor taxa de comercio maritimo do jogador para um recurso:
+ * 4:1 por padrao, 3:1 com porto generico, 2:1 com porto daquele recurso.
+ */
+export function maritimeRate(state: GameState, color: PlayerColor, give: Resource): number {
+  let rate = 4;
+  for (const port of state.board.ports) {
+    const owns = port.vertices.some((v) => state.buildings[v]?.owner === color);
+    if (!owns) continue;
+    if (port.type === 'generic') rate = Math.min(rate, 3);
+    else if (port.type === give) rate = Math.min(rate, 2);
+  }
+  return rate;
+}
+
 /** Pontuacao total visivel + oculta de um jogador. */
 export function scoreOf(state: GameState, color: PlayerColor): number {
   const p = getPlayer(state, color);

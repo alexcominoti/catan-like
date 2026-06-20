@@ -10,6 +10,7 @@ import {
   getPlayer,
   handTotal,
   longestRoadLength,
+  maritimeRate,
   payToBank,
   roadConnects,
   scoreOf,
@@ -20,6 +21,7 @@ import type {
   GameEvent,
   GameState,
   PlayerColor,
+  ProgressCard,
   ReduceResult,
   Resource,
 } from './types.js';
@@ -65,8 +67,22 @@ export function reduce(state: GameState, by: PlayerColor, action: Action): Reduc
       return discard(state, by, action.resources);
     case 'moveBlocker':
       return moveBlocker(state, by, action.hexId, action.stealFrom);
-    case 'playProgressCard':
-      return err('Cartas de progresso ainda nao implementadas (proximo passo).');
+    case 'playKnight':
+      return playKnight(state, by);
+    case 'playRoadBuilding':
+      return playRoadBuilding(state, by);
+    case 'playYearOfPlenty':
+      return playYearOfPlenty(state, by, action.resources);
+    case 'playMonopoly':
+      return playMonopoly(state, by, action.resource);
+    case 'proposeTrade':
+      return proposeTrade(state, by, action.give, action.want, action.to);
+    case 'respondTrade':
+      return respondTrade(state, by, action.accept);
+    case 'confirmTrade':
+      return confirmTrade(state, by, action.with);
+    case 'cancelTrade':
+      return cancelTrade(state, by);
     case 'endTurn':
       return endTurn(state, by);
     default:
@@ -187,6 +203,7 @@ function rollDice(state: GameState, by: PlayerColor): ReduceResult {
       }
     }
     next.pendingDiscards = pending;
+    next.returnPhaseAfterBlocker = 'main';
     if (mustDiscard.length > 0) {
       next.phase = 'discard';
       events.push({ t: 'mustDiscard', players: mustDiscard });
@@ -279,7 +296,8 @@ function moveBlocker(
     events.push({ t: 'blockerMoved', hexId });
   }
 
-  next.phase = 'main';
+  next.phase = next.returnPhaseAfterBlocker ?? 'main';
+  next.returnPhaseAfterBlocker = null;
   return ok(next, events);
 }
 
@@ -298,8 +316,13 @@ function buildRoad(state: GameState, by: PlayerColor, edgeId: string): ReduceRes
   const next = clone(state);
   const p = getPlayer(next, by);
   if (p.pieces.roads <= 0) return err('Sem estradas no estoque.');
-  if (!canAfford(p, COSTS.road)) return err('Recursos insuficientes para estrada.');
-  payToBank(next, p, COSTS.road);
+  // Estradas gratis da carta "2 Estradas" tem prioridade sobre o pagamento.
+  if (next.pendingFreeRoads > 0) {
+    next.pendingFreeRoads -= 1;
+  } else {
+    if (!canAfford(p, COSTS.road)) return err('Recursos insuficientes para estrada.');
+    payToBank(next, p, COSTS.road);
+  }
   p.pieces.roads -= 1;
   next.roads[edgeId] = { owner: by, edgeId };
 
@@ -382,7 +405,7 @@ function tradeBank(
 
   const next = clone(state);
   const p = getPlayer(next, by);
-  const rate = 4; // 4:1 (portos entram depois)
+  const rate = maritimeRate(next, by, give); // 4:1, ou 3:1/2:1 com porto
   if (p.hand[give] < rate) return err(`Precisa de ${rate} ${give}.`);
   if (next.bank[want] <= 0) return err('O banco nao tem esse recurso.');
   p.hand[give] -= rate;
@@ -390,7 +413,204 @@ function tradeBank(
   p.hand[want] += 1;
   next.bank[want] -= 1;
 
-  return ok(next, [{ t: 'bankTrade', owner: by, give, want }]);
+  return ok(next, [{ t: 'bankTrade', owner: by, give, want, rate }]);
+}
+
+// ---------------------------------------------------------------------------
+// Cartas de progresso
+// ---------------------------------------------------------------------------
+
+/** Verifica se o jogador pode jogar uma carta deste tipo agora. */
+function cardPlayError(state: GameState, p: GameState['players'][number], card: ProgressCard): string | null {
+  if (state.devCardPlayedThisTurn) return 'Voce ja jogou uma carta de progresso neste turno.';
+  const have = p.progressCards.filter((c) => c === card).length;
+  const bought = p.progressCardsBoughtThisTurn.filter((c) => c === card).length;
+  if (have - bought <= 0) return 'Voce nao tem essa carta (ou foi comprada neste turno).';
+  return null;
+}
+
+function removeCard(p: GameState['players'][number], card: ProgressCard): void {
+  const i = p.progressCards.indexOf(card);
+  if (i >= 0) p.progressCards.splice(i, 1);
+}
+
+function playKnight(state: GameState, by: PlayerColor): ReduceResult {
+  if (by !== state.currentPlayer) return err('Nao e a sua vez.');
+  if (state.phase !== 'roll' && state.phase !== 'main') {
+    return err('Cavaleiro so antes ou depois de rolar.');
+  }
+  const next = clone(state);
+  const p = getPlayer(next, by);
+  const e = cardPlayError(next, p, 'knight');
+  if (e) return err(e);
+  removeCard(p, 'knight');
+  next.devCardPlayedThisTurn = true;
+  p.knightsPlayed += 1;
+
+  const events: GameEvent[] = [{ t: 'cardPlayed', owner: by, card: 'knight' }];
+  updateLargestArmy(next, events);
+  // Entra no fluxo de mover bloqueador, voltando a fase de onde veio.
+  next.returnPhaseAfterBlocker = state.phase === 'roll' ? 'roll' : 'main';
+  next.phase = 'moveBlocker';
+  checkWin(next, by, events); // Maior Exercito pode fechar o jogo
+  return ok(next, events);
+}
+
+function playRoadBuilding(state: GameState, by: PlayerColor): ReduceResult {
+  if (state.phase !== 'main') return err('So da pra jogar na fase principal.');
+  if (by !== state.currentPlayer) return err('Nao e a sua vez.');
+  const next = clone(state);
+  const p = getPlayer(next, by);
+  const e = cardPlayError(next, p, 'roadBuilding');
+  if (e) return err(e);
+  removeCard(p, 'roadBuilding');
+  next.devCardPlayedThisTurn = true;
+  next.pendingFreeRoads += 2;
+  return ok(next, [{ t: 'cardPlayed', owner: by, card: 'roadBuilding' }]);
+}
+
+function playYearOfPlenty(
+  state: GameState,
+  by: PlayerColor,
+  resources: [Resource, Resource],
+): ReduceResult {
+  if (state.phase !== 'main') return err('So da pra jogar na fase principal.');
+  if (by !== state.currentPlayer) return err('Nao e a sua vez.');
+  const next = clone(state);
+  const p = getPlayer(next, by);
+  const e = cardPlayError(next, p, 'yearOfPlenty');
+  if (e) return err(e);
+  // O banco precisa ter os dois recursos pedidos.
+  const need: Partial<Record<Resource, number>> = {};
+  for (const r of resources) need[r] = (need[r] ?? 0) + 1;
+  for (const [r, n] of Object.entries(need) as [Resource, number][]) {
+    if (next.bank[r] < n) return err('O banco nao tem esses recursos.');
+  }
+  removeCard(p, 'yearOfPlenty');
+  next.devCardPlayedThisTurn = true;
+  const gains: Partial<Record<Resource, number>> = {};
+  for (const r of resources) {
+    p.hand[r] += 1;
+    next.bank[r] -= 1;
+    gains[r] = (gains[r] ?? 0) + 1;
+  }
+  const allGains = {} as Record<PlayerColor, Partial<Record<Resource, number>>>;
+  for (const pl of next.players) allGains[pl.color] = pl.color === by ? gains : {};
+  return ok(next, [
+    { t: 'cardPlayed', owner: by, card: 'yearOfPlenty' },
+    { t: 'produced', gains: allGains },
+  ]);
+}
+
+function playMonopoly(state: GameState, by: PlayerColor, resource: Resource): ReduceResult {
+  if (state.phase !== 'main') return err('So da pra jogar na fase principal.');
+  if (by !== state.currentPlayer) return err('Nao e a sua vez.');
+  const next = clone(state);
+  const p = getPlayer(next, by);
+  const e = cardPlayError(next, p, 'monopoly');
+  if (e) return err(e);
+  removeCard(p, 'monopoly');
+  next.devCardPlayedThisTurn = true;
+  let taken = 0;
+  for (const other of next.players) {
+    if (other.color === by) continue;
+    taken += other.hand[resource];
+    other.hand[resource] = 0;
+  }
+  p.hand[resource] += taken;
+  return ok(next, [
+    { t: 'cardPlayed', owner: by, card: 'monopoly' },
+    { t: 'monopoly', owner: by, resource, taken },
+  ]);
+}
+
+// ---------------------------------------------------------------------------
+// Comercio entre jogadores
+// ---------------------------------------------------------------------------
+
+function sanitizeResMap(m: Partial<Record<Resource, number>>): Partial<Record<Resource, number>> {
+  const out: Partial<Record<Resource, number>> = {};
+  for (const r of RESOURCES) {
+    const n = m[r] ?? 0;
+    if (n > 0 && Number.isInteger(n)) out[r] = n;
+  }
+  return out;
+}
+
+function moveResources(
+  from: GameState['players'][number],
+  to: GameState['players'][number],
+  res: Partial<Record<Resource, number>>,
+): void {
+  for (const [r, n] of Object.entries(res) as [Resource, number][]) {
+    from.hand[r] -= n;
+    to.hand[r] += n;
+  }
+}
+
+function proposeTrade(
+  state: GameState,
+  by: PlayerColor,
+  give: Partial<Record<Resource, number>>,
+  want: Partial<Record<Resource, number>>,
+  to?: PlayerColor[],
+): ReduceResult {
+  if (state.phase !== 'main') return err('So da pra comerciar na fase principal.');
+  if (by !== state.currentPlayer) return err('Nao e a sua vez.');
+  const g = sanitizeResMap(give);
+  const w = sanitizeResMap(want);
+  if (Object.keys(g).length === 0 && Object.keys(w).length === 0) {
+    return err('Proposta vazia.');
+  }
+  const next = clone(state);
+  const p = getPlayer(next, by);
+  if (!canAfford(p, g)) return err('Voce nao tem os recursos oferecidos.');
+  const recipients = (to ?? next.players.map((pl) => pl.color)).filter((c) => c !== by);
+  if (recipients.length === 0) return err('Sem destinatarios.');
+  next.activeTrade = { from: by, give: g, want: w, to: recipients, accepted: [] };
+  return ok(next, [{ t: 'tradeProposed', from: by }]);
+}
+
+function respondTrade(state: GameState, by: PlayerColor, accept: boolean): ReduceResult {
+  const trade = state.activeTrade;
+  if (!trade) return err('Nao ha proposta ativa.');
+  if (by === trade.from) return err('O proponente nao responde.');
+  if (!trade.to.includes(by)) return err('Voce nao foi convidado.');
+  const next = clone(state);
+  const t = next.activeTrade!;
+  if (accept) {
+    const responder = getPlayer(next, by);
+    if (!canAfford(responder, t.want)) return err('Voce nao tem o que foi pedido.');
+    if (!t.accepted.includes(by)) t.accepted.push(by);
+  } else {
+    t.accepted = t.accepted.filter((c) => c !== by);
+  }
+  return ok(next, [{ t: 'tradeResponded', player: by, accept }]);
+}
+
+function confirmTrade(state: GameState, by: PlayerColor, withPlayer: PlayerColor): ReduceResult {
+  const trade = state.activeTrade;
+  if (!trade) return err('Nao ha proposta ativa.');
+  if (by !== trade.from) return err('Apenas o proponente fecha o negocio.');
+  if (!trade.accepted.includes(withPlayer)) return err('Esse jogador nao aceitou.');
+  const next = clone(state);
+  const from = getPlayer(next, by);
+  const to = getPlayer(next, withPlayer);
+  if (!canAfford(from, trade.give)) return err('Voce nao tem mais os recursos.');
+  if (!canAfford(to, trade.want)) return err('O outro jogador nao tem mais os recursos.');
+  moveResources(from, to, trade.give);
+  moveResources(to, from, trade.want);
+  next.activeTrade = null;
+  return ok(next, [{ t: 'tradeExecuted', from: by, with: withPlayer }]);
+}
+
+function cancelTrade(state: GameState, by: PlayerColor): ReduceResult {
+  const trade = state.activeTrade;
+  if (!trade) return err('Nao ha proposta ativa.');
+  if (by !== trade.from && by !== state.currentPlayer) return err('Nao pode cancelar.');
+  const next = clone(state);
+  next.activeTrade = null;
+  return ok(next, [{ t: 'tradeCancelled' }]);
 }
 
 function endTurn(state: GameState, by: PlayerColor): ReduceResult {
@@ -401,6 +621,7 @@ function endTurn(state: GameState, by: PlayerColor): ReduceResult {
   next.dice = null;
   next.devCardPlayedThisTurn = false;
   next.pendingFreeRoads = 0;
+  next.activeTrade = null;
   for (const p of next.players) p.progressCardsBoughtThisTurn = [];
 
   const idx = next.players.findIndex((p) => p.color === by);

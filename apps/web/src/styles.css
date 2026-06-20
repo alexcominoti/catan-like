@@ -226,3 +226,134 @@ button.active {
   color: #ff8a8a;
   font-size: 13px;
 }
+
+.muted-note {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.dev-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.dev-cards button {
+  width: 100%;
+  text-align: left;
+}
+
+/* Modais */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 8, 14, 0.66);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px;
+  min-width: 320px;
+  max-width: 92vw;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.modal.wide {
+  min-width: 520px;
+}
+
+.modal h3 {
+  margin: 0 0 14px;
+  font-size: 16px;
+}
+
+.modal h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+button.link {
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 8px 0 0;
+  text-decoration: underline;
+}
+
+.trade-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+.trade-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 3px 0;
+  font-size: 14px;
+}
+
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stepper button {
+  width: 28px;
+  padding: 4px 0;
+  text-align: center;
+  font-weight: 700;
+}
+
+.stepper b {
+  min-width: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.trade-recipients {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.chk {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.trade-summary {
+  font-size: 15px;
+  margin: 0 0 14px;
+}
+
+.trade-responders {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}

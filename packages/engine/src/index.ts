@@ -16,6 +16,7 @@ export {
   scoreOf,
   handTotal,
   longestRoadLength,
+  maritimeRate,
   computeProduction,
   distanceRuleOk,
   roadConnects,

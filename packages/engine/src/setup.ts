@@ -24,6 +24,19 @@ const TERRAIN_BAG: Terrain[] = [
 /** 18 tokens numericos (sem 7); o deserto nao recebe numero. */
 const NUMBER_BAG: number[] = [2, 3, 3, 4, 4, 5, 5, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11, 12];
 
+/** Tipos de porto: 4 genericos (3:1) + 1 de cada recurso (2:1). */
+const PORT_TYPE_BAG: ('generic' | Resource)[] = [
+  'generic',
+  'generic',
+  'generic',
+  'generic',
+  'wood',
+  'brick',
+  'wool',
+  'grain',
+  'ore',
+];
+
 /** Baralho de progresso (25 cartas), distribuicao classica. */
 const DEV_DECK_BAG: ProgressCard[] = [
   ...Array<ProgressCard>(14).fill('knight'),
@@ -92,7 +105,14 @@ export function createInitialState(opts: SetupOptions): GameState {
     }
   });
 
-  // 3. Baralho de progresso embaralhado.
+  // 3. Tipos de porto embaralhados (geometria ja veio do grafo).
+  const pt = shuffle(rng, PORT_TYPE_BAG);
+  rng = pt.rng;
+  board.ports.forEach((port, i) => {
+    port.type = pt.value[i] ?? 'generic';
+  });
+
+  // 4. Baralho de progresso embaralhado.
   const d = shuffle(rng, DEV_DECK_BAG);
   rng = d.rng;
   const devDeck = d.value;
@@ -119,6 +139,8 @@ export function createInitialState(opts: SetupOptions): GameState {
     devCardPlayedThisTurn: false,
     pendingFreeRoads: 0,
     pendingDiscards: {},
+    returnPhaseAfterBlocker: null,
+    activeTrade: null,
     board,
     buildings: {},
     roads: {},

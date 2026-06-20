@@ -118,14 +118,42 @@ export interface Edge {
   hexes: string[];
 }
 
+/** Porto maritimo numa aresta costeira. 'generic' = 3:1; um Resource = 2:1 daquele. */
+export interface Port {
+  id: string;
+  edgeId: string;
+  /** Os dois vertices que dao acesso ao porto. */
+  vertices: [string, string];
+  type: 'generic' | Resource;
+  /** Ponto medio da aresta + normal apontando para fora (para a UI). */
+  x: number;
+  y: number;
+  nx: number;
+  ny: number;
+}
+
 export interface Board {
   hexes: Record<string, Hex>;
   vertices: Record<string, Vertex>;
   edges: Record<string, Edge>;
+  ports: Port[];
   /** Ordem estavel para iteracao/renderizacao deterministica. */
   hexOrder: string[];
   vertexOrder: string[];
   edgeOrder: string[];
+}
+
+/** Oferta de comercio entre jogadores (uma ativa por vez). */
+export interface TradeOffer {
+  from: PlayerColor;
+  /** O que 'from' oferece (vai para quem aceitar). */
+  give: Partial<Record<Resource, number>>;
+  /** O que 'from' quer receber. */
+  want: Partial<Record<Resource, number>>;
+  /** Jogadores elegiveis a responder. */
+  to: PlayerColor[];
+  /** Quem ja aceitou (o proponente escolhe com quem fechar). */
+  accepted: PlayerColor[];
 }
 
 export interface GameState {
@@ -142,6 +170,10 @@ export interface GameState {
   pendingFreeRoads: number;
   /** Quantas cartas cada jogador ainda precisa descartar (apos um 7). */
   pendingDiscards: Partial<Record<PlayerColor, number>>;
+  /** Para onde voltar depois de mover o bloqueador ('roll' se veio de Cavaleiro pre-rolagem). */
+  returnPhaseAfterBlocker: 'roll' | 'main' | null;
+  /** Oferta de comercio entre jogadores ativa (ou null). */
+  activeTrade: TradeOffer | null;
   board: Board;
   buildings: Record<string, Building>; // por vertexId
   roads: Record<string, Road>; // por edgeId
@@ -165,7 +197,13 @@ export type GameEvent =
   | { t: 'blockerMoved'; hexId: string; stoleFrom?: PlayerColor; resource?: Resource }
   | { t: 'mustDiscard'; players: { color: PlayerColor; count: number }[] }
   | { t: 'discarded'; owner: PlayerColor }
-  | { t: 'bankTrade'; owner: PlayerColor; give: Resource; want: Resource }
+  | { t: 'bankTrade'; owner: PlayerColor; give: Resource; want: Resource; rate: number }
+  | { t: 'cardPlayed'; owner: PlayerColor; card: ProgressCard }
+  | { t: 'monopoly'; owner: PlayerColor; resource: Resource; taken: number }
+  | { t: 'tradeProposed'; from: PlayerColor }
+  | { t: 'tradeResponded'; player: PlayerColor; accept: boolean }
+  | { t: 'tradeExecuted'; from: PlayerColor; with: PlayerColor }
+  | { t: 'tradeCancelled' }
   | { t: 'longestRoad'; owner: PlayerColor | null }
   | { t: 'largestArmy'; owner: PlayerColor | null }
   | { t: 'turnEnded'; next: PlayerColor }
@@ -179,10 +217,17 @@ export type Action =
   | { t: 'buildRoad'; edgeId: string }
   | { t: 'buildCity'; vertexId: string }
   | { t: 'buyProgressCard' }
-  | { t: 'playProgressCard'; card: ProgressCard; params?: unknown }
+  | { t: 'playKnight' }
+  | { t: 'playRoadBuilding' }
+  | { t: 'playYearOfPlenty'; resources: [Resource, Resource] }
+  | { t: 'playMonopoly'; resource: Resource }
   | { t: 'moveBlocker'; hexId: string; stealFrom?: PlayerColor }
   | { t: 'discard'; resources: Partial<Record<Resource, number>> }
   | { t: 'tradeBank'; give: Resource; want: Resource }
+  | { t: 'proposeTrade'; give: Partial<Record<Resource, number>>; want: Partial<Record<Resource, number>>; to?: PlayerColor[] }
+  | { t: 'respondTrade'; accept: boolean }
+  | { t: 'confirmTrade'; with: PlayerColor }
+  | { t: 'cancelTrade' }
   | { t: 'endTurn' };
 
 export type ReduceResult =

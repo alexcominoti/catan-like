@@ -1,4 +1,4 @@
-import type { Board, Hex, Vertex, Edge } from './types.js';
+import type { Board, Hex, Vertex, Edge, Port } from './types.js';
 
 /**
  * Geometria do tabuleiro classico de 19 hexes (aneis 1 + 6 + 12).
@@ -166,7 +166,74 @@ export function buildBoardGeometry(): Board {
     hexes[hid]!.corners = hexes[hid]!.corners.map((v) => tmpToVid.get(v)!);
   }
 
-  return { hexes, vertices, edges, hexOrder, vertexOrder, edgeOrder };
+  const ports = buildPorts(edges, vertices, edgeOrder);
+
+  return { hexes, vertices, edges, ports, hexOrder, vertexOrder, edgeOrder };
+}
+
+/** Numero de portos no tabuleiro classico. */
+const PORT_COUNT = 9;
+
+/**
+ * Posiciona 9 portos em arestas costeiras (geometria apenas; o *tipo* de cada
+ * porto e atribuido no setup, com a seed). As arestas costeiras (1 hex vizinho)
+ * formam um unico anel; escolhemos 9 posicoes espacadas uniformemente nele.
+ */
+function buildPorts(
+  edges: Record<string, Edge>,
+  vertices: Record<string, Vertex>,
+  edgeOrder: string[],
+): Port[] {
+  const coastal = edgeOrder.filter((e) => edges[e]!.hexes.length === 1);
+
+  // Indexa arestas costeiras por vertice (na borda, cada vertice tem 2).
+  const byVertex = new Map<string, string[]>();
+  for (const eid of coastal) {
+    for (const v of edges[eid]!.v) {
+      if (!byVertex.has(v)) byVertex.set(v, []);
+      byVertex.get(v)!.push(eid);
+    }
+  }
+
+  // Caminha o anel costeiro a partir de uma aresta qualquer.
+  const ring: string[] = [];
+  const visited = new Set<string>();
+  let curEdge = coastal[0]!;
+  let curVertex = edges[curEdge]!.v[0];
+  while (curEdge && !visited.has(curEdge)) {
+    ring.push(curEdge);
+    visited.add(curEdge);
+    const e = edges[curEdge]!;
+    const other = e.v[0] === curVertex ? e.v[1] : e.v[0];
+    const next = (byVertex.get(other) ?? []).find((x) => x !== curEdge && !visited.has(x));
+    if (!next) break;
+    curVertex = other;
+    curEdge = next;
+  }
+
+  // Seleciona PORT_COUNT posicoes espacadas no anel.
+  const ports: Port[] = [];
+  for (let i = 0; i < PORT_COUNT; i++) {
+    const idx = Math.round((i * ring.length) / PORT_COUNT) % ring.length;
+    const eid = ring[idx]!;
+    const e = edges[eid]!;
+    const a = vertices[e.v[0]]!;
+    const b = vertices[e.v[1]]!;
+    const mx = (a.x + b.x) / 2;
+    const my = (a.y + b.y) / 2;
+    const len = Math.hypot(mx, my) || 1; // centro do tabuleiro = (0,0)
+    ports.push({
+      id: `p${i}`,
+      edgeId: eid,
+      vertices: [e.v[0], e.v[1]],
+      type: 'generic',
+      x: mx,
+      y: my,
+      nx: mx / len,
+      ny: my / len,
+    });
+  }
+  return ports;
 }
 
 function midOf(
