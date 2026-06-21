@@ -40,6 +40,34 @@ describe('estado inicial', () => {
     }
   });
 
+  it("desert: 'center' fixa o deserto no hex central", () => {
+    const s = createInitialState({ seed: 7, desert: 'center' });
+    const desert = s.board.hexes[s.blocker.hexId]!;
+    expect(desert.terrain).toBe('desert');
+    expect(desert.q).toBe(0);
+    expect(desert.r).toBe(0);
+  });
+
+  it("numberLayout: 'balanced' nunca poe dois 6/8 adjacentes", () => {
+    const dirs: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]];
+    for (const seed of [1, 2, 3, 42, 1234]) {
+      const s = createInitialState({ seed, numberLayout: 'balanced' });
+      const byQR = new Map<string, number | null>();
+      for (const h of s.board.hexOrder) {
+        const hex = s.board.hexes[h]!;
+        byQR.set(`${hex.q},${hex.r}`, hex.number);
+      }
+      for (const h of s.board.hexOrder) {
+        const hex = s.board.hexes[h]!;
+        if (hex.number !== 6 && hex.number !== 8) continue;
+        for (const [dq, dr] of dirs) {
+          const nb = byQR.get(`${hex.q + dq},${hex.r + dr}`);
+          expect(nb === 6 || nb === 8).toBe(false);
+        }
+      }
+    }
+  });
+
   it('comeca com o bloqueador no deserto e banco cheio', () => {
     const s = createInitialState({ seed: 7 });
     expect(s.board.hexes[s.blocker.hexId]!.terrain).toBe('desert');

@@ -3,11 +3,13 @@ import { createRng, shuffle } from './rng.js';
 import {
   PLAYER_COLORS,
   RESOURCES,
+  type Board,
   type GameState,
   type Player,
   type PlayerColor,
   type ProgressCard,
   type Resource,
+  type RngState,
   type Terrain,
 } from './types.js';
 
@@ -67,10 +69,19 @@ function makePlayer(color: PlayerColor, name: string): Player {
   };
 }
 
+/** Como distribuir os tokens numericos. */
+export type NumberLayout = 'random' | 'balanced';
+/** Onde fica o deserto (e o bloqueador inicial). */
+export type DesertPlacement = 'random' | 'center';
+
 export interface SetupOptions {
   seed: number;
   /** Ate 4 jogadores. Default: 4 cores padrao com nomes genericos. */
   players?: { color?: PlayerColor; name: string }[];
+  /** 'balanced' evita que dois numeros vermelhos (6/8) fiquem adjacentes. Default 'random'. */
+  numberLayout?: NumberLayout;
+  /** 'center' fixa o deserto no hex central. Default 'random'. */
+  desert?: DesertPlacement;
 }
 
 /**
@@ -81,29 +92,33 @@ export function createInitialState(opts: SetupOptions): GameState {
   const board = buildBoardGeometry();
   let rng = createRng(opts.seed);
 
-  // 1. Terrenos embaralhados.
-  const t = shuffle(rng, TERRAIN_BAG);
-  rng = t.rng;
-  const terrains = t.value;
-
-  // 2. Numeros embaralhados (atribuidos so a hexes nao-deserto).
-  const n = shuffle(rng, NUMBER_BAG);
-  rng = n.rng;
-  const numbers = n.value;
-
-  let numIdx = 0;
-  let desertHexId = board.hexOrder[0]!;
-  board.hexOrder.forEach((hid, i) => {
-    const hex = board.hexes[hid]!;
-    const terrain = terrains[i]!;
-    hex.terrain = terrain;
-    if (terrain === 'desert') {
-      hex.number = null;
-      desertHexId = hid;
-    } else {
-      hex.number = numbers[numIdx++]!;
+  // 1. Terrenos: o deserto pode ser sorteado ou fixado no centro.
+  let desertHexId: string;
+  if (opts.desert === 'center') {
+    const center = board.hexOrder.find((h) => board.hexes[h]!.q === 0 && board.hexes[h]!.r === 0)!;
+    const bag = TERRAIN_BAG.filter((x) => x !== 'desert');
+    const t = shuffle(rng, bag);
+    rng = t.rng;
+    let i = 0;
+    for (const hid of board.hexOrder) {
+      board.hexes[hid]!.terrain = hid === center ? 'desert' : t.value[i++]!;
     }
-  });
+    desertHexId = center;
+  } else {
+    const t = shuffle(rng, TERRAIN_BAG);
+    rng = t.rng;
+    desertHexId = board.hexOrder[0]!;
+    board.hexOrder.forEach((hid, i) => {
+      board.hexes[hid]!.terrain = t.value[i]!;
+      if (t.value[i] === 'desert') desertHexId = hid;
+    });
+  }
+
+  // 2. Numeros (so em hexes nao-deserto). 'balanced' garante que nenhum par de
+  //    numeros vermelhos (6/8) fique adjacente.
+  const nonDesert = board.hexOrder.filter((h) => board.hexes[h]!.terrain !== 'desert');
+  for (const hid of board.hexOrder) board.hexes[hid]!.number = null;
+  rng = assignNumbers(board, nonDesert, rng, opts.numberLayout ?? 'random');
 
   // 3. Tipos de porto embaralhados (geometria ja veio do grafo).
   const pt = shuffle(rng, PORT_TYPE_BAG);
@@ -153,4 +168,79 @@ export function createInitialState(opts: SetupOptions): GameState {
     winner: null,
     rng,
   };
+}
+
+/** Numeros "vermelhos" (alta probabilidade) que nao devem se tocar no modo balanced. */
+const RED_NUMBERS = new Set([6, 8]);
+
+/** Direcoes axiais para vizinhanca de hexes. */
+const AXIAL_DIRS: [number, number][] = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+  [1, -1],
+  [-1, 1],
+];
+
+/** Mapa hexId -> hexIds vizinhos (compartilham aresta). */
+function hexAdjacency(board: Board): Map<string, string[]> {
+  const byQR = new Map<string, string>();
+  for (const hid of board.hexOrder) {
+    const h = board.hexes[hid]!;
+    byQR.set(`${h.q},${h.r}`, hid);
+  }
+  const adj = new Map<string, string[]>();
+  for (const hid of board.hexOrder) {
+    const h = board.hexes[hid]!;
+    const nbs: string[] = [];
+    for (const [dq, dr] of AXIAL_DIRS) {
+      const nb = byQR.get(`${h.q + dq},${h.r + dr}`);
+      if (nb) nbs.push(nb);
+    }
+    adj.set(hid, nbs);
+  }
+  return adj;
+}
+
+/** Atribui os numeros aos hexes nao-deserto conforme o layout escolhido. */
+function assignNumbers(
+  board: Board,
+  ids: string[],
+  rng: RngState,
+  layout: NumberLayout,
+): RngState {
+  if (layout !== 'balanced') {
+    const n = shuffle(rng, NUMBER_BAG);
+    ids.forEach((hid, i) => (board.hexes[hid]!.number = n.value[i]!));
+    return n.rng;
+  }
+
+  const adj = hexAdjacency(board);
+  let cur = rng;
+  for (let attempt = 0; attempt < 500; attempt++) {
+    const n = shuffle(cur, NUMBER_BAG);
+    cur = n.rng;
+    const assign = new Map<string, number>();
+    ids.forEach((hid, i) => assign.set(hid, n.value[i]!));
+    let ok = true;
+    outer: for (const hid of ids) {
+      if (!RED_NUMBERS.has(assign.get(hid)!)) continue;
+      for (const nb of adj.get(hid) ?? []) {
+        const nn = assign.get(nb);
+        if (nn !== undefined && RED_NUMBERS.has(nn)) {
+          ok = false;
+          break outer;
+        }
+      }
+    }
+    if (ok) {
+      for (const hid of ids) board.hexes[hid]!.number = assign.get(hid)!;
+      return cur;
+    }
+  }
+  // Fallback improvavel: aceita o ultimo embaralhamento.
+  const n = shuffle(cur, NUMBER_BAG);
+  ids.forEach((hid, i) => (board.hexes[hid]!.number = n.value[i]!));
+  return n.rng;
 }

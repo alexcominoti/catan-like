@@ -6,7 +6,12 @@
  */
 
 export * from './types.js';
-export { createInitialState, type SetupOptions } from './setup.js';
+export {
+  createInitialState,
+  type SetupOptions,
+  type NumberLayout,
+  type DesertPlacement,
+} from './setup.js';
 export { reduce } from './reduce.js';
 export {
   COSTS,

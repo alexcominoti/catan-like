@@ -44,7 +44,12 @@ const PLAYABLE_CARDS: { card: Exclude<ProgressCard, 'victoryPoint'>; label: stri
 
 export function Game({ config, onExit }: { config: GameConfig; onExit: () => void }) {
   const [state, setState] = useState<GameState>(() =>
-    createInitialState({ seed: config.seed, players: config.players }),
+    createInitialState({
+      seed: config.seed,
+      players: config.players,
+      numberLayout: config.numberLayout,
+      desert: config.desert,
+    }),
   );
   const [log, setLog] = useState<string[]>(['Partida iniciada. Coloquem as vilas iniciais.']);
   const [error, setError] = useState<string | null>(null);

@@ -1,5 +1,10 @@
 import { useState } from 'react';
-import { PLAYER_COLORS, type PlayerColor } from '@hexgame/engine';
+import {
+  PLAYER_COLORS,
+  type DesertPlacement,
+  type NumberLayout,
+  type PlayerColor,
+} from '@hexgame/engine';
 import { PLAYER_FILL, PLAYER_LABEL } from '../game/theme.js';
 
 export type SeatKind = 'human' | 'bot';
@@ -8,6 +13,8 @@ export interface GameConfig {
   players: { color: PlayerColor; name: string }[];
   bots: PlayerColor[];
   seed: number;
+  numberLayout: NumberLayout;
+  desert: DesertPlacement;
 }
 
 const DEFAULT_NAMES = ['Você', 'Bot 2', 'Bot 3', 'Bot 4'];
@@ -18,6 +25,8 @@ export function Lobby({ onStart }: { onStart: (cfg: GameConfig) => void }) {
   const [names, setNames] = useState<string[]>([...DEFAULT_NAMES]);
   const [colors, setColors] = useState<PlayerColor[]>([...PLAYER_COLORS]);
   const [kinds, setKinds] = useState<SeatKind[]>([...DEFAULT_KINDS]);
+  const [numberLayout, setNumberLayout] = useState<NumberLayout>('balanced');
+  const [desert, setDesert] = useState<DesertPlacement>('random');
   const [seedText, setSeedText] = useState('');
 
   function setColor(slot: number, color: PlayerColor) {
@@ -37,7 +46,7 @@ export function Lobby({ onStart }: { onStart: (cfg: GameConfig) => void }) {
       name: names[i]!.trim() || DEFAULT_NAMES[i]!,
     }));
     const bots = players.filter((_, i) => kinds[i] === 'bot').map((p) => p.color);
-    onStart({ players, bots, seed });
+    onStart({ players, bots, seed, numberLayout, desert });
   }
 
   return (
@@ -90,6 +99,31 @@ export function Lobby({ onStart }: { onStart: (cfg: GameConfig) => void }) {
               </div>
             </div>
           ))}
+        </div>
+
+        <div className="lobby-field">
+          <label>Números no tabuleiro</label>
+          <div className="seg">
+            <button className={numberLayout === 'balanced' ? 'active' : ''} onClick={() => setNumberLayout('balanced')}>
+              Equilibrado
+            </button>
+            <button className={numberLayout === 'random' ? 'active' : ''} onClick={() => setNumberLayout('random')}>
+              Aleatório
+            </button>
+          </div>
+          <span className="lobby-hint">Equilibrado evita que dois números vermelhos (6 e 8) fiquem vizinhos.</span>
+        </div>
+
+        <div className="lobby-field">
+          <label>Deserto / ladrão</label>
+          <div className="seg">
+            <button className={desert === 'random' ? 'active' : ''} onClick={() => setDesert('random')}>
+              Aleatório
+            </button>
+            <button className={desert === 'center' ? 'active' : ''} onClick={() => setDesert('center')}>
+              No centro
+            </button>
+          </div>
         </div>
 
         <div className="lobby-field">
