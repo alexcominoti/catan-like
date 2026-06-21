@@ -174,6 +174,8 @@ export interface GameState {
   returnPhaseAfterBlocker: 'roll' | 'main' | null;
   /** Oferta de comercio entre jogadores ativa (ou null). */
   activeTrade: TradeOffer | null;
+  /** Quantas propostas de troca foram feitas no turno atual (limita bots). */
+  tradeOffersThisTurn: number;
   /** Pontos necessarios para vencer (padrao 10). */
   victoryTarget: number;
   /** Acima deste numero de cartas, descarta metade ao rolar 7 (padrao 7). */

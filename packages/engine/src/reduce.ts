@@ -567,6 +567,7 @@ function proposeTrade(
   const recipients = (to ?? next.players.map((pl) => pl.color)).filter((c) => c !== by);
   if (recipients.length === 0) return err('Sem destinatarios.');
   next.activeTrade = { from: by, give: g, want: w, to: recipients, accepted: [] };
+  next.tradeOffersThisTurn += 1;
   return ok(next, [{ t: 'tradeProposed', from: by }]);
 }
 
@@ -621,6 +622,7 @@ function endTurn(state: GameState, by: PlayerColor): ReduceResult {
   next.devCardPlayedThisTurn = false;
   next.pendingFreeRoads = 0;
   next.activeTrade = null;
+  next.tradeOffersThisTurn = 0;
   for (const p of next.players) p.progressCardsBoughtThisTurn = [];
 
   const idx = next.players.findIndex((p) => p.color === by);

@@ -4,6 +4,7 @@ import {
   reduce,
   publicScoreOf,
   handTotal,
+  longestRoadLength,
   maritimeRate,
   COSTS,
   RESOURCES,
@@ -14,12 +15,19 @@ import {
   type ProgressCard,
   type Resource,
 } from '@hexgame/engine';
-import { planBotAction } from '@hexgame/bot';
+import { planBotAction, resolveBotProposal } from '@hexgame/bot';
 import { Board, type InteractionMode } from './board/Board.js';
 import { Dice } from './ui/Dice.js';
+import { HandBar } from './ui/HandBar.js';
 import { Toasts, useToasts, type ToastTone } from './ui/Toasts.js';
+import { play as playSound, setMuted, unlockAudio, type SoundKind } from './ui/sound.js';
 import type { GameConfig } from './ui/Lobby.js';
 import { PLAYER_FILL, PLAYER_LABEL, RESOURCE_ICON, RESOURCE_LABEL } from './game/theme.js';
+
+interface PendingBuild {
+  action: Action;
+  label: string;
+}
 
 function zeroRes(): Record<Resource, number> {
   return { wood: 0, brick: 0, wool: 0, grain: 0, ore: 0 };
@@ -65,6 +73,9 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   const [help, setHelp] = useState(false);
   // Quando o ladrao pode roubar de 2+ jogadores, o humano escolhe a vitima.
   const [robberChoice, setRobberChoice] = useState<{ hexId: string; victims: PlayerColor[] } | null>(null);
+  // Confirmacao antes de construir.
+  const [pendingBuild, setPendingBuild] = useState<PendingBuild | null>(null);
+  const [muted, setMutedState] = useState(false);
   const { toasts, push } = useToasts();
 
   const isBot = useMemo(() => {
@@ -120,6 +131,8 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
     for (const e of res.events) {
       const t = toastForEvent(e, res.state);
       if (t) push(t.text, t.tone);
+      const s = soundForEvent(e);
+      if (s) playSound(s);
     }
     if (res.events.some((e) => e.t === 'turnEnded' || e.t === 'gameWon')) setMode('idle');
     resetTransient();
@@ -133,32 +146,53 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
         setArming(null);
         setYopPicks([]);
         setHelp(false);
+        setPendingBuild(null);
         setError(null);
       }
     }
+    function onPointer() {
+      unlockAudio();
+    }
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('pointerdown', onPointer);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('pointerdown', onPointer);
+    };
   }, []);
 
-  // Auto-jogo dos bots: a cada mudanca de estado, se ha uma acao de bot pendente
-  // (turno do bot, descarte, mover bloqueador, ou aceitar troca), agenda e aplica.
+  // Auto-jogo dos bots: ao menos 1s entre acoes para o humano acompanhar.
   useEffect(() => {
     const move = planBotAction(state, isBot, difficultyOf);
     if (!move) return;
-    const delay = state.phase === 'setup1' || state.phase === 'setup2' ? 360 : 620;
+    const delay = state.phase === 'setup1' || state.phase === 'setup2' ? 1000 : 1100;
     const id = setTimeout(() => dispatch(move.action, move.by), delay);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, isBot, difficultyOf]);
 
+  // Quando um BOT propoe uma troca, da uma janela para o humano avaliar e entao
+  // resolve (fecha com quem aceitou, ou cancela).
+  useEffect(() => {
+    const t = state.activeTrade;
+    if (!t || !isBot(t.from)) return;
+    const wait = t.accepted.length > 0 ? 1300 : 6000;
+    const id = setTimeout(() => {
+      const mv = resolveBotProposal(state);
+      if (mv) dispatch(mv.action, mv.by);
+    }, wait);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, isBot]);
+
   function onVertex(vid: string) {
-    if (effMode === 'placeSettlement') dispatch({ t: 'placeSettlement', vertexId: vid });
-    else if (effMode === 'buildSettlement') dispatch({ t: 'buildSettlement', vertexId: vid });
-    else if (effMode === 'buildCity') dispatch({ t: 'buildCity', vertexId: vid });
+    if (effMode === 'placeSettlement') setPendingBuild({ action: { t: 'placeSettlement', vertexId: vid }, label: 'Colocar vila aqui?' });
+    else if (effMode === 'buildSettlement') setPendingBuild({ action: { t: 'buildSettlement', vertexId: vid }, label: 'Construir vila aqui?' });
+    else if (effMode === 'buildCity') setPendingBuild({ action: { t: 'buildCity', vertexId: vid }, label: 'Construir cidade aqui?' });
   }
   function onEdge(eid: string) {
-    if (effMode === 'placeRoad') dispatch({ t: 'placeRoad', edgeId: eid });
-    else if (effMode === 'buildRoad') dispatch({ t: 'buildRoad', edgeId: eid });
+    if (effMode === 'placeRoad') setPendingBuild({ action: { t: 'placeRoad', edgeId: eid }, label: 'Colocar estrada aqui?' });
+    else if (effMode === 'buildRoad') setPendingBuild({ action: { t: 'buildRoad', edgeId: eid }, label: 'Construir estrada aqui?' });
   }
   function onHex(hid: string) {
     if (effMode !== 'moveBlocker') return;
@@ -211,6 +245,9 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
           {state.pendingFreeRoads > 0 && <span className="badge"> {state.pendingFreeRoads} estrada(s) grátis</span>}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <button title={muted ? 'Som desligado' : 'Som ligado'} onClick={() => { const m = !muted; setMutedState(m); setMuted(m); }}>
+            {muted ? '🔇' : '🔊'}
+          </button>
           <button onClick={() => setHelp(true)}>❔ Ajuda</button>
           <button onClick={onExit}>Novo jogo</button>
         </div>
@@ -224,23 +261,20 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
         <div className="card">
           <h2>Jogadores</h2>
           {state.players.map((p) => (
-            <div key={p.color} className={`player-row${p.color === state.currentPlayer ? ' active' : ''}`}>
-              <span className="swatch" style={{ background: PLAYER_FILL[p.color] }} />
-              <span className="name">{p.name}{isBot(p.color) && <span title="Bot"> 🤖</span>}</span>
-              {state.longestRoad.owner === p.color && <span className="badge" title="Estrada Mais Longa">📏</span>}
-              {state.largestArmy.owner === p.color && <span className="badge" title="Maior Exército">⚔️</span>}
-              <span className="pts">{publicScoreOf(state, p.color)}⭐ · {handTotal(p)}🂠 · {p.progressCards.length}🃏</span>
+            <div key={p.color} className={`player-card${p.color === state.currentPlayer ? ' active' : ''}`}>
+              <div className="player-card-top">
+                <span className="swatch" style={{ background: PLAYER_FILL[p.color] }} />
+                <span className="name">{p.name}{isBot(p.color) && <span title="Bot"> 🤖</span>}</span>
+                <span className="vp">{publicScoreOf(state, p.color)} ⭐</span>
+              </div>
+              <div className="player-card-stats">
+                <span title="Cartas na mão">🂠 {handTotal(p)}</span>
+                <span title="Cartas de progresso">🃏 {p.progressCards.length}</span>
+                <span title="Cavaleiros jogados" className={state.largestArmy.owner === p.color ? 'hl' : ''}>⚔️ {p.knightsPlayed}</span>
+                <span title="Maior estrada" className={state.longestRoad.owner === p.color ? 'hl' : ''}>📏 {longestRoadLength(state, p.color)}</span>
+              </div>
             </div>
           ))}
-        </div>
-
-        <div className="card">
-          <h2>Sua mão ({localPlayer.name})</h2>
-          <div className="hand">
-            {RESOURCES.map((r) => (
-              <span key={r} className="res-chip" title={RESOURCE_LABEL[r]}>{RESOURCE_ICON[r]} {localPlayer.hand[r]}</span>
-            ))}
-          </div>
         </div>
 
         <div className="card">
@@ -273,6 +307,8 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
           <div className="log">{log.map((line, i) => <div key={i}>{line}</div>)}</div>
         </div>
       </aside>
+
+      <HandBar hand={localPlayer.hand} devCards={localPlayer.progressCards} name={localPlayer.name} />
 
       <div className="actionbar">
         {state.phase === 'ended' ? (
@@ -345,7 +381,18 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
           onPropose={(to) => dispatch({ t: 'proposeTrade', give: tradeGive, want: tradeWant, to })}
           onClose={resetTransient} />
       )}
-      {state.activeTrade && <ActiveTradeModal state={state} dispatch={dispatch} />}
+      {state.activeTrade && <ActiveTradeModal state={state} dispatch={dispatch} localColor={localColor} />}
+      {pendingBuild && (
+        <div className="overlay" onClick={() => setPendingBuild(null)}>
+          <div className="modal confirm" onClick={(e) => e.stopPropagation()}>
+            <h3>{pendingBuild.label}</h3>
+            <div className="modal-actions">
+              <button onClick={() => setPendingBuild(null)}>✗ Cancelar</button>
+              <button className="primary" onClick={() => { dispatch(pendingBuild.action); setPendingBuild(null); }}>✓ Confirmar</button>
+            </div>
+          </div>
+        </div>
+      )}
       {robberChoice && (
         <RobberVictimModal
           state={state}
@@ -516,33 +563,50 @@ function TradeBuilderModal({
   );
 }
 
-function ActiveTradeModal({ state, dispatch }: { state: GameState; dispatch: (a: Action, by?: PlayerColor) => boolean }) {
+function ActiveTradeModal({
+  state,
+  dispatch,
+  localColor,
+}: {
+  state: GameState;
+  dispatch: (a: Action, by?: PlayerColor) => boolean;
+  localColor: PlayerColor;
+}) {
   const t = state.activeTrade!;
   const fmt = (m: Partial<Record<Resource, number>>) =>
     (Object.entries(m) as [Resource, number][]).filter(([, n]) => n > 0).map(([r, n]) => `${n}${RESOURCE_ICON[r]}`).join(' ') || '—';
+  const iAmProposer = t.from === localColor;
+  const iAmRecipient = t.to.includes(localColor);
   return (
     <div className="overlay">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Troca proposta por {PLAYER_LABEL[t.from]}</h3>
+        <h3>{PLAYER_LABEL[t.from]} quer trocar</h3>
         <p className="trade-summary">Dá <b>{fmt(t.give)}</b> &nbsp;→&nbsp; quer <b>{fmt(t.want)}</b></p>
-        <div className="trade-responders">
-          {t.to.map((c) => {
-            const accepted = t.accepted.includes(c);
-            return (
-              <div key={c} className="trade-row">
-                <span><span className="swatch" style={{ background: PLAYER_FILL[c] }} /> {PLAYER_LABEL[c]} {accepted && '✅'}</span>
-                <span style={{ display: 'inline-flex', gap: 4 }}>
-                  <button onClick={() => dispatch({ t: 'respondTrade', accept: true }, c)}>Aceitar</button>
-                  <button onClick={() => dispatch({ t: 'respondTrade', accept: false }, c)}>Recusar</button>
-                  <button className="primary" disabled={!accepted} onClick={() => dispatch({ t: 'confirmTrade', with: c }, t.from)}>Fechar</button>
-                </span>
-              </div>
-            );
-          })}
-        </div>
-        <div className="modal-actions">
-          <button onClick={() => dispatch({ t: 'cancelTrade' }, t.from)}>Cancelar proposta</button>
-        </div>
+        {iAmProposer ? (
+          <>
+            <div className="trade-responders">
+              {t.to.map((c) => {
+                const accepted = t.accepted.includes(c);
+                return (
+                  <div key={c} className="trade-row">
+                    <span><span className="swatch" style={{ background: PLAYER_FILL[c] }} /> {PLAYER_LABEL[c]} {accepted ? '✅ aceitou' : '⏳'}</span>
+                    <button className="primary" disabled={!accepted} onClick={() => dispatch({ t: 'confirmTrade', with: c }, t.from)}>Fechar</button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="modal-actions">
+              <button onClick={() => dispatch({ t: 'cancelTrade' }, t.from)}>Cancelar proposta</button>
+            </div>
+          </>
+        ) : iAmRecipient ? (
+          <div className="modal-actions">
+            <button onClick={() => dispatch({ t: 'cancelTrade' }, t.from)}>✗ Recusar</button>
+            <button className="primary" onClick={() => dispatch({ t: 'respondTrade', accept: true }, localColor)}>✓ Aceitar</button>
+          </div>
+        ) : (
+          <p className="muted-note">Aguardando resposta dos jogadores…</p>
+        )}
       </div>
     </div>
   );
@@ -639,6 +703,31 @@ function phaseLabel(state: GameState): string {
       return 'Fim';
     default:
       return '';
+  }
+}
+
+function soundForEvent(e: GameEvent): SoundKind | null {
+  switch (e.t) {
+    case 'diceRolled':
+      return 'dice';
+    case 'built':
+      return e.kind; // 'road' | 'settlement' | 'city'
+    case 'progressCardBought':
+    case 'cardPlayed':
+      return 'card';
+    case 'blockerMoved':
+      return 'robber';
+    case 'bankTrade':
+    case 'tradeExecuted':
+      return 'trade';
+    case 'longestRoad':
+      return e.owner ? 'longestRoad' : null;
+    case 'largestArmy':
+      return e.owner ? 'largestArmy' : null;
+    case 'gameWon':
+      return 'win';
+    default:
+      return null;
   }
 }
 

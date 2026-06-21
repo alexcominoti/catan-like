@@ -57,11 +57,15 @@ export function planBotAction(
         return { by: c, action: { t: 'respondTrade', accept: true } };
       }
     }
+    // Se a proposta ativa e do bot da vez, ele espera a janela de resposta dos
+    // humanos (resolvida pela UI via resolveBotProposal) — nao age agora.
+    if (isBot(state.currentPlayer) && t.from === state.currentPlayer) return null;
   }
 
   const me = state.currentPlayer;
   if (!isBot(me)) return null;
   const level = difficultyOf(me);
+  const humans = state.players.filter((p) => !isBot(p.color)).map((p) => p.color);
 
   switch (state.phase) {
     case 'moveBlocker':
@@ -76,10 +80,21 @@ export function planBotAction(
       return { by: me, action: knight ?? { t: 'rollDice' } };
     }
     case 'main':
-      return { by: me, action: planMain(state, me, level) };
+      return { by: me, action: planMain(state, me, level, humans) };
     default:
       return null;
   }
+}
+
+/**
+ * Resolve a proposta de troca do bot apos a janela de resposta: fecha com o
+ * primeiro que aceitou, ou cancela. A UI chama isto quando o tempo acaba.
+ */
+export function resolveBotProposal(state: GameState): BotMove | null {
+  const t = state.activeTrade;
+  if (!t) return null;
+  if (t.accepted.length > 0) return { by: t.from, action: { t: 'confirmTrade', with: t.accepted[0]! } };
+  return { by: t.from, action: { t: 'cancelTrade' } };
 }
 
 // ---------------------------------------------------------------------------
@@ -158,7 +173,7 @@ function bestSetupRoad(state: GameState, _me: PlayerColor): string {
 // Fase principal
 // ---------------------------------------------------------------------------
 
-function planMain(state: GameState, me: PlayerColor, level: Difficulty): Action {
+function planMain(state: GameState, me: PlayerColor, level: Difficulty, humans: PlayerColor[]): Action {
   const p = getPlayer(state, me);
 
   // 1. Jogar uma carta util (uma por turno).
@@ -171,13 +186,13 @@ function planMain(state: GameState, me: PlayerColor, level: Difficulty): Action 
     if (road) return { t: 'buildRoad', edgeId: road };
   }
 
-  // 3. Cidade.
+  // 3. Cidade (2 PV).
   const city = bestCityTarget(state, me, level);
   if (city && p.pieces.cities > 0 && canAfford(p.hand, COSTS.city)) {
     return { t: 'buildCity', vertexId: city };
   }
 
-  // 4. Vila.
+  // 4. Vila (expansao = mais producao e PV).
   const settle = bestSettlementTarget(state, me, level);
   if (settle && p.pieces.settlements > 0 && canAfford(p.hand, COSTS.settlement)) {
     return { t: 'buildSettlement', vertexId: settle };
@@ -189,22 +204,60 @@ function planMain(state: GameState, me: PlayerColor, level: Difficulty): Action 
     if (road) return { t: 'buildRoad', edgeId: road };
   }
 
-  // 6. Comprar carta com a sobra (VP/cavaleiro -> pontos).
+  // 6. Oferecer uma troca a um humano (uma por turno) rumo a expansao.
+  const offer = planTradeProposal(state, me, level, humans);
+  if (offer) return offer;
+
+  // 7. Trocar com o banco rumo a EXPANSAO (cidade > vila > estrada). Cartas nao.
+  const trade = tradeTowardGoal(state, me, level);
+  if (trade) return trade;
+
+  // 8. Sem como expandir agora: usar a sobra comprando carta (PV/cavaleiro).
   if (state.devDeck.length > 0 && canAfford(p.hand, COSTS.progressCard)) {
     return { t: 'buyProgressCard' };
   }
 
-  // 7. Trocar 4:1 / porto rumo a meta alcancavel (cidade > vila > carta).
-  const trade = tradeTowardGoal(state, me, level);
-  if (trade) return trade;
-
-  // 8. Estender estrada (caca a Estrada Mais Longa) — mantem o jogo avancando.
+  // 9. Estender estrada (caca a Estrada Mais Longa) — mantem o jogo avancando.
   if (p.pieces.roads > 0 && canAfford(p.hand, COSTS.road)) {
     const road = roadToUnlock(state, me, level) ?? anyLegalRoad(state, me);
     if (road) return { t: 'buildRoad', edgeId: road };
   }
 
   return { t: 'endTurn' };
+}
+
+/** Metas de expansao do bot (sem cartas): cidade > vila > estrada que destrava. */
+function expansionGoals(state: GameState, me: PlayerColor, level: Difficulty): Partial<Record<Resource, number>>[] {
+  const p = getPlayer(state, me);
+  const goals: Partial<Record<Resource, number>>[] = [];
+  if (bestCityTarget(state, me, level) && p.pieces.cities > 0) goals.push(COSTS.city);
+  if (bestSettlementTarget(state, me, level) && p.pieces.settlements > 0) goals.push(COSTS.settlement);
+  if (roadToUnlock(state, me, level) && p.pieces.roads > 0 && p.pieces.settlements > 0) goals.push(COSTS.road);
+  return goals;
+}
+
+/**
+ * Oferta de troca 1:1 a um humano: da 1 de um excedente (cuja taxa de banco seria
+ * >=3) por 1 do recurso que falta para a expansao. So uma oferta por turno.
+ */
+function planTradeProposal(
+  state: GameState,
+  me: PlayerColor,
+  level: Difficulty,
+  humans: PlayerColor[],
+): Action | null {
+  if (humans.length === 0 || state.tradeOffersThisTurn > 0) return null;
+  const p = getPlayer(state, me);
+  for (const cost of expansionGoals(state, me, level)) {
+    const needed = RESOURCES.find((r) => (cost[r] ?? 0) - p.hand[r] > 0);
+    if (!needed) continue;
+    const give = RESOURCES.find(
+      (r) => r !== needed && p.hand[r] - (cost[r] ?? 0) >= 1 && maritimeRate(state, me, r) >= 3,
+    );
+    if (!give) continue;
+    return { t: 'proposeTrade', give: { [give]: 1 }, want: { [needed]: 1 }, to: humans };
+  }
+  return null;
 }
 
 function bestCityTarget(state: GameState, me: PlayerColor, level: Difficulty): string | null {
@@ -266,16 +319,10 @@ function anyLegalRoad(state: GameState, me: PlayerColor): string | null {
 
 function tradeTowardGoal(state: GameState, me: PlayerColor, level: Difficulty): Action | null {
   const p = getPlayer(state, me);
-  const goals: { cost: Partial<Record<Resource, number>>; ok: boolean }[] = [
-    { cost: COSTS.city, ok: !!bestCityTarget(state, me, level) && p.pieces.cities > 0 },
-    { cost: COSTS.settlement, ok: !!bestSettlementTarget(state, me, level) && p.pieces.settlements > 0 },
-    { cost: COSTS.progressCard, ok: state.devDeck.length > 0 },
-  ];
-  for (const g of goals) {
-    if (!g.ok) continue;
+  for (const cost of expansionGoals(state, me, level)) {
     let want: Resource | null = null;
     for (const r of RESOURCES) {
-      if ((g.cost[r] ?? 0) - p.hand[r] > 0 && state.bank[r] > 0) {
+      if ((cost[r] ?? 0) - p.hand[r] > 0 && state.bank[r] > 0) {
         want = r;
         break;
       }
@@ -284,7 +331,7 @@ function tradeTowardGoal(state: GameState, me: PlayerColor, level: Difficulty): 
     for (const give of RESOURCES) {
       if (give === want) continue;
       const rate = maritimeRate(state, me, give);
-      const spare = p.hand[give] - (g.cost[give] ?? 0);
+      const spare = p.hand[give] - (cost[give] ?? 0);
       if (spare >= rate) return { t: 'tradeBank', give, want };
     }
   }
