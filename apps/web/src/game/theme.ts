@@ -32,7 +32,7 @@ export const RESOURCE_ICON: Record<Resource, string> = {
   brick: '🧱',
   wool: '🐑',
   grain: '🌾',
-  ore: '⛰️',
+  ore: '🪨',
 };
 
 export const PLAYER_FILL: Record<PlayerColor, string> = {

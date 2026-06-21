@@ -223,8 +223,9 @@ export function Board({ state, mode, onVertex, onEdge, onHex }: BoardProps) {
 
       {/* Textura: grao + manchas, recortados na silhueta dos hexes */}
       <g clipPath="url(#hexClip)" pointerEvents="none">
-        <rect x={frame.minX} y={frame.minY} width={frame.w} height={frame.h} filter="url(#mottle)" opacity={0.1} style={{ mixBlendMode: 'overlay' }} />
-        <rect x={frame.minX} y={frame.minY} width={frame.w} height={frame.h} filter="url(#grain)" opacity={0.12} style={{ mixBlendMode: 'soft-light' }} />
+        <rect x={frame.minX} y={frame.minY} width={frame.w} height={frame.h} filter="url(#mottle)" opacity={0.16} style={{ mixBlendMode: 'overlay' }} />
+        <rect x={frame.minX} y={frame.minY} width={frame.w} height={frame.h} filter="url(#grain)" opacity={0.22} style={{ mixBlendMode: 'soft-light' }} />
+        <rect x={frame.minX} y={frame.minY} width={frame.w} height={frame.h} filter="url(#grain)" opacity={0.1} style={{ mixBlendMode: 'multiply' }} />
       </g>
 
       {/* Tokens e bloqueador (nitidos, acima da textura) */}

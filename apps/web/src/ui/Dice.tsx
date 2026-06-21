@@ -10,14 +10,25 @@ const PIPS: Record<number, [number, number][]> = {
   6: [[0, 0], [2, 0], [0, 1], [2, 1], [0, 2], [2, 2]],
 };
 
-function Die({ value, color }: { value: number; color: string }) {
+const SIZE = 42;
+
+function Die({ value, accent }: { value: number; accent: boolean }) {
   const cells = PIPS[value] ?? [];
-  const pos = (i: number) => 8 + i * 12; // 3 colunas/linhas em 32px
+  const pos = (i: number) => SIZE * 0.25 + i * SIZE * 0.25; // 3 colunas/linhas
   return (
-    <svg width={32} height={32} viewBox="0 0 32 32" aria-label={`dado ${value}`}>
-      <rect x={1} y={1} width={30} height={30} rx={6} fill="#f3ead0" stroke="#0c1118" strokeWidth={1.5} />
+    <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} aria-label={`dado ${value}`}>
+      <rect
+        x={2}
+        y={2}
+        width={SIZE - 4}
+        height={SIZE - 4}
+        rx={8}
+        fill="#fbfbf7"
+        stroke={accent ? '#c0392b' : '#2a2a2a'}
+        strokeWidth={2}
+      />
       {cells.map(([cx, cy], i) => (
-        <circle key={i} cx={pos(cx)} cy={pos(cy)} r={3} fill={color} />
+        <circle key={i} cx={pos(cx)} cy={pos(cy)} r={4} fill={accent ? '#c0392b' : '#1a1a1a'} />
       ))}
     </svg>
   );
@@ -38,24 +49,25 @@ export function Dice({ dice }: { dice: [number, number] | null }) {
     let ticks = 0;
     const id = setInterval(() => {
       ticks++;
-      if (ticks >= 6) {
+      if (ticks >= 7) {
         clearInterval(id);
         setShown(dice);
         setRolling(false);
       } else {
         setShown([1 + Math.floor(Math.random() * 6), 1 + Math.floor(Math.random() * 6)]);
       }
-    }, 60);
+    }, 55);
     return () => clearInterval(id);
   }, [dice]);
 
   if (!dice) return null;
   const sum = shown[0] + shown[1];
+  const hot = !rolling && sum === 7;
   return (
     <span className={`dice-faces${rolling ? ' rolling' : ''}`}>
-      <Die value={shown[0]} color="#c0392b" />
-      <Die value={shown[1]} color="#1a1a1a" />
-      {!rolling && <b className="dice-sum">{sum}</b>}
+      <Die value={shown[0]} accent={false} />
+      <Die value={shown[1]} accent={false} />
+      <b className={`dice-sum${hot ? ' hot' : ''}`}>{rolling ? '…' : sum}</b>
     </span>
   );
 }

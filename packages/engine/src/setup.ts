@@ -82,6 +82,10 @@ export interface SetupOptions {
   numberLayout?: NumberLayout;
   /** 'center' fixa o deserto no hex central. Default 'random'. */
   desert?: DesertPlacement;
+  /** Pontos para vencer (default 10). */
+  pointsToWin?: number;
+  /** Limite de cartas antes do descarte no 7 (default 7). */
+  discardLimit?: number;
 }
 
 /**
@@ -156,6 +160,8 @@ export function createInitialState(opts: SetupOptions): GameState {
     pendingDiscards: {},
     returnPhaseAfterBlocker: null,
     activeTrade: null,
+    victoryTarget: opts.pointsToWin ?? 10,
+    discardLimit: opts.discardLimit ?? 7,
     board,
     buildings: {},
     roads: {},

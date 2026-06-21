@@ -78,15 +78,24 @@ pontos). UI com destaque de alvos válidos, peça-fantasma no hover e ESC cancel
 
 ### Bots (`@hexgame/bot`)
 
-Bot heurístico (guloso, mas sensato): setup em bons vértices, constrói por
-prioridade (cidade > vila > estrada), usa cartas/ladrão/portos, troca com o banco
-para destravar metas, e caça Estrada Mais Longa / Maior Exército. No lobby cada
-assento é **Humano** ou **Bot**; na vez de um bot a UI joga sozinha. É puro e
-reutilizável no servidor (Fase 2+). Testes simulam partidas 4-bots até a vitória.
+Bot heurístico com **3 níveis** (fácil / médio / difícil): setup em bons vértices
+(difícil pondera portos e escassez), constrói por prioridade (cidade > vila >
+estrada), usa cartas/ladrão/portos, troca com o banco para destravar metas, caça
+Estrada Mais Longa / Maior Exército (difícil mira o líder ao mover o ladrão). No
+lobby cada assento é **Humano** ou **Bot** (com dificuldade própria); na vez de um
+bot a UI joga sozinha. É puro e reutilizável no servidor (Fase 2+). Testes simulam
+partidas 4-bots até a vitória nos 3 níveis.
+
+### Lobby (estilo colonist.io)
+
+Painel de jogadores (nome/cor/Humano-Bot/dificuldade), tiles de tabuleiro (números
+equilibrados, deserto no centro) e sliders de **pontos para vencer** e **limite de
+descarte**. Mãos dos adversários ficam ocultas (só a contagem aparece); cartas de
++1 PV são secretas no placar até a vitória.
 
 ### Próximos passos
 
-- Variantes/refino de UX (atalhos, animações, tema claro), bots mais fortes.
+- Refino de UX, acessibilidade/mobile, tema claro.
 - Fase 2: servidor `ws` autoritativo + `projectFor` (fog of war) para jogar de
   abas/PCs diferentes.
 

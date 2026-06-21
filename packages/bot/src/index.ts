@@ -1,9 +1,7 @@
 /**
- * Bot heuristico (guloso, mas sensato). Puro: nao tem I/O nem aleatoriedade.
- *
- * `planBotAction` olha o estado e devolve a proxima acao que um bot deveria
- * tomar (jogada do turno, descarte do 7, mover bloqueador, ou aceitar uma troca
- * favoravel). Retorna null quando nenhum bot precisa agir agora.
+ * Bot heuristico com 3 niveis (facil / medio / dificil). Puro: sem I/O nem
+ * aleatoriedade. `planBotAction` devolve a proxima acao de um bot (jogada do
+ * turno, descarte do 7, mover bloqueador, ou aceitar uma troca favoravel).
  *
  * O reducer do engine continua sendo a unica autoridade: o bot so sugere acoes
  * legais; quem aplica e o `reduce`.
@@ -14,6 +12,7 @@ import {
   TERRAIN_RESOURCE,
   distanceRuleOk,
   maritimeRate,
+  publicScoreOf,
   roadConnects,
   vertexTouchesPlayerRoad,
   type Action,
@@ -25,14 +24,22 @@ import {
   type TradeOffer,
 } from '@hexgame/engine';
 
+export type Difficulty = 'easy' | 'medium' | 'hard';
 export type IsBot = (color: PlayerColor) => boolean;
+export type DifficultyOf = (color: PlayerColor) => Difficulty;
 
 export interface BotMove {
   by: PlayerColor;
   action: Action;
 }
 
-export function planBotAction(state: GameState, isBot: IsBot): BotMove | null {
+const DEFAULT_DIFFICULTY: DifficultyOf = () => 'medium';
+
+export function planBotAction(
+  state: GameState,
+  isBot: IsBot,
+  difficultyOf: DifficultyOf = DEFAULT_DIFFICULTY,
+): BotMove | null {
   if (state.phase === 'ended') return null;
 
   // 1. Descartes pendentes de bots (apos um 7).
@@ -42,8 +49,7 @@ export function planBotAction(state: GameState, isBot: IsBot): BotMove | null {
     return null; // espera os humanos descartarem
   }
 
-  // 2. Respostas de troca: o bot SO aceita (uma vez) quando favoravel; nunca
-  //    devolve "recusar" — assim o loop nao fica preso.
+  // 2. Respostas de troca: o bot SO aceita (uma vez) quando favoravel.
   if (state.activeTrade) {
     const t = state.activeTrade;
     for (const c of t.to) {
@@ -55,36 +61,38 @@ export function planBotAction(state: GameState, isBot: IsBot): BotMove | null {
 
   const me = state.currentPlayer;
   if (!isBot(me)) return null;
+  const level = difficultyOf(me);
 
   switch (state.phase) {
     case 'moveBlocker':
-      return { by: me, action: planBlocker(state, me) };
+      return { by: me, action: planBlocker(state, me, level) };
     case 'setup1':
     case 'setup2':
       return state.setupLastVertex
         ? { by: me, action: { t: 'placeRoad', edgeId: bestSetupRoad(state, me) } }
-        : { by: me, action: { t: 'placeSettlement', vertexId: bestSetupVertex(state) } };
+        : { by: me, action: { t: 'placeSettlement', vertexId: bestSetupVertex(state, level) } };
     case 'roll': {
       const knight = maybeKnight(state, me);
       return { by: me, action: knight ?? { t: 'rollDice' } };
     }
     case 'main':
-      return { by: me, action: planMain(state, me) };
+      return { by: me, action: planMain(state, me, level) };
     default:
       return null;
   }
 }
 
 // ---------------------------------------------------------------------------
-// Avaliacao de posicoes
+// Avaliacao de posicoes (sensivel ao nivel)
 // ---------------------------------------------------------------------------
 
 function pip(n: number | null): number {
   return n === null ? 0 : 6 - Math.abs(7 - n);
 }
 
-/** Valor de um vertice: soma das probabilidades dos hexes + variedade. */
-function vertexValue(state: GameState, vid: string): number {
+const SCARCE: Partial<Record<Resource, number>> = { ore: 0.5, brick: 0.4 };
+
+function vertexValue(state: GameState, vid: string, level: Difficulty): number {
   const v = state.board.vertices[vid];
   if (!v) return 0;
   let sum = 0;
@@ -93,9 +101,18 @@ function vertexValue(state: GameState, vid: string): number {
     const hex = state.board.hexes[hid]!;
     sum += pip(hex.number);
     const r = TERRAIN_RESOURCE[hex.terrain];
-    if (r) res.add(r);
+    if (r) {
+      res.add(r);
+      if (level === 'hard') sum += (SCARCE[r] ?? 0) * pip(hex.number) * 0.2;
+    }
   }
-  return sum + res.size * 0.6;
+  if (level === 'easy') return sum; // ignora variedade e portos
+  let value = sum + res.size * 0.6;
+  if (level === 'hard') {
+    const onPort = state.board.ports.some((p) => p.vertices.includes(vid));
+    if (onPort) value += 1.2;
+  }
+  return value;
 }
 
 function getPlayer(state: GameState, color: PlayerColor): Player {
@@ -110,21 +127,16 @@ function canAfford(hand: Record<Resource, number>, cost: Partial<Record<Resource
 // Setup
 // ---------------------------------------------------------------------------
 
-function bestSetupVertex(state: GameState): string {
-  let best = state.board.vertexOrder[0]!;
-  let bestScore = -1;
-  for (const vid of state.board.vertexOrder) {
-    if (!distanceRuleOk(state, vid)) continue;
-    const s = vertexValue(state, vid);
-    if (s > bestScore) {
-      bestScore = s;
-      best = vid;
-    }
-  }
-  return best;
+function bestSetupVertex(state: GameState, level: Difficulty): string {
+  const valid = state.board.vertexOrder.filter((vid) => distanceRuleOk(state, vid));
+  if (valid.length === 0) return state.board.vertexOrder[0]!;
+  const scored = valid.map((vid) => ({ vid, s: vertexValue(state, vid, level) })).sort((a, b) => b.s - a.s);
+  // Facil escolhe um vertice mediano (jogo mais fraco); os demais, o melhor.
+  if (level === 'easy') return scored[Math.floor(scored.length / 2)]!.vid;
+  return scored[0]!.vid;
 }
 
-function bestSetupRoad(state: GameState, me: PlayerColor): string {
+function bestSetupRoad(state: GameState, _me: PlayerColor): string {
   const last = state.setupLastVertex!;
   const v = state.board.vertices[last]!;
   let best = v.edges.find((e) => !state.roads[e]) ?? v.edges[0]!;
@@ -133,7 +145,7 @@ function bestSetupRoad(state: GameState, me: PlayerColor): string {
     if (state.roads[eid]) continue;
     const e = state.board.edges[eid]!;
     const other = e.v[0] === last ? e.v[1] : e.v[0];
-    const s = vertexValue(state, other); // estrada aponta para um bom vizinho
+    const s = vertexValue(state, other, 'medium');
     if (s > bestScore) {
       bestScore = s;
       best = eid;
@@ -146,34 +158,34 @@ function bestSetupRoad(state: GameState, me: PlayerColor): string {
 // Fase principal
 // ---------------------------------------------------------------------------
 
-function planMain(state: GameState, me: PlayerColor): Action {
+function planMain(state: GameState, me: PlayerColor, level: Difficulty): Action {
   const p = getPlayer(state, me);
 
   // 1. Jogar uma carta util (uma por turno).
-  const card = planPlayCard(state, me);
+  const card = planPlayCard(state, me, level);
   if (card) return card;
 
   // 2. Estrada gratis pendente (carta "2 Estradas").
   if (state.pendingFreeRoads > 0 && p.pieces.roads > 0) {
-    const road = roadToUnlock(state, me) ?? anyLegalRoad(state, me);
+    const road = roadToUnlock(state, me, level) ?? anyLegalRoad(state, me);
     if (road) return { t: 'buildRoad', edgeId: road };
   }
 
-  // 3. Cidade (melhor retorno por ponto).
-  const city = bestCityTarget(state, me);
+  // 3. Cidade.
+  const city = bestCityTarget(state, me, level);
   if (city && p.pieces.cities > 0 && canAfford(p.hand, COSTS.city)) {
     return { t: 'buildCity', vertexId: city };
   }
 
   // 4. Vila.
-  const settle = bestSettlementTarget(state, me);
+  const settle = bestSettlementTarget(state, me, level);
   if (settle && p.pieces.settlements > 0 && canAfford(p.hand, COSTS.settlement)) {
     return { t: 'buildSettlement', vertexId: settle };
   }
 
   // 5. Estrada que destrava uma nova vila.
   if (p.pieces.roads > 0 && p.pieces.settlements > 0 && canAfford(p.hand, COSTS.road)) {
-    const road = roadToUnlock(state, me);
+    const road = roadToUnlock(state, me, level);
     if (road) return { t: 'buildRoad', edgeId: road };
   }
 
@@ -182,27 +194,25 @@ function planMain(state: GameState, me: PlayerColor): Action {
     return { t: 'buyProgressCard' };
   }
 
-  // 7. Trocar 4:1 / porto rumo a meta alcancavel de maior prioridade
-  //    (cidade > vila > carta). Garante progresso de pontos ao longo dos turnos.
-  const trade = tradeTowardGoal(state, me);
+  // 7. Trocar 4:1 / porto rumo a meta alcancavel (cidade > vila > carta).
+  const trade = tradeTowardGoal(state, me, level);
   if (trade) return trade;
 
-  // 8. Sem ore/expansao: estender estrada (caca a Estrada Mais Longa; usa so
-  //    madeira+tijolo). Mantem o jogo avancando mesmo com o banco escasso.
+  // 8. Estender estrada (caca a Estrada Mais Longa) — mantem o jogo avancando.
   if (p.pieces.roads > 0 && canAfford(p.hand, COSTS.road)) {
-    const road = roadToUnlock(state, me) ?? anyLegalRoad(state, me);
+    const road = roadToUnlock(state, me, level) ?? anyLegalRoad(state, me);
     if (road) return { t: 'buildRoad', edgeId: road };
   }
 
   return { t: 'endTurn' };
 }
 
-function bestCityTarget(state: GameState, me: PlayerColor): string | null {
+function bestCityTarget(state: GameState, me: PlayerColor, level: Difficulty): string | null {
   let best: string | null = null;
   let bestScore = -1;
   for (const [vid, b] of Object.entries(state.buildings)) {
     if (b.owner !== me || b.kind !== 'settlement') continue;
-    const s = vertexValue(state, vid);
+    const s = vertexValue(state, vid, level);
     if (s > bestScore) {
       bestScore = s;
       best = vid;
@@ -211,13 +221,13 @@ function bestCityTarget(state: GameState, me: PlayerColor): string | null {
   return best;
 }
 
-function bestSettlementTarget(state: GameState, me: PlayerColor): string | null {
+function bestSettlementTarget(state: GameState, me: PlayerColor, level: Difficulty): string | null {
   let best: string | null = null;
   let bestScore = -1;
   for (const vid of state.board.vertexOrder) {
     if (!distanceRuleOk(state, vid)) continue;
     if (!vertexTouchesPlayerRoad(state, me, vid)) continue;
-    const s = vertexValue(state, vid);
+    const s = vertexValue(state, vid, level);
     if (s > bestScore) {
       bestScore = s;
       best = vid;
@@ -226,8 +236,7 @@ function bestSettlementTarget(state: GameState, me: PlayerColor): string | null 
   return best;
 }
 
-/** Estrada legal cujo extremo distante e uma nova vila possivel. */
-function roadToUnlock(state: GameState, me: PlayerColor): string | null {
+function roadToUnlock(state: GameState, me: PlayerColor, level: Difficulty): string | null {
   let best: string | null = null;
   let bestScore = -1;
   for (const eid of state.board.edgeOrder) {
@@ -237,8 +246,8 @@ function roadToUnlock(state: GameState, me: PlayerColor): string | null {
     for (const far of e.v) {
       if (state.buildings[far]) continue;
       if (!distanceRuleOk(state, far)) continue;
-      if (vertexTouchesPlayerRoad(state, me, far)) continue; // ja alcancado
-      const s = vertexValue(state, far);
+      if (vertexTouchesPlayerRoad(state, me, far)) continue;
+      const s = vertexValue(state, far, level);
       if (s > bestScore) {
         bestScore = s;
         best = eid;
@@ -255,16 +264,11 @@ function anyLegalRoad(state: GameState, me: PlayerColor): string | null {
   return null;
 }
 
-/**
- * Troca com o banco rumo a meta alcancavel de maior prioridade (cidade > vila >
- * carta): pega um recurso faltante (com estoque no banco) usando a sobra de
- * outro. Uma troca por chamada; ao longo dos turnos converge para a construcao.
- */
-function tradeTowardGoal(state: GameState, me: PlayerColor): Action | null {
+function tradeTowardGoal(state: GameState, me: PlayerColor, level: Difficulty): Action | null {
   const p = getPlayer(state, me);
   const goals: { cost: Partial<Record<Resource, number>>; ok: boolean }[] = [
-    { cost: COSTS.city, ok: !!bestCityTarget(state, me) && p.pieces.cities > 0 },
-    { cost: COSTS.settlement, ok: !!bestSettlementTarget(state, me) && p.pieces.settlements > 0 },
+    { cost: COSTS.city, ok: !!bestCityTarget(state, me, level) && p.pieces.cities > 0 },
+    { cost: COSTS.settlement, ok: !!bestSettlementTarget(state, me, level) && p.pieces.settlements > 0 },
     { cost: COSTS.progressCard, ok: state.devDeck.length > 0 },
   ];
   for (const g of goals) {
@@ -276,7 +280,7 @@ function tradeTowardGoal(state: GameState, me: PlayerColor): Action | null {
         break;
       }
     }
-    if (!want) continue; // ja tem os recursos desta meta
+    if (!want) continue;
     for (const give of RESOURCES) {
       if (give === want) continue;
       const rate = maritimeRate(state, me, give);
@@ -309,14 +313,11 @@ function maybeKnight(state: GameState, me: PlayerColor): Action | null {
   return null;
 }
 
-/** Vale a pena jogar Cavaleiro: tirar bloqueador de mim, caca ao exercito ou roubo. */
 function shouldPlayKnight(state: GameState, me: PlayerColor): boolean {
   if (robberOnMyHex(state, me)) return true;
   const p = getPlayer(state, me);
   const needed = Math.max(3, state.largestArmy.size + 1);
-  const chaseArmy = state.largestArmy.owner !== me && p.knightsPlayed + 1 >= needed;
-  if (chaseArmy) return true;
-  // Existe um roubo bom (adversario com >=3 cartas em um hex que da pra bloquear)?
+  if (state.largestArmy.owner !== me && p.knightsPlayed + 1 >= needed) return true;
   for (const hid of state.board.hexOrder) {
     if (hid === state.blocker.hexId) continue;
     const hex = state.board.hexes[hid]!;
@@ -331,25 +332,23 @@ function shouldPlayKnight(state: GameState, me: PlayerColor): boolean {
   return false;
 }
 
-function planPlayCard(state: GameState, me: PlayerColor): Action | null {
+function planPlayCard(state: GameState, me: PlayerColor, level: Difficulty): Action | null {
   const p = getPlayer(state, me);
 
-  // Cavaleiro: tira o bloqueador de cima de mim, caca o Maior Exercito,
-  // ou aproveita um bom roubo.
-  if (canPlay(state, p, 'knight') && shouldPlayKnight(state, me)) return { t: 'playKnight' };
+  // Facil so usa Cavaleiro quando o bloqueador esta em cima dele (joga mal as cartas).
+  if (level === 'easy') {
+    if (canPlay(state, p, 'knight') && robberOnMyHex(state, me)) return { t: 'playKnight' };
+    return null;
+  }
 
-  // +2 Recursos: completa uma cidade/vila alvo.
+  if (canPlay(state, p, 'knight') && shouldPlayKnight(state, me)) return { t: 'playKnight' };
   if (canPlay(state, p, 'yearOfPlenty')) {
-    const picks = resourcesToComplete(state, me);
+    const picks = resourcesToComplete(state, me, level);
     if (picks) return { t: 'playYearOfPlenty', resources: picks };
   }
-
-  // 2 Estradas: quando ha vilas a destravar.
-  if (canPlay(state, p, 'roadBuilding') && p.pieces.roads > 0 && roadToUnlock(state, me)) {
+  if (canPlay(state, p, 'roadBuilding') && p.pieces.roads > 0 && roadToUnlock(state, me, level)) {
     return { t: 'playRoadBuilding' };
   }
-
-  // Monopolio: se algum recurso esta muito nas maos dos adversarios.
   if (canPlay(state, p, 'monopoly')) {
     const r = monopolyTarget(state, me);
     if (r) return { t: 'playMonopoly', resource: r };
@@ -357,12 +356,11 @@ function planPlayCard(state: GameState, me: PlayerColor): Action | null {
   return null;
 }
 
-/** Dois recursos que completariam a cidade ou a vila alvo (deficit <= 2). */
-function resourcesToComplete(state: GameState, me: PlayerColor): [Resource, Resource] | null {
+function resourcesToComplete(state: GameState, me: PlayerColor, level: Difficulty): [Resource, Resource] | null {
   const p = getPlayer(state, me);
   const options: Partial<Record<Resource, number>>[] = [];
-  if (bestCityTarget(state, me) && p.pieces.cities > 0) options.push(COSTS.city);
-  if (bestSettlementTarget(state, me) && p.pieces.settlements > 0) options.push(COSTS.settlement);
+  if (bestCityTarget(state, me, level) && p.pieces.cities > 0) options.push(COSTS.city);
+  if (bestSettlementTarget(state, me, level) && p.pieces.settlements > 0) options.push(COSTS.settlement);
   for (const cost of options) {
     const need: Resource[] = [];
     for (const r of RESOURCES) {
@@ -383,7 +381,7 @@ function resourcesToComplete(state: GameState, me: PlayerColor): [Resource, Reso
 
 function monopolyTarget(state: GameState, me: PlayerColor): Resource | null {
   let best: Resource | null = null;
-  let bestTotal = 3; // so vale a pena a partir de 4 cartas no total dos outros
+  let bestTotal = 3;
   for (const r of RESOURCES) {
     let total = 0;
     for (const pl of state.players) if (pl.color !== me) total += pl.hand[r];
@@ -399,36 +397,57 @@ function monopolyTarget(state: GameState, me: PlayerColor): Resource | null {
 // Bloqueador, descarte e trocas
 // ---------------------------------------------------------------------------
 
-function planBlocker(state: GameState, me: PlayerColor): Action {
+function planBlocker(state: GameState, me: PlayerColor, level: Difficulty): Action {
+  // Dificil mira o lider; medio bloqueia a maior producao; facil so evita a si.
+  let leader: PlayerColor | null = null;
+  if (level === 'hard') {
+    let bestPts = -1;
+    for (const p of state.players) {
+      if (p.color === me) continue;
+      const pts = publicScoreOf(state, p.color);
+      if (pts > bestPts) {
+        bestPts = pts;
+        leader = p.color;
+      }
+    }
+  }
+
   let bestHex = state.board.hexOrder.find((h) => h !== state.blocker.hexId)!;
-  let bestScore = -1;
+  let bestScore = -Infinity;
   for (const hid of state.board.hexOrder) {
     if (hid === state.blocker.hexId) continue;
     const hex = state.board.hexes[hid]!;
-    let opp = 0;
+    let score = 0;
     let touchesSelf = false;
     for (const vid of hex.corners) {
       const b = state.buildings[vid];
       if (!b) continue;
-      if (b.owner === me) touchesSelf = true;
-      else opp += pip(hex.number) * (b.kind === 'city' ? 2 : 1);
+      if (b.owner === me) {
+        touchesSelf = true;
+      } else {
+        const w = level === 'hard' && b.owner === leader ? 3 : 1;
+        score += pip(hex.number) * (b.kind === 'city' ? 2 : 1) * w;
+      }
     }
-    const score = touchesSelf ? opp - 100 : opp; // evita travar a si mesmo
+    if (level === 'easy') score = touchesSelf ? -1 : 0; // sem mira: qualquer hex livre
+    else if (touchesSelf) score -= 100;
     if (score > bestScore) {
       bestScore = score;
       bestHex = hid;
     }
   }
-  // Rouba do adversario com mais cartas adjacente ao hex escolhido.
+
+  // Rouba do alvo: lider (dificil) senao o de mais cartas adjacente ao hex.
   const hex = state.board.hexes[bestHex]!;
   let victim: PlayerColor | undefined;
-  let mostCards = 0;
+  let mostCards = -1;
   for (const vid of hex.corners) {
     const b = state.buildings[vid];
     if (!b || b.owner === me) continue;
     const total = RESOURCES.reduce((s, r) => s + getPlayer(state, b.owner).hand[r], 0);
-    if (total > mostCards) {
-      mostCards = total;
+    const pref = level === 'hard' && b.owner === leader ? total + 100 : total;
+    if (total > 0 && pref > mostCards) {
+      mostCards = pref;
       victim = b.owner;
     }
   }

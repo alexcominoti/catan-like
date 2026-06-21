@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   createInitialState,
   reduce,
-  scoreOf,
+  publicScoreOf,
   handTotal,
   maritimeRate,
   COSTS,
@@ -49,6 +49,8 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
       players: config.players,
       numberLayout: config.numberLayout,
       desert: config.desert,
+      pointsToWin: config.pointsToWin,
+      discardLimit: config.discardLimit,
     }),
   );
   const [log, setLog] = useState<string[]>(['Partida iniciada. Coloquem as vilas iniciais.']);
@@ -61,13 +63,31 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   const [tradeGive, setTradeGive] = useState<Record<Resource, number>>(zeroRes);
   const [tradeWant, setTradeWant] = useState<Record<Resource, number>>(zeroRes);
   const [help, setHelp] = useState(false);
+  // Quando o ladrao pode roubar de 2+ jogadores, o humano escolhe a vitima.
+  const [robberChoice, setRobberChoice] = useState<{ hexId: string; victims: PlayerColor[] } | null>(null);
   const { toasts, push } = useToasts();
 
   const isBot = useMemo(() => {
     const set = new Set(config.bots);
     return (c: PlayerColor) => set.has(c);
   }, [config.bots]);
+  const difficultyOf = useMemo(() => {
+    const map = config.botDifficulty ?? {};
+    return (c: PlayerColor) => map[c] ?? 'medium';
+  }, [config.botDifficulty]);
   const botTurn = isBot(state.currentPlayer);
+
+  // "Eu" (jogador local): com 1 humano, e sempre ele; em hotseat com varios
+  // humanos, e o humano da vez. As maos dos demais ficam ocultas (so contagem).
+  const humanColors = state.players.filter((p) => !isBot(p.color)).map((p) => p.color);
+  const localColor: PlayerColor =
+    humanColors.length === 1
+      ? humanColors[0]!
+      : !isBot(state.currentPlayer)
+        ? state.currentPlayer
+        : (humanColors[0] ?? state.currentPlayer);
+  const localPlayer = getPlayer(state, localColor);
+  const myTurn = state.currentPlayer === localColor;
 
   const effMode: InteractionMode = useMemo(() => {
     if (isBot(state.currentPlayer)) return 'idle'; // humano nao age na vez do bot
@@ -123,13 +143,13 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   // Auto-jogo dos bots: a cada mudanca de estado, se ha uma acao de bot pendente
   // (turno do bot, descarte, mover bloqueador, ou aceitar troca), agenda e aplica.
   useEffect(() => {
-    const move = planBotAction(state, isBot);
+    const move = planBotAction(state, isBot, difficultyOf);
     if (!move) return;
     const delay = state.phase === 'setup1' || state.phase === 'setup2' ? 360 : 620;
     const id = setTimeout(() => dispatch(move.action, move.by), delay);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state, isBot]);
+  }, [state, isBot, difficultyOf]);
 
   function onVertex(vid: string) {
     if (effMode === 'placeSettlement') dispatch({ t: 'placeSettlement', vertexId: vid });
@@ -144,16 +164,22 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
     if (effMode !== 'moveBlocker') return;
     const hex = state.board.hexes[hid]!;
     const me = state.currentPlayer;
-    const victim = hex.corners
-      .map((vid) => state.buildings[vid]?.owner)
-      .find((o): o is PlayerColor => !!o && o !== me && handTotal(getPlayer(state, o)) > 0);
-    dispatch({ t: 'moveBlocker', hexId: hid, ...(victim ? { stealFrom: victim } : {}) });
+    const victims = [...new Set(
+      hex.corners
+        .map((vid) => state.buildings[vid]?.owner)
+        .filter((o): o is PlayerColor => !!o && o !== me && handTotal(getPlayer(state, o)) > 0),
+    )];
+    if (victims.length >= 2) {
+      setRobberChoice({ hexId: hid, victims }); // humano escolhe de quem roubar
+    } else {
+      dispatch({ t: 'moveBlocker', hexId: hid, ...(victims[0] ? { stealFrom: victims[0] } : {}) });
+    }
   }
 
   function canPlay(card: ProgressCard): boolean {
-    const p = getPlayer(state, state.currentPlayer);
-    const have = p.progressCards.filter((c) => c === card).length;
-    const bought = p.progressCardsBoughtThisTurn.filter((c) => c === card).length;
+    if (!myTurn) return false;
+    const have = localPlayer.progressCards.filter((c) => c === card).length;
+    const bought = localPlayer.progressCardsBoughtThisTurn.filter((c) => c === card).length;
     if (have - bought <= 0) return false;
     if (state.devCardPlayedThisTurn) return false;
     return state.phase === 'main' || (card === 'knight' && state.phase === 'roll');
@@ -172,7 +198,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   const isMain = state.phase === 'main';
   const isRoll = state.phase === 'roll';
   const bestRate = maritimeRate(state, state.currentPlayer, give);
-  const devCounts = countCards(cur.progressCards);
+  const devCounts = countCards(localPlayer.progressCards);
   const playerColor = PLAYER_FILL[state.currentPlayer];
 
   return (
@@ -203,23 +229,23 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
               <span className="name">{p.name}{isBot(p.color) && <span title="Bot"> 🤖</span>}</span>
               {state.longestRoad.owner === p.color && <span className="badge" title="Estrada Mais Longa">📏</span>}
               {state.largestArmy.owner === p.color && <span className="badge" title="Maior Exército">⚔️</span>}
-              <span className="pts">{scoreOf(state, p.color)}⭐ · {handTotal(p)}🂠 · {p.progressCards.length}🃏</span>
+              <span className="pts">{publicScoreOf(state, p.color)}⭐ · {handTotal(p)}🂠 · {p.progressCards.length}🃏</span>
             </div>
           ))}
         </div>
 
         <div className="card">
-          <h2>Mão de {PLAYER_LABEL[state.currentPlayer]}</h2>
+          <h2>Sua mão ({localPlayer.name})</h2>
           <div className="hand">
             {RESOURCES.map((r) => (
-              <span key={r} className="res-chip" title={RESOURCE_LABEL[r]}>{RESOURCE_ICON[r]} {cur.hand[r]}</span>
+              <span key={r} className="res-chip" title={RESOURCE_LABEL[r]}>{RESOURCE_ICON[r]} {localPlayer.hand[r]}</span>
             ))}
           </div>
         </div>
 
         <div className="card">
-          <h2>Cartas de progresso</h2>
-          {cur.progressCards.length === 0 ? (
+          <h2>Suas cartas de progresso</h2>
+          {localPlayer.progressCards.length === 0 ? (
             <p className="muted-note">Nenhuma carta.</p>
           ) : (
             <div className="dev-cards">
@@ -252,7 +278,10 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
         {state.phase === 'ended' ? (
           <span className="hint">🏆 {PLAYER_LABEL[state.winner!]} venceu! Clique em “Novo jogo”.</span>
         ) : state.phase === 'discard' ? (
-          <DiscardControls state={state} dispatch={dispatch} />
+          <span className="hint">
+            Rolou 7! Quem tem mais de {state.discardLimit} cartas descarta metade:{' '}
+            {(Object.entries(state.pendingDiscards) as [PlayerColor, number][]).map(([c, n]) => `${PLAYER_LABEL[c]} (${n})`).join(', ')}
+          </span>
         ) : botTurn ? (
           <span className="hint">🤖 {cur.name} está jogando…</span>
         ) : effMode === 'moveBlocker' ? (
@@ -276,7 +305,9 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
               onClick={() => dispatch({ t: 'buyProgressCard' })} />
             <span className="trade-bank">
               <select value={give} onChange={(e) => setGive(e.target.value as Resource)} disabled={!isMain}>
-                {RESOURCES.map((r) => <option key={r} value={r}>{RESOURCE_ICON[r]}×{bestRate}</option>)}
+                {RESOURCES.map((r) => (
+                  <option key={r} value={r}>{RESOURCE_ICON[r]}×{maritimeRate(state, state.currentPlayer, r)}</option>
+                ))}
               </select>
               →
               <select value={want} onChange={(e) => setWant(e.target.value as Resource)} disabled={!isMain}>
@@ -315,6 +346,26 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
           onClose={resetTransient} />
       )}
       {state.activeTrade && <ActiveTradeModal state={state} dispatch={dispatch} />}
+      {robberChoice && (
+        <RobberVictimModal
+          state={state}
+          victims={robberChoice.victims}
+          onPick={(victim) => { dispatch({ t: 'moveBlocker', hexId: robberChoice.hexId, stealFrom: victim }); setRobberChoice(null); }}
+        />
+      )}
+      {(() => {
+        if (state.phase !== 'discard') return null;
+        const who = (Object.keys(state.pendingDiscards) as PlayerColor[]).find((c) => !isBot(c));
+        if (!who) return null;
+        return (
+          <DiscardModal
+            state={state}
+            color={who}
+            count={state.pendingDiscards[who]!}
+            onDiscard={(resources) => dispatch({ t: 'discard', resources }, who)}
+          />
+        );
+      })()}
     </div>
   );
 
@@ -497,31 +548,68 @@ function ActiveTradeModal({ state, dispatch }: { state: GameState; dispatch: (a:
   );
 }
 
-function DiscardControls({ state, dispatch }: { state: GameState; dispatch: (a: Action, by?: PlayerColor) => boolean }) {
-  const pending = Object.entries(state.pendingDiscards) as [PlayerColor, number][];
+/** Escolha de quem roubar quando o hex toca 2+ adversarios com cartas. */
+function RobberVictimModal({
+  state,
+  victims,
+  onPick,
+}: {
+  state: GameState;
+  victims: PlayerColor[];
+  onPick: (victim: PlayerColor) => void;
+}) {
   return (
-    <>
-      <span className="hint">Rolou 7! Descarte pela metade: {pending.map(([c, n]) => `${PLAYER_LABEL[c]} (${n})`).join(', ')}</span>
-      {pending.map(([color, count]) => (
-        <button key={color} onClick={() => dispatch({ t: 'discard', resources: autoDiscard(state, color, count) }, color)}>
-          Descartar {count} de {PLAYER_LABEL[color]}
-        </button>
-      ))}
-    </>
+    <div className="overlay">
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h3>Roubar de quem?</h3>
+        <div className="dev-cards">
+          {victims.map((c) => (
+            <button key={c} onClick={() => onPick(c)}>
+              <span className="swatch" style={{ background: PLAYER_FILL[c] }} /> {PLAYER_LABEL[c]} · {handTotal(getPlayer(state, c))} cartas
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
-function autoDiscard(state: GameState, color: PlayerColor, count: number): Partial<Record<Resource, number>> {
-  const p = getPlayer(state, color);
-  const hand: Record<Resource, number> = { ...p.hand };
-  const out: Partial<Record<Resource, number>> = {};
-  for (let i = 0; i < count; i++) {
-    let best: Resource = RESOURCES[0]!;
-    for (const r of RESOURCES) if (hand[r] > hand[best]) best = r;
-    hand[best] -= 1;
-    out[best] = (out[best] ?? 0) + 1;
-  }
-  return out;
+/** O jogador humano escolhe quais cartas descartar (total = count). */
+function DiscardModal({
+  state,
+  color,
+  count,
+  onDiscard,
+}: {
+  state: GameState;
+  color: PlayerColor;
+  count: number;
+  onDiscard: (resources: Partial<Record<Resource, number>>) => void;
+}) {
+  const hand = getPlayer(state, color).hand;
+  const [picks, setPicks] = useState<Record<Resource, number>>({ wood: 0, brick: 0, wool: 0, grain: 0, ore: 0 });
+  const total = RESOURCES.reduce((s, r) => s + picks[r], 0);
+  return (
+    <div className="overlay">
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h3>Descartar {count} carta(s) — {PLAYER_LABEL[color]}</h3>
+        <p className="muted-note">Selecionadas: {total}/{count}</p>
+        <div className="trade-grid" style={{ gridTemplateColumns: '1fr' }}>
+          <div>
+            {RESOURCES.map((r) => (
+              <div key={r} className="trade-row">
+                <span>{RESOURCE_ICON[r]} {RESOURCE_LABEL[r]} ({hand[r]})</span>
+                <Stepper value={picks[r]} max={hand[r]} onChange={(v) => setPicks((p) => ({ ...p, [r]: v }))} />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="modal-actions">
+          <button className="primary" disabled={total !== count} onClick={() => onDiscard(picks)}>Descartar</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function countCards(cards: ProgressCard[]): Record<ProgressCard, number> {

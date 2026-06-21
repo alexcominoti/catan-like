@@ -19,6 +19,7 @@ export {
   LONGEST_ROAD_MIN,
   LARGEST_ARMY_MIN,
   scoreOf,
+  publicScoreOf,
   handTotal,
   longestRoadLength,
   maritimeRate,

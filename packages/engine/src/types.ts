@@ -174,6 +174,10 @@ export interface GameState {
   returnPhaseAfterBlocker: 'roll' | 'main' | null;
   /** Oferta de comercio entre jogadores ativa (ou null). */
   activeTrade: TradeOffer | null;
+  /** Pontos necessarios para vencer (padrao 10). */
+  victoryTarget: number;
+  /** Acima deste numero de cartas, descarta metade ao rolar 7 (padrao 7). */
+  discardLimit: number;
   board: Board;
   buildings: Record<string, Building>; // por vertexId
   roads: Record<string, Road>; // por edgeId

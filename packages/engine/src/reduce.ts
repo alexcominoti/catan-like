@@ -3,7 +3,6 @@ import {
   COSTS,
   LARGEST_ARMY_MIN,
   LONGEST_ROAD_MIN,
-  VICTORY_POINTS_TO_WIN,
   canAfford,
   computeProduction,
   distanceRuleOk,
@@ -196,7 +195,7 @@ function rollDice(state: GameState, by: PlayerColor): ReduceResult {
     const mustDiscard: { color: PlayerColor; count: number }[] = [];
     for (const p of next.players) {
       const total = handTotal(p);
-      if (total > 7) {
+      if (total > next.discardLimit) {
         const count = Math.floor(total / 2);
         pending[p.color] = count;
         mustDiscard.push({ color: p.color, count });
@@ -687,7 +686,7 @@ export function updateLargestArmy(state: GameState, events: GameEvent[]): void {
 }
 
 function checkWin(state: GameState, by: PlayerColor, events: GameEvent[]): void {
-  if (scoreOf(state, by) >= VICTORY_POINTS_TO_WIN) {
+  if (scoreOf(state, by) >= state.victoryTarget) {
     state.winner = by;
     state.phase = 'ended';
     events.push({ t: 'gameWon', winner: by });

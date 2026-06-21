@@ -59,14 +59,21 @@ export function maritimeRate(state: GameState, color: PlayerColor, give: Resourc
   return rate;
 }
 
-/** Pontuacao total visivel + oculta de um jogador. */
+/** Pontuacao total (inclui os pontos ocultos de cartas +1 PV). Usada na vitoria. */
 export function scoreOf(state: GameState, color: PlayerColor): number {
   const p = getPlayer(state, color);
+  return publicScoreOf(state, color) + p.progressCards.filter((c) => c === 'victoryPoint').length;
+}
+
+/**
+ * Pontuacao *publica* (visivel no placar): NAO conta as cartas +1 PV, que sao
+ * secretas. So sao reveladas quando o jogador realmente vence.
+ */
+export function publicScoreOf(state: GameState, color: PlayerColor): number {
   let pts = 0;
   for (const b of Object.values(state.buildings)) {
     if (b.owner === color) pts += b.kind === 'city' ? 2 : 1;
   }
-  pts += p.progressCards.filter((c) => c === 'victoryPoint').length;
   if (state.longestRoad.owner === color) pts += 2;
   if (state.largestArmy.owner === color) pts += 2;
   return pts;
