@@ -42,6 +42,23 @@ describe('fluxo de jogo', () => {
     expect(actions.length).toBe(16);
   });
 
+  it('suporta 3 jogadores (setup completo -> fase de rolar)', () => {
+    const s0 = createInitialState({
+      seed: 77,
+      players: [
+        { color: 'red', name: 'A' },
+        { color: 'blue', name: 'B' },
+        { color: 'white', name: 'C' },
+      ],
+    });
+    const { state, actions } = autoSetup(s0);
+    expect(state.players).toHaveLength(3);
+    expect(state.phase).toBe('roll');
+    expect(state.currentPlayer).toBe('red');
+    expect(Object.keys(state.buildings)).toHaveLength(6); // 2 por jogador
+    expect(actions.length).toBe(12);
+  });
+
   it('rejeita colocar vila em vertice que viola a regra de distancia', () => {
     const s0 = createInitialState({ seed: 5 });
     const v0 = s0.board.vertexOrder[0]!;
