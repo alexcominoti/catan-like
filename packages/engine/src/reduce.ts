@@ -76,6 +76,8 @@ export function reduce(state: GameState, by: PlayerColor, action: Action): Reduc
       return playMonopoly(state, by, action.resource);
     case 'proposeTrade':
       return proposeTrade(state, by, action.give, action.want, action.to);
+    case 'counterTrade':
+      return counterTrade(state, by, action.give, action.want);
     case 'respondTrade':
       return respondTrade(state, by, action.accept);
     case 'confirmTrade':
@@ -569,6 +571,29 @@ function proposeTrade(
   next.activeTrade = { from: by, give: g, want: w, to: recipients, accepted: [] };
   next.tradeOffersThisTurn += 1;
   return ok(next, [{ t: 'tradeProposed', from: by }]);
+}
+
+/**
+ * Contraproposta: um destinatario da oferta ativa devolve uma nova oferta ao
+ * proponente original (so para ele). Nao precisa ser a vez de quem contrapropoe.
+ */
+function counterTrade(
+  state: GameState,
+  by: PlayerColor,
+  give: Partial<Record<Resource, number>>,
+  want: Partial<Record<Resource, number>>,
+): ReduceResult {
+  const trade = state.activeTrade;
+  if (!trade) return err('Nao ha proposta para contrapor.');
+  if (!trade.to.includes(by)) return err('Voce nao foi convidado a essa troca.');
+  const g = sanitizeResMap(give);
+  const w = sanitizeResMap(want);
+  if (Object.keys(g).length === 0 && Object.keys(w).length === 0) return err('Contraproposta vazia.');
+  const next = clone(state);
+  const p = getPlayer(next, by);
+  if (!canAfford(p, g)) return err('Voce nao tem os recursos oferecidos.');
+  next.activeTrade = { from: by, give: g, want: w, to: [trade.from], accepted: [] };
+  return ok(next, [{ t: 'tradeCountered', from: by }]);
 }
 
 function respondTrade(state: GameState, by: PlayerColor, accept: boolean): ReduceResult {

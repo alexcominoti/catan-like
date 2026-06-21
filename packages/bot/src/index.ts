@@ -57,9 +57,9 @@ export function planBotAction(
         return { by: c, action: { t: 'respondTrade', accept: true } };
       }
     }
-    // Se a proposta ativa e do bot da vez, ele espera a janela de resposta dos
-    // humanos (resolvida pela UI via resolveBotProposal) — nao age agora.
-    if (isBot(state.currentPlayer) && t.from === state.currentPlayer) return null;
+    // Durante QUALQUER troca ativa na vez do bot (oferta propria ou uma
+    // contraproposta de humano), ele aguarda — a UI resolve via resolveBotProposal.
+    if (isBot(state.currentPlayer)) return null;
   }
 
   const me = state.currentPlayer;

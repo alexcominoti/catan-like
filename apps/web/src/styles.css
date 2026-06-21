@@ -60,6 +60,7 @@ body {
 
 .board-wrap {
   grid-area: board;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -161,13 +162,126 @@ body {
 .actionbar {
   grid-area: actionbar;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 8px 12px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
+  min-height: 92px;
+  justify-content: center;
+}
+
+.action-status {
+  font-size: 13px;
+  color: var(--muted);
+  min-height: 18px;
+}
+
+.action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.primary.pulse {
+  animation: pulseBtn 1s ease-in-out infinite;
+}
+
+@keyframes pulseBtn {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(77, 163, 255, 0.6); transform: scale(1); }
+  50% { box-shadow: 0 0 0 6px rgba(77, 163, 255, 0); transform: scale(1.05); }
+}
+
+/* ---------- Painel de troca no canto do mapa ---------- */
+.trade-popup {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 250px;
+  background: rgba(20, 30, 44, 0.96);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  z-index: 20;
+}
+
+.trade-popup h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.trade-popup .trade-summary {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.trade-timer {
+  height: 5px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.trade-timer-bar {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transform-origin: left;
+  animation: tradeShrink 10s linear forwards;
+}
+
+@keyframes tradeShrink {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+
+.modal-actions.wrap {
+  flex-wrap: wrap;
+}
+
+/* Pilha de cartas (cobre o icone de tras) + contador */
+.card-stack {
+  position: relative;
+  display: inline-flex;
+}
+
+.play-card.back {
+  position: absolute;
+  top: 0;
+}
+
+.play-card.front {
+  position: relative;
+}
+
+.card-count {
+  position: absolute;
+  bottom: -3px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: #0c1118;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.dev-divider {
+  display: inline-flex;
+  gap: 14px;
+  margin-left: 10px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
 }
 
 button {

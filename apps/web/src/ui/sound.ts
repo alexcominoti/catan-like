@@ -13,7 +13,8 @@ export type SoundKind =
   | 'largestArmy'
   | 'win'
   | 'robber'
-  | 'trade';
+  | 'trade'
+  | 'yourTurn';
 
 let ctx: AudioContext | null = null;
 let muted = false;
@@ -126,6 +127,10 @@ export function play(kind: SoundKind): void {
     case 'trade':
       tone(680, 0, 0.06, 'sine', 0.16);
       tone(920, 0.06, 0.08, 'sine', 0.16);
+      break;
+    case 'yourTurn':
+      tone(784, 0, 0.12, 'sine', 0.18);
+      tone(1047, 0.12, 0.16, 'sine', 0.18);
       break;
   }
 }

@@ -207,6 +207,7 @@ export type GameEvent =
   | { t: 'cardPlayed'; owner: PlayerColor; card: ProgressCard }
   | { t: 'monopoly'; owner: PlayerColor; resource: Resource; taken: number }
   | { t: 'tradeProposed'; from: PlayerColor }
+  | { t: 'tradeCountered'; from: PlayerColor }
   | { t: 'tradeResponded'; player: PlayerColor; accept: boolean }
   | { t: 'tradeExecuted'; from: PlayerColor; with: PlayerColor }
   | { t: 'tradeCancelled' }
@@ -231,6 +232,7 @@ export type Action =
   | { t: 'discard'; resources: Partial<Record<Resource, number>> }
   | { t: 'tradeBank'; give: Resource; want: Resource }
   | { t: 'proposeTrade'; give: Partial<Record<Resource, number>>; want: Partial<Record<Resource, number>>; to?: PlayerColor[] }
+  | { t: 'counterTrade'; give: Partial<Record<Resource, number>>; want: Partial<Record<Resource, number>> }
   | { t: 'respondTrade'; accept: boolean }
   | { t: 'confirmTrade'; with: PlayerColor }
   | { t: 'cancelTrade' }

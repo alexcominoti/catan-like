@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createInitialState,
   reduce,
@@ -66,7 +66,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   const [mode, setMode] = useState<InteractionMode>('idle');
   const [give, setGive] = useState<Resource>('wood');
   const [want, setWant] = useState<Resource>('brick');
-  const [arming, setArming] = useState<'yearOfPlenty' | 'monopoly' | 'trade' | null>(null);
+  const [arming, setArming] = useState<'yearOfPlenty' | 'monopoly' | 'trade' | 'counter' | null>(null);
   const [yopPicks, setYopPicks] = useState<Resource[]>([]);
   const [tradeGive, setTradeGive] = useState<Record<Resource, number>>(zeroRes);
   const [tradeWant, setTradeWant] = useState<Record<Resource, number>>(zeroRes);
@@ -171,12 +171,14 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, isBot, difficultyOf]);
 
-  // Quando um BOT propoe uma troca, da uma janela para o humano avaliar e entao
-  // resolve (fecha com quem aceitou, ou cancela).
+  // Durante a vez de um BOT com uma troca ativa (oferta do bot OU contraproposta
+  // de humano), da uma janela e entao resolve (fecha com quem aceitou, ou cancela).
   useEffect(() => {
     const t = state.activeTrade;
-    if (!t || !isBot(t.from)) return;
-    const wait = t.accepted.length > 0 ? 1300 : 6000;
+    if (!t || !isBot(state.currentPlayer)) return;
+    let wait: number;
+    if (t.from === state.currentPlayer) wait = t.accepted.length > 0 ? 1200 : 10000; // oferta do bot: 10s
+    else wait = t.accepted.length > 0 ? 1000 : 4000; // contraproposta do humano
     const id = setTimeout(() => {
       const mv = resolveBotProposal(state);
       if (mv) dispatch(mv.action, mv.by);
@@ -184,6 +186,14 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, isBot]);
+
+  // Toca um som quando vira a minha vez (entrada na fase de rolar).
+  const wasMyRoll = useRef(false);
+  useEffect(() => {
+    const isMyRoll = myTurn && state.phase === 'roll';
+    if (isMyRoll && !wasMyRoll.current) playSound('yourTurn');
+    wasMyRoll.current = isMyRoll;
+  }, [myTurn, state.phase]);
 
   function onVertex(vid: string) {
     if (effMode === 'placeSettlement') setPendingBuild({ action: { t: 'placeSettlement', vertexId: vid }, label: 'Colocar vila aqui?' });
@@ -228,10 +238,26 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
     } else if (card === 'monopoly') setArming('monopoly');
   }
 
+  // Abre o construtor de troca como CONTRAPROPOSTA: pré-preenche com a oferta
+  // invertida (você dá o que ele pediu; pede o que ele ofereceu) e você edita.
+  function openCounter(t: NonNullable<GameState['activeTrade']>) {
+    const giveFill = zeroRes();
+    const wantFill = zeroRes();
+    for (const r of RESOURCES) {
+      // O que eu daria começa pelo que ele pediu, mas limitado ao que tenho.
+      giveFill[r] = Math.min(t.want[r] ?? 0, localPlayer.hand[r]);
+      // O que eu quero começa pelo que ele ofereceu.
+      wantFill[r] = t.give[r] ?? 0;
+    }
+    setTradeGive(giveFill);
+    setTradeWant(wantFill);
+    setArming('counter');
+  }
+
   const cur = getPlayer(state, state.currentPlayer);
-  const isMain = state.phase === 'main';
-  const isRoll = state.phase === 'roll';
-  const bestRate = maritimeRate(state, state.currentPlayer, give);
+  const myMain = myTurn && state.phase === 'main';
+  const myRoll = myTurn && state.phase === 'roll';
+  const bestRate = maritimeRate(state, localColor, give);
   const devCounts = countCards(localPlayer.progressCards);
   const playerColor = PLAYER_FILL[state.currentPlayer];
 
@@ -255,6 +281,15 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
 
       <div className="board-wrap" style={{ borderColor: playerColor }}>
         <Board state={state} mode={effMode} onVertex={onVertex} onEdge={onEdge} onHex={onHex} />
+        {state.activeTrade && (
+          <ActiveTradePopup
+            state={state}
+            dispatch={dispatch}
+            localColor={localColor}
+            botOffer={isBot(state.activeTrade.from)}
+            onCounter={() => openCounter(state.activeTrade!)}
+          />
+        )}
       </div>
 
       <aside className="sidebar">
@@ -311,52 +346,35 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
       <HandBar hand={localPlayer.hand} devCards={localPlayer.progressCards} name={localPlayer.name} />
 
       <div className="actionbar">
-        {state.phase === 'ended' ? (
-          <span className="hint">🏆 {PLAYER_LABEL[state.winner!]} venceu! Clique em “Novo jogo”.</span>
-        ) : state.phase === 'discard' ? (
-          <span className="hint">
-            Rolou 7! Quem tem mais de {state.discardLimit} cartas descarta metade:{' '}
-            {(Object.entries(state.pendingDiscards) as [PlayerColor, number][]).map(([c, n]) => `${PLAYER_LABEL[c]} (${n})`).join(', ')}
+        <div className="action-status">{statusText(state, myTurn, botTurn, cur.name)}{error && <span className="error"> · ⚠ {error}</span>}</div>
+        <div className="action-buttons">
+          <button className={`primary${myRoll ? ' pulse' : ''}`} disabled={!myRoll} onClick={() => dispatch({ t: 'rollDice' })}>🎲 Rolar</button>
+          <BuildButton label="Estrada" cost={COSTS.road} active={mode === 'buildRoad'} hand={localPlayer.hand}
+            enabled={(myMain && canAffordUI(localPlayer.hand, COSTS.road)) || (myMain && state.pendingFreeRoads > 0)}
+            free={state.pendingFreeRoads > 0} onClick={() => toggle('buildRoad')} />
+          <BuildButton label="Vila" cost={COSTS.settlement} active={mode === 'buildSettlement'} hand={localPlayer.hand}
+            enabled={myMain && canAffordUI(localPlayer.hand, COSTS.settlement)} onClick={() => toggle('buildSettlement')} />
+          <BuildButton label="Cidade" cost={COSTS.city} active={mode === 'buildCity'} hand={localPlayer.hand}
+            enabled={myMain && canAffordUI(localPlayer.hand, COSTS.city)} onClick={() => toggle('buildCity')} />
+          <BuildButton label="Carta" cost={COSTS.progressCard} hand={localPlayer.hand}
+            enabled={myMain && canAffordUI(localPlayer.hand, COSTS.progressCard) && state.devDeck.length > 0}
+            onClick={() => dispatch({ t: 'buyProgressCard' })} />
+          <span className="trade-bank">
+            <select value={give} onChange={(e) => setGive(e.target.value as Resource)} disabled={!myMain}>
+              {RESOURCES.map((r) => (
+                <option key={r} value={r}>{RESOURCE_ICON[r]}×{maritimeRate(state, localColor, r)}</option>
+              ))}
+            </select>
+            →
+            <select value={want} onChange={(e) => setWant(e.target.value as Resource)} disabled={!myMain}>
+              {RESOURCES.map((r) => <option key={r} value={r}>{RESOURCE_ICON[r]}</option>)}
+            </select>
+            <button disabled={!myMain || localPlayer.hand[give] < bestRate} onClick={() => dispatch({ t: 'tradeBank', give, want })}>{bestRate}:1</button>
           </span>
-        ) : botTurn ? (
-          <span className="hint">🤖 {cur.name} está jogando…</span>
-        ) : effMode === 'moveBlocker' ? (
-          <span className="hint">Clique em um hex para mover o bloqueador (rouba de um vizinho).</span>
-        ) : effMode === 'placeSettlement' ? (
-          <span className="hint">Setup: clique em um vértice para colocar sua vila.</span>
-        ) : effMode === 'placeRoad' ? (
-          <span className="hint">Setup: clique em uma aresta ligada à vila para a estrada.</span>
-        ) : (
-          <>
-            <button className="primary" disabled={!isRoll} onClick={() => dispatch({ t: 'rollDice' })}>🎲 Rolar</button>
-            <BuildButton label="Estrada" cost={COSTS.road} active={mode === 'buildRoad'} hand={cur.hand}
-              enabled={(isMain && canAffordUI(cur.hand, COSTS.road)) || state.pendingFreeRoads > 0}
-              free={state.pendingFreeRoads > 0} onClick={() => toggle('buildRoad')} />
-            <BuildButton label="Vila" cost={COSTS.settlement} active={mode === 'buildSettlement'} hand={cur.hand}
-              enabled={isMain && canAffordUI(cur.hand, COSTS.settlement)} onClick={() => toggle('buildSettlement')} />
-            <BuildButton label="Cidade" cost={COSTS.city} active={mode === 'buildCity'} hand={cur.hand}
-              enabled={isMain && canAffordUI(cur.hand, COSTS.city)} onClick={() => toggle('buildCity')} />
-            <BuildButton label="Carta" cost={COSTS.progressCard} hand={cur.hand}
-              enabled={isMain && canAffordUI(cur.hand, COSTS.progressCard) && state.devDeck.length > 0}
-              onClick={() => dispatch({ t: 'buyProgressCard' })} />
-            <span className="trade-bank">
-              <select value={give} onChange={(e) => setGive(e.target.value as Resource)} disabled={!isMain}>
-                {RESOURCES.map((r) => (
-                  <option key={r} value={r}>{RESOURCE_ICON[r]}×{maritimeRate(state, state.currentPlayer, r)}</option>
-                ))}
-              </select>
-              →
-              <select value={want} onChange={(e) => setWant(e.target.value as Resource)} disabled={!isMain}>
-                {RESOURCES.map((r) => <option key={r} value={r}>{RESOURCE_ICON[r]}</option>)}
-              </select>
-              <button disabled={!isMain || cur.hand[give] < bestRate} onClick={() => dispatch({ t: 'tradeBank', give, want })}>{bestRate}:1</button>
-            </span>
-            <button disabled={!isMain} onClick={() => setArming('trade')}>🤝 Propor troca</button>
-            <button disabled={!isMain} onClick={() => dispatch({ t: 'endTurn' })}>Fim de turno</button>
-            <Dice dice={state.dice} />
-          </>
-        )}
-        {error && <span className="error">⚠ {error}</span>}
+          <button disabled={!myMain} onClick={() => setArming('trade')}>🤝 Propor troca</button>
+          <button disabled={!myMain} onClick={() => dispatch({ t: 'endTurn' })}>Fim de turno</button>
+          <Dice dice={state.dice} />
+        </div>
       </div>
 
       <Toasts toasts={toasts} />
@@ -375,13 +393,17 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
           }}
           onClose={() => { setArming(null); setYopPicks([]); }} />
       )}
-      {arming === 'trade' && (
-        <TradeBuilderModal state={state} tradeGive={tradeGive} tradeWant={tradeWant}
+      {(arming === 'trade' || arming === 'counter') && (
+        <TradeBuilderModal state={state} proposer={localColor} tradeGive={tradeGive} tradeWant={tradeWant}
+          counter={arming === 'counter'}
           setTradeGive={setTradeGive} setTradeWant={setTradeWant}
-          onPropose={(to) => dispatch({ t: 'proposeTrade', give: tradeGive, want: tradeWant, to })}
+          onPropose={(to) =>
+            arming === 'counter'
+              ? dispatch({ t: 'counterTrade', give: tradeGive, want: tradeWant }, localColor)
+              : dispatch({ t: 'proposeTrade', give: tradeGive, want: tradeWant, to })
+          }
           onClose={resetTransient} />
       )}
-      {state.activeTrade && <ActiveTradeModal state={state} dispatch={dispatch} localColor={localColor} />}
       {pendingBuild && (
         <div className="overlay" onClick={() => setPendingBuild(null)}>
           <div className="modal confirm" onClick={(e) => e.stopPropagation()}>
@@ -504,9 +526,11 @@ function Stepper({ value, max, onChange }: { value: number; max: number; onChang
 }
 
 function TradeBuilderModal({
-  state, tradeGive, tradeWant, setTradeGive, setTradeWant, onPropose, onClose,
+  state, proposer, counter, tradeGive, tradeWant, setTradeGive, setTradeWant, onPropose, onClose,
 }: {
   state: GameState;
+  proposer: PlayerColor;
+  counter?: boolean;
   tradeGive: Record<Resource, number>;
   tradeWant: Record<Resource, number>;
   setTradeGive: (v: Record<Resource, number>) => void;
@@ -514,15 +538,14 @@ function TradeBuilderModal({
   onPropose: (to: PlayerColor[]) => void;
   onClose: () => void;
 }) {
-  const me = state.currentPlayer;
-  const others = state.players.filter((p) => p.color !== me).map((p) => p.color);
+  const others = state.players.filter((p) => p.color !== proposer).map((p) => p.color);
   const [to, setTo] = useState<PlayerColor[]>(others);
-  const cur = state.players.find((p) => p.color === me)!;
+  const cur = state.players.find((p) => p.color === proposer)!;
   const total = (m: Record<Resource, number>) => RESOURCES.reduce((s, r) => s + m[r], 0);
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal wide" onClick={(e) => e.stopPropagation()}>
-        <h3>Propor troca</h3>
+        <h3>{counter ? 'Contraproposta' : 'Propor troca'}</h3>
         <div className="trade-grid">
           <div>
             <h4>Você dá</h4>
@@ -543,19 +566,21 @@ function TradeBuilderModal({
             ))}
           </div>
         </div>
-        <div className="trade-recipients">
-          <span>Para:</span>
-          {others.map((c) => (
-            <label key={c} className="chk">
-              <input type="checkbox" checked={to.includes(c)}
-                onChange={(e) => setTo((cur2) => (e.target.checked ? [...cur2, c] : cur2.filter((x) => x !== c)))} />
-              <span className="swatch" style={{ background: PLAYER_FILL[c] }} /> {PLAYER_LABEL[c]}
-            </label>
-          ))}
-        </div>
+        {!counter && (
+          <div className="trade-recipients">
+            <span>Para:</span>
+            {others.map((c) => (
+              <label key={c} className="chk">
+                <input type="checkbox" checked={to.includes(c)}
+                  onChange={(e) => setTo((cur2) => (e.target.checked ? [...cur2, c] : cur2.filter((x) => x !== c)))} />
+                <span className="swatch" style={{ background: PLAYER_FILL[c] }} /> {PLAYER_LABEL[c]}
+              </label>
+            ))}
+          </div>
+        )}
         <div className="modal-actions">
-          <button className="primary" disabled={(total(tradeGive) === 0 && total(tradeWant) === 0) || to.length === 0}
-            onClick={() => onPropose(to)}>Propor</button>
+          <button className="primary" disabled={(total(tradeGive) === 0 && total(tradeWant) === 0) || (!counter && to.length === 0)}
+            onClick={() => onPropose(to)}>{counter ? 'Enviar contraproposta' : 'Propor'}</button>
           <button onClick={onClose}>Cancelar (ESC)</button>
         </div>
       </div>
@@ -563,51 +588,60 @@ function TradeBuilderModal({
   );
 }
 
-function ActiveTradeModal({
+/** Painel de troca no canto do mapa (sem escurecer a tela). */
+function ActiveTradePopup({
   state,
   dispatch,
   localColor,
+  botOffer,
+  onCounter,
 }: {
   state: GameState;
   dispatch: (a: Action, by?: PlayerColor) => boolean;
   localColor: PlayerColor;
+  botOffer: boolean;
+  onCounter: () => void;
 }) {
   const t = state.activeTrade!;
   const fmt = (m: Partial<Record<Resource, number>>) =>
     (Object.entries(m) as [Resource, number][]).filter(([, n]) => n > 0).map(([r, n]) => `${n}${RESOURCE_ICON[r]}`).join(' ') || '—';
   const iAmProposer = t.from === localColor;
   const iAmRecipient = t.to.includes(localColor);
+  // Barra de tempo só na oferta de um bot para mim (janela de 10s).
+  const showTimer = botOffer && iAmRecipient;
   return (
-    <div className="overlay">
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>{PLAYER_LABEL[t.from]} quer trocar</h3>
-        <p className="trade-summary">Dá <b>{fmt(t.give)}</b> &nbsp;→&nbsp; quer <b>{fmt(t.want)}</b></p>
-        {iAmProposer ? (
-          <>
-            <div className="trade-responders">
-              {t.to.map((c) => {
-                const accepted = t.accepted.includes(c);
-                return (
-                  <div key={c} className="trade-row">
-                    <span><span className="swatch" style={{ background: PLAYER_FILL[c] }} /> {PLAYER_LABEL[c]} {accepted ? '✅ aceitou' : '⏳'}</span>
-                    <button className="primary" disabled={!accepted} onClick={() => dispatch({ t: 'confirmTrade', with: c }, t.from)}>Fechar</button>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="modal-actions">
-              <button onClick={() => dispatch({ t: 'cancelTrade' }, t.from)}>Cancelar proposta</button>
-            </div>
-          </>
-        ) : iAmRecipient ? (
-          <div className="modal-actions">
-            <button onClick={() => dispatch({ t: 'cancelTrade' }, t.from)}>✗ Recusar</button>
-            <button className="primary" onClick={() => dispatch({ t: 'respondTrade', accept: true }, localColor)}>✓ Aceitar</button>
+    <div className="trade-popup">
+      <h3>{PLAYER_LABEL[t.from]} quer trocar</h3>
+      <p className="trade-summary">Dá <b>{fmt(t.give)}</b> &nbsp;→&nbsp; quer <b>{fmt(t.want)}</b></p>
+      {showTimer && (
+        <div className="trade-timer"><span className="trade-timer-bar" /></div>
+      )}
+      {iAmProposer ? (
+        <>
+          <div className="trade-responders">
+            {t.to.map((c) => {
+              const accepted = t.accepted.includes(c);
+              return (
+                <div key={c} className="trade-row">
+                  <span><span className="swatch" style={{ background: PLAYER_FILL[c] }} /> {PLAYER_LABEL[c]} {accepted ? '✅' : '⏳'}</span>
+                  <button className="primary" disabled={!accepted} onClick={() => dispatch({ t: 'confirmTrade', with: c }, t.from)}>Fechar</button>
+                </div>
+              );
+            })}
           </div>
-        ) : (
-          <p className="muted-note">Aguardando resposta dos jogadores…</p>
-        )}
-      </div>
+          <div className="modal-actions">
+            <button onClick={() => dispatch({ t: 'cancelTrade' }, t.from)}>Cancelar</button>
+          </div>
+        </>
+      ) : iAmRecipient ? (
+        <div className="modal-actions wrap">
+          <button onClick={() => dispatch({ t: 'cancelTrade' }, t.from)}>✗ Recusar</button>
+          <button onClick={onCounter}>✎ Contraproposta</button>
+          <button className="primary" onClick={() => dispatch({ t: 'respondTrade', accept: true }, localColor)}>✓ Aceitar</button>
+        </div>
+      ) : (
+        <p className="muted-note">Aguardando resposta…</p>
+      )}
     </div>
   );
 }
@@ -706,6 +740,20 @@ function phaseLabel(state: GameState): string {
   }
 }
 
+function statusText(state: GameState, myTurn: boolean, botTurn: boolean, curName: string): string {
+  if (state.phase === 'ended') return `🏆 ${PLAYER_LABEL[state.winner!]} venceu! Clique em “Novo jogo”.`;
+  if (state.phase === 'discard') return `Rolou 7! Quem tem mais de ${state.discardLimit} cartas descarta metade.`;
+  if (botTurn) return `🤖 ${curName} está jogando…`;
+  if (!myTurn) return 'Aguardando…';
+  if (state.phase === 'moveBlocker') return 'Mova o bloqueador — clique em um hex.';
+  if (state.phase === 'setup1' || state.phase === 'setup2') {
+    return state.setupLastVertex ? 'Coloque sua estrada.' : 'Coloque sua vila.';
+  }
+  if (state.phase === 'roll') return 'Sua vez — role os dados!';
+  if (state.phase === 'main') return 'Sua vez — construa, comercie ou encerre.';
+  return '';
+}
+
 function soundForEvent(e: GameEvent): SoundKind | null {
   switch (e.t) {
     case 'diceRolled':
@@ -719,6 +767,8 @@ function soundForEvent(e: GameEvent): SoundKind | null {
       return 'robber';
     case 'bankTrade':
     case 'tradeExecuted':
+    case 'tradeProposed':
+    case 'tradeCountered':
       return 'trade';
     case 'longestRoad':
       return e.owner ? 'longestRoad' : null;
@@ -790,6 +840,8 @@ function describeEvent(e: GameEvent, state: GameState): string {
       return `${PLAYER_LABEL[e.owner]} trocou ${e.rate} ${RESOURCE_LABEL[e.give]} por 1 ${RESOURCE_LABEL[e.want]}`;
     case 'tradeProposed':
       return `🤝 ${PLAYER_LABEL[e.from]} propôs uma troca`;
+    case 'tradeCountered':
+      return `↩ ${PLAYER_LABEL[e.from]} fez uma contraproposta`;
     case 'tradeResponded':
       return `${PLAYER_LABEL[e.player]} ${e.accept ? 'aceitou' : 'recusou'} a troca`;
     case 'tradeExecuted':
