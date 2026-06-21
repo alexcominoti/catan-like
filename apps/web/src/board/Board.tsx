@@ -99,16 +99,23 @@ export function Board({ state, mode, onVertex, onEdge, onHex }: BoardProps) {
     return map;
   }, [board]);
 
-  const viewBox = useMemo(() => {
+  const hexPaths = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const hid of board.hexOrder) map[hid] = roundedPath(cornersOf[hid]!, 10);
+    return map;
+  }, [board, cornersOf]);
+
+  const frame = useMemo(() => {
     const xs = board.vertexOrder.map((v) => board.vertices[v]!.x);
     const ys = board.vertexOrder.map((v) => board.vertices[v]!.y);
-    const pad = 90;
+    const pad = 84;
     const minX = Math.min(...xs) - pad;
     const minY = Math.min(...ys) - pad;
     const w = Math.max(...xs) - minX + pad;
     const h = Math.max(...ys) - minY + pad;
-    return `${minX} ${minY} ${w} ${h}`;
+    return { viewBox: `${minX} ${minY} ${w} ${h}`, minX, minY, w, h };
   }, [board]);
+  const viewBox = frame.viewBox;
 
   return (
     <svg viewBox={viewBox} role="img" aria-label="Tabuleiro hexagonal">
@@ -136,18 +143,37 @@ export function Board({ state, mode, onVertex, onEdge, onHex }: BoardProps) {
         <filter id="softShadow" x="-50%" y="-50%" width="200%" height="200%">
           <feDropShadow dx="0" dy="1.5" stdDeviation="1.4" floodColor="#000000" floodOpacity="0.55" />
         </filter>
+        {/* Grao fino para textura dos terrenos */}
+        <filter id="grain">
+          <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch" result="n" />
+          <feColorMatrix in="n" type="saturate" values="0" />
+        </filter>
+        {/* Manchas maiores (variacao organica) */}
+        <filter id="mottle">
+          <feTurbulence type="fractalNoise" baseFrequency="0.045" numOctaves="3" stitchTiles="stitch" result="n" />
+          <feColorMatrix in="n" type="saturate" values="0" />
+        </filter>
+        <clipPath id="hexClip">
+          {board.hexOrder.map((hid) => (
+            <path key={hid} d={hexPaths[hid]} />
+          ))}
+        </clipPath>
       </defs>
 
-      {/* Agua (halo desfocado) */}
-      <g filter="url(#waterBlur)">
+      {/* Agua: halo amplo + orla mais brilhante */}
+      <g filter="url(#waterBlur)" opacity={0.55}>
         {board.hexOrder.map((hid) => {
           const h = board.hexes[hid]!;
-          return (
-            <path key={hid} d={roundedPath(scaled(cornersOf[hid]!, h.cx, h.cy, 1.5), 18)} fill="#57c1ef" opacity={0.85} />
-          );
+          return <path key={hid} d={roundedPath(scaled(cornersOf[hid]!, h.cx, h.cy, 1.62), 20)} fill="#3aa9e6" />;
         })}
       </g>
-      {/* Litoral (areia) */}
+      <g filter="url(#waterBlur)" opacity={0.9}>
+        {board.hexOrder.map((hid) => {
+          const h = board.hexes[hid]!;
+          return <path key={hid} d={roundedPath(scaled(cornersOf[hid]!, h.cx, h.cy, 1.32), 20)} fill="#6fd0f5" />;
+        })}
+      </g>
+      {/* Litoral (areia) com leve mottle */}
       <g>
         {board.hexOrder.map((hid) => {
           const h = board.hexes[hid]!;
@@ -172,12 +198,10 @@ export function Board({ state, mode, onVertex, onEdge, onHex }: BoardProps) {
         );
       })}
 
-      {/* Hexes */}
+      {/* Hexes: fundo, motivo, luz/sombra e borda */}
       {board.hexOrder.map((hid) => {
         const hex = board.hexes[hid]!;
-        const pts = cornersOf[hid]!;
-        const path = roundedPath(pts, 10);
-        const isBlocked = blocker.hexId === hid;
+        const path = hexPaths[hid]!;
         return (
           <g key={hid}>
             <path d={path} fill={TERRAIN_FILL[hex.terrain]} />
@@ -187,14 +211,29 @@ export function Board({ state, mode, onVertex, onEdge, onHex }: BoardProps) {
             <path
               d={path}
               fill="transparent"
-              stroke={hexMode ? '#ffe08a' : 'rgba(0,0,0,0.35)'}
+              stroke={hexMode ? '#ffe08a' : 'rgba(0,0,0,0.38)'}
               strokeWidth={hexMode ? 4 : 2}
               strokeLinejoin="round"
               style={{ cursor: hexMode ? 'pointer' : 'default' }}
               onClick={() => hexMode && onHex(hid)}
             />
+          </g>
+        );
+      })}
+
+      {/* Textura: grao + manchas, recortados na silhueta dos hexes */}
+      <g clipPath="url(#hexClip)" pointerEvents="none">
+        <rect x={frame.minX} y={frame.minY} width={frame.w} height={frame.h} filter="url(#mottle)" opacity={0.1} style={{ mixBlendMode: 'overlay' }} />
+        <rect x={frame.minX} y={frame.minY} width={frame.w} height={frame.h} filter="url(#grain)" opacity={0.12} style={{ mixBlendMode: 'soft-light' }} />
+      </g>
+
+      {/* Tokens e bloqueador (nitidos, acima da textura) */}
+      {board.hexOrder.map((hid) => {
+        const hex = board.hexes[hid]!;
+        return (
+          <g key={hid} pointerEvents="none">
             {hex.number !== null && <NumberToken cx={hex.cx} cy={hex.cy + 6} n={hex.number} />}
-            {isBlocked && <Blocker cx={hex.cx} cy={hex.cy - 26} />}
+            {blocker.hexId === hid && <Blocker cx={hex.cx} cy={hex.cy - 26} />}
           </g>
         );
       })}
@@ -293,62 +332,71 @@ function Blocker({ cx, cy }: { cx: number; cy: number }) {
   );
 }
 
-/** Motivos vetoriais por terreno (sutis, atras do token). */
+/** Motivos vetoriais por terreno (maiores, atras do token). */
 function TerrainMotif({ terrain, cx, cy }: { terrain: Terrain; cx: number; cy: number }) {
-  const y = cy - 20;
+  const y = cy - 14;
   switch (terrain) {
     case 'forest':
       return (
-        <g pointerEvents="none" opacity={0.8}>
-          <Tree x={cx - 13} y={y + 2} s={1} />
-          <Tree x={cx + 12} y={y + 4} s={0.85} />
-          <Tree x={cx} y={y - 4} s={1.15} />
+        <g pointerEvents="none" opacity={0.95}>
+          <Tree x={cx - 24} y={y + 6} s={1.05} />
+          <Tree x={cx + 24} y={y + 8} s={0.95} />
+          <Tree x={cx - 9} y={y - 6} s={1.35} />
+          <Tree x={cx + 12} y={y - 4} s={1.2} />
         </g>
       );
     case 'pasture':
       return (
         <g pointerEvents="none">
-          <Sheep x={cx} y={y} />
-          <Tuft x={cx - 16} y={y + 10} c="#6fa235" />
-          <Tuft x={cx + 16} y={y + 8} c="#6fa235" />
+          <Sheep x={cx - 11} y={y - 2} s={1.05} />
+          <Sheep x={cx + 13} y={y + 5} s={0.85} />
+          <Tuft x={cx - 24} y={y + 12} c="#6fa235" />
+          <Tuft x={cx + 25} y={y + 10} c="#6fa235" />
+          <Tuft x={cx + 2} y={y + 14} c="#6fa235" />
         </g>
       );
     case 'field':
       return (
-        <g pointerEvents="none" opacity={0.85} stroke="#b9851a" strokeWidth={1.6} strokeLinecap="round">
-          {[-12, -4, 4, 12].map((dx) => (
+        <g pointerEvents="none" opacity={0.92} stroke="#b9851a" strokeWidth={2} strokeLinecap="round">
+          {[-22, -13, -4, 5, 14, 23].map((dx) => (
             <g key={dx}>
-              <line x1={cx + dx} y1={y + 10} x2={cx + dx} y2={y - 8} />
-              <line x1={cx + dx} y1={y - 6} x2={cx + dx - 3} y2={y - 9} />
-              <line x1={cx + dx} y1={y - 6} x2={cx + dx + 3} y2={y - 9} />
-              <line x1={cx + dx} y1={y - 1} x2={cx + dx - 3} y2={y - 4} />
-              <line x1={cx + dx} y1={y - 1} x2={cx + dx + 3} y2={y - 4} />
+              <line x1={cx + dx} y1={y + 14} x2={cx + dx} y2={y - 12} />
+              <line x1={cx + dx} y1={y - 9} x2={cx + dx - 4} y2={y - 13} />
+              <line x1={cx + dx} y1={y - 9} x2={cx + dx + 4} y2={y - 13} />
+              <line x1={cx + dx} y1={y - 3} x2={cx + dx - 4} y2={y - 7} />
+              <line x1={cx + dx} y1={y - 3} x2={cx + dx + 4} y2={y - 7} />
+              <line x1={cx + dx} y1={y + 3} x2={cx + dx - 4} y2={y - 1} />
+              <line x1={cx + dx} y1={y + 3} x2={cx + dx + 4} y2={y - 1} />
             </g>
           ))}
         </g>
       );
     case 'hills':
       return (
-        <g pointerEvents="none" opacity={0.85}>
+        <g pointerEvents="none" opacity={0.92}>
           {[
-            [cx - 9, y - 2], [cx + 1, y - 2], [cx - 4, y + 5], [cx + 6, y + 5],
+            [cx - 16, y - 6], [cx - 4, y - 6], [cx + 8, y - 6],
+            [cx - 10, y + 2], [cx + 2, y + 2],
+            [cx - 16, y + 10], [cx - 4, y + 10], [cx + 8, y + 10],
           ].map(([bx, by], i) => (
-            <rect key={i} x={bx} y={by} width={9} height={5} rx={1} fill="#9c4521" stroke="#7c3417" strokeWidth={0.7} />
+            <rect key={i} x={bx} y={by} width={11} height={6} rx={1.2} fill="#d8763f" stroke="#7c3417" strokeWidth={1.1} />
           ))}
         </g>
       );
     case 'mountain':
       return (
-        <g pointerEvents="none" opacity={0.9}>
-          <polygon points={`${cx - 14},${y + 8} ${cx - 4},${y - 8} ${cx + 6},${y + 8}`} fill="#6b7480" stroke="#525a64" strokeWidth={0.8} />
-          <polygon points={`${cx - 2},${y + 8} ${cx + 8},${y - 4} ${cx + 16},${y + 8}`} fill="#7c8593" stroke="#525a64" strokeWidth={0.8} />
+        <g pointerEvents="none" opacity={0.95}>
+          <polygon points={`${cx - 24},${y + 12} ${cx - 8},${y - 12} ${cx + 8},${y + 12}`} fill="#6b7480" stroke="#4c545e" strokeWidth={1} />
+          <polygon points={`${cx - 2},${y + 12} ${cx + 12},${y - 6} ${cx + 26},${y + 12}`} fill="#7c8593" stroke="#4c545e" strokeWidth={1} />
+          <polygon points={`${cx - 8},${y - 12} ${cx - 3},${y - 5} ${cx - 13},${y - 5}`} fill="#eef1f4" opacity={0.85} />
+          <polygon points={`${cx + 12},${y - 6} ${cx + 16},${y} ${cx + 8},${y}`} fill="#eef1f4" opacity={0.7} />
         </g>
       );
     case 'desert':
       return (
         <g pointerEvents="none">
-          <path d={`M ${cx} ${y + 10} L ${cx} ${y - 8} M ${cx} ${y - 2} L ${cx - 6} ${y - 6} M ${cx} ${y + 2} L ${cx + 6} ${y - 4}`}
-            stroke="#5b8f4a" strokeWidth={3.4} strokeLinecap="round" fill="none" />
+          <path d={`M ${cx} ${y + 16} L ${cx} ${y - 12} M ${cx} ${y - 4} L ${cx - 9} ${y - 9} L ${cx - 9} ${y - 16} M ${cx} ${y + 1} L ${cx + 9} ${y - 4} L ${cx + 9} ${y - 11}`}
+            stroke="#5b8f4a" strokeWidth={4.5} strokeLinecap="round" strokeLinejoin="round" fill="none" />
         </g>
       );
     default:
@@ -359,27 +407,27 @@ function TerrainMotif({ terrain, cx, cy }: { terrain: Terrain; cx: number; cy: n
 function Tree({ x, y, s }: { x: number; y: number; s: number }) {
   return (
     <g transform={`translate(${x} ${y}) scale(${s})`}>
-      <rect x={-1.4} y={4} width={2.8} height={5} fill="#5b3a1e" />
-      <polygon points="0,-9 6,2 -6,2" fill="#1f6336" />
-      <polygon points="0,-4 5,5 -5,5" fill="#256e3c" />
+      <rect x={-1.8} y={5} width={3.6} height={6} fill="#5b3a1e" />
+      <polygon points="0,-12 8,4 -8,4" fill="#1f6336" />
+      <polygon points="0,-6 7,8 -7,8" fill="#2a7a44" />
     </g>
   );
 }
 
-function Sheep({ x, y }: { x: number; y: number }) {
+function Sheep({ x, y, s }: { x: number; y: number; s: number }) {
   return (
-    <g>
-      <ellipse cx={x} cy={y} rx={9} ry={6.5} fill="#f2f2ee" stroke="#cfcfc8" strokeWidth={0.8} />
-      <circle cx={x + 7} cy={y - 2} r={3.2} fill="#4a4a4a" />
-      <rect x={x + 4} y={y + 4} width={1.6} height={3} fill="#4a4a4a" />
-      <rect x={x + 9} y={y + 4} width={1.6} height={3} fill="#4a4a4a" />
+    <g transform={`translate(${x} ${y}) scale(${s})`}>
+      <ellipse cx={0} cy={0} rx={11} ry={8} fill="#f4f4f0" stroke="#cbcbc3" strokeWidth={0.9} />
+      <circle cx={8} cy={-2} r={4} fill="#454545" />
+      <rect x={4} y={6} width={1.8} height={3.5} fill="#454545" />
+      <rect x={10} y={6} width={1.8} height={3.5} fill="#454545" />
     </g>
   );
 }
 
 function Tuft({ x, y, c }: { x: number; y: number; c: string }) {
   return (
-    <path d={`M ${x} ${y} l -2 -5 M ${x} ${y} l 0 -6 M ${x} ${y} l 2 -5`} stroke={c} strokeWidth={1.6} strokeLinecap="round" fill="none" />
+    <path d={`M ${x} ${y} l -2.5 -6 M ${x} ${y} l 0 -7 M ${x} ${y} l 2.5 -6`} stroke={c} strokeWidth={1.8} strokeLinecap="round" fill="none" />
   );
 }
 
