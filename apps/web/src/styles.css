@@ -1280,20 +1280,26 @@ button.link {
 .match-timer { font-size: 12px; color: var(--muted); background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; }
 
 .noble {
-  display: grid; grid-template-columns: auto auto 1fr; gap: 10px; align-items: center;
-  padding: 10px; border: 1px solid var(--border); border-radius: 12px;
+  display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start;
+  padding: 11px; border: 1px solid var(--border); border-radius: 12px;
   background: var(--panel-2); margin-bottom: 8px;
 }
 .noble.active { border-color: var(--accent); background: linear-gradient(90deg, rgba(192, 86, 58, 0.12), transparent); box-shadow: 0 0 0 1px rgba(192, 86, 58, 0.25); }
-.noble-crest { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; font-size: 18px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12); }
+.noble-left { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.noble-crest { width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; font-size: 18px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12); }
 .noble-pts { text-align: center; line-height: 1; }
-.noble-pts b { display: block; font-family: var(--serif); font-size: 22px; color: var(--accent); }
+.noble-pts b { display: block; font-family: var(--serif); font-size: 24px; color: var(--accent); }
 .noble-pts span { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
 .noble-main { min-width: 0; }
-.noble-name { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; }
+.noble-name { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+.noble-nick { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .you-tag { background: var(--text); color: var(--bg); font-size: 9px; text-transform: uppercase; border-radius: 4px; padding: 1px 5px; }
-.noble-stats { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 4px; font-size: 11px; color: var(--muted); }
-.noble-stats .hl { color: var(--accent); font-weight: 700; }
+.bot-tag { background: var(--panel); border: 1px solid var(--border); color: var(--muted); font-size: 9px; text-transform: uppercase; border-radius: 4px; padding: 1px 5px; }
+.noble-stats { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.nstat { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--muted); background: var(--panel); border-radius: 6px; padding: 2px 6px; }
+.nstat.hl { background: rgba(192, 86, 58, 0.15); color: var(--accent); font-weight: 600; }
+.noble-badges { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.title-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 600; color: #fff; background: linear-gradient(90deg, var(--accent), var(--accent-dark)); border-radius: 6px; padding: 2px 7px; }
 
 .title-cards { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
 .title-card { display: flex; gap: 8px; padding: 10px; border-radius: 12px; border: 1px dashed var(--border); background: rgba(225, 178, 114, 0.12); font-size: 12px; }
@@ -1345,3 +1351,27 @@ button.link {
 .chat-row input { flex: 1; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); font-size: 13px; }
 .chat-row button { background: var(--accent); color: #fff; border: none; border-radius: 9px; padding: 0 14px; cursor: pointer; }
 
+
+/* Alinhamento dos icones lucide (SVG) */
+.game svg, .site svg { flex: 0 0 auto; }
+.hbtn, .roll-btn, .cta, .ghost, .dark, .chat-row button { display: inline-flex; align-items: center; gap: 6px; }
+.hbtn.icon-only { padding: 8px; }
+.nobres-head h2, .pergaminho h2, .card h2 { display: flex; align-items: center; gap: 7px; }
+.turn-chip, .match-timer { display: inline-flex; align-items: center; gap: 5px; }
+.ic-primary { color: var(--accent); }
+.tc-icon { display: inline-flex; margin-top: 1px; }
+.tc-pv { display: inline-flex; align-items: center; gap: 2px; }
+.site-nav button, .brand { display: inline-flex; align-items: center; gap: 8px; }
+
+/* Cartas um pouco maiores (mais proximas do mockup) */
+.card-pile-inner { height: 92px; }
+.play-img { width: 64px; height: 92px; }
+.hand-divider { height: 80px; }
+
+/* Alinhamento de icones nas paginas do site */
+.hero-stats span, .badge-pill, .foot-brand, .stat-eyebrow, .room-name b { display: inline-flex; align-items: center; gap: 6px; }
+.feature-icon svg, .quick-icon svg { display: block; }
+.room-online { color: var(--good); }
+.search-box { flex: 1; display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; background: #fff; color: var(--muted); }
+.search-box input { flex: 1; border: none; background: none; padding: 11px 0; outline: none; }
+.ach svg { margin-bottom: 2px; }

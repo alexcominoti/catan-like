@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   createInitialState,
   reduce,
@@ -15,6 +15,11 @@ import {
   type ProgressCard,
   type Resource,
 } from '@hexgame/engine';
+import {
+  Hexagon, Crown, Clock, Layers, Sparkles, Scroll, Swords, Trophy,
+  Dices, ArrowLeftRight, Hand, MessageSquare, Send, Landmark,
+  Volume2, VolumeX, HelpCircle, LogOut,
+} from 'lucide-react';
 import { planBotAction, resolveBotProposal } from '@hexgame/bot';
 import { Board, type InteractionMode } from './board/Board.js';
 import { Dice } from './ui/Dice.js';
@@ -283,12 +288,12 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   return (
     <div className="game site bg-paper" style={{ ['--turn-color' as string]: playerColor }}>
       <header className="game-header">
-        <span className="brand"><span className="brand-mark">⬡</span> Hexkeep</span>
-        <span className="turn-chip">⌛ Turno {turnCount}</span>
+        <span className="brand"><span className="brand-mark"><Hexagon size={18} strokeWidth={2.5} /></span> Hexkeep</span>
+        <span className="turn-chip"><Clock size={13} /> Turno {turnCount}</span>
         <div className="game-header-actions">
-          <button className="hbtn" title={muted ? 'Som desligado' : 'Som ligado'} onClick={() => { const m = !muted; setMutedState(m); setMuted(m); }}>{muted ? '🔇' : '🔊'}</button>
-          <button className="hbtn" onClick={() => setHelp(true)}>❔ Ajuda</button>
-          <button className="ghost" onClick={onExit}>Sair</button>
+          <button className="hbtn icon-only" title={muted ? 'Som desligado' : 'Som ligado'} onClick={() => { const m = !muted; setMutedState(m); setMuted(m); }}>{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button>
+          <button className="hbtn" onClick={() => setHelp(true)}><HelpCircle size={15} /> Ajuda</button>
+          <button className="ghost" onClick={onExit}><LogOut size={15} /> Sair</button>
         </div>
       </header>
 
@@ -296,8 +301,8 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
         {/* ESQUERDA — Nobres */}
         <aside className="nobres">
           <div className="nobres-head">
-            <h2>👑 Nobres</h2>
-            <span className="match-timer">🕐 {fmtTime(elapsed)}</span>
+            <h2><Crown size={18} className="ic-primary" /> Nobres</h2>
+            <span className="match-timer"><Clock size={13} /> {fmtTime(elapsed)}</span>
           </div>
           {state.players.map((p) => {
             const hasRoad = state.longestRoad.owner === p.color;
@@ -305,32 +310,38 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
             return (
               <div key={p.color} className={`noble${p.color === state.currentPlayer ? ' active' : ''}`}
                 style={{ ['--pc' as string]: PLAYER_FILL[p.color] }}>
-                <div className="noble-crest" style={{ background: PLAYER_FILL[p.color] }}>{CREST[p.color]}</div>
-                <div className="noble-pts">
-                  <b>{publicScoreOf(state, p.color)}</b><span>pts</span>
+                <div className="noble-left">
+                  <span className="noble-crest" style={{ background: PLAYER_FILL[p.color] }}>{CREST[p.color]}</span>
+                  <div className="noble-pts"><b>{publicScoreOf(state, p.color)}</b><span>pts</span></div>
                 </div>
                 <div className="noble-main">
                   <div className="noble-name">
-                    {p.name}
+                    <span className="noble-nick">{p.name}</span>
                     {p.color === localColor && <span className="you-tag">você</span>}
-                    {isBot(p.color) && <span title="Bot"> 🤖</span>}
+                    {isBot(p.color) && <span className="bot-tag">bot</span>}
                   </div>
                   <div className="noble-stats">
-                    <span title="Recursos">📦 {handTotal(p)}</span>
-                    <span title="Desenvolvimento">✦ {p.progressCards.length}</span>
-                    <span className={hasRoad ? 'hl' : ''} title="Estradas">📜 {longestRoadLength(state, p.color)}</span>
-                    <span className={hasArmy ? 'hl' : ''} title="Cavaleiros">⚔️ {p.knightsPlayed}</span>
+                    <Stat icon={<Layers size={12} />} label={`${handTotal(p)} recursos`} />
+                    <Stat icon={<Sparkles size={12} />} label={`${p.progressCards.length} desenv.`} />
+                    <Stat icon={<Scroll size={12} />} label={`${longestRoadLength(state, p.color)} estradas`} hl={hasRoad} />
+                    <Stat icon={<Swords size={12} />} label={`${p.knightsPlayed} cav.`} hl={hasArmy} />
                   </div>
+                  {(hasRoad || hasArmy) && (
+                    <div className="noble-badges">
+                      {hasRoad && <TitleBadge icon={<Scroll size={11} />} label="Maior Estrada" />}
+                      {hasArmy && <TitleBadge icon={<Swords size={11} />} label="Maior Exército" />}
+                    </div>
+                  )}
                 </div>
               </div>
             );
           })}
 
           <div className="title-cards">
-            <TitleCard icon="📜" title="Maior Estrada"
+            <TitleCard icon={<Scroll size={15} className="ic-primary" />} title="Maior Estrada"
               owner={state.longestRoad.owner ? `${PLAYER_LABEL[state.longestRoad.owner]} · ${state.longestRoad.length} segmentos` : '— ainda em disputa'}
               earned={!!state.longestRoad.owner} hint="5+ estradas conectadas = +2 PV" />
-            <TitleCard icon="⚔️" title="Maior Exército"
+            <TitleCard icon={<Swords size={15} className="ic-primary" />} title="Maior Exército"
               owner={state.largestArmy.owner ? `${PLAYER_LABEL[state.largestArmy.owner]} · ${state.largestArmy.size} cavaleiros` : '— ainda em disputa'}
               earned={!!state.largestArmy.owner} hint="3+ cavaleiros jogados = +2 PV" />
           </div>
@@ -343,7 +354,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
               <p className="eyebrow-turn">{myTurn ? 'Sua vez, nobre' : botTurn ? `Vez de ${cur.name}` : 'Aguardando'}</p>
               <h2>{headline(state, myTurn, botTurn, cur.name)}</h2>
             </div>
-            <button className={`roll-btn${myRoll ? ' pulse' : ''}`} disabled={!myRoll} onClick={() => dispatch({ t: 'rollDice' })}>🎲 Rolar dados</button>
+            <button className={`roll-btn${myRoll ? ' pulse' : ''}`} disabled={!myRoll} onClick={() => dispatch({ t: 'rollDice' })}><Dices size={16} /> Rolar dados</button>
           </div>
 
           <div className="board-wrap" style={{ borderColor: playerColor }}>
@@ -386,8 +397,8 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
                   </select>
                   <button disabled={!myMain || localPlayer.hand[give] < bestRate} onClick={() => dispatch({ t: 'tradeBank', give, want })}>{bestRate}:1</button>
                 </span>
-                <button className="hbtn" disabled={!myMain} onClick={() => setArming('trade')}>🤝 Trocar</button>
-                <button className="hbtn primary-soft" disabled={!myMain} onClick={() => dispatch({ t: 'endTurn' })}>Passar</button>
+                <button className="hbtn" disabled={!myMain} onClick={() => setArming('trade')}><ArrowLeftRight size={14} /> Trocar</button>
+                <button className="hbtn primary-soft" disabled={!myMain} onClick={() => dispatch({ t: 'endTurn' })}><Hand size={14} /> Passar</button>
               </div>
             </div>
             {error && <div className="error">⚠ {error}</div>}
@@ -398,17 +409,17 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
         {/* DIREITA — Pergaminho + Banco */}
         <aside className="pergaminho">
           <div className="card scroll-card">
-            <h2>📜 Pergaminho</h2>
+            <h2><MessageSquare size={16} className="ic-primary" /> Pergaminho</h2>
             <div className="log">{log.map((line, i) => <div key={i}>{line}</div>)}</div>
             <div className="chat-row">
               <input value={chatInput} placeholder="Mensagem ou /comando"
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') sendChat(); }} />
-              <button onClick={sendChat}>↵</button>
+              <button onClick={sendChat} aria-label="Enviar"><Send size={15} /></button>
             </div>
           </div>
           <div className="card">
-            <h2>🏛️ Banco</h2>
+            <h2><Landmark size={16} className="ic-primary" /> Banco</h2>
             <div className="hand">
               {RESOURCES.map((r) => (
                 <span key={r} className="res-chip">{RESOURCE_ICON[r]} {state.bank[r]}</span>
@@ -791,20 +802,28 @@ function headline(state: GameState, myTurn: boolean, botTurn: boolean, curName: 
   return '';
 }
 
-function TitleCard({ icon, title, owner, earned, hint }: { icon: string; title: string; owner: string; earned: boolean; hint: string }) {
+function TitleCard({ icon, title, owner, earned, hint }: { icon: ReactNode; title: string; owner: string; earned: boolean; hint: string }) {
   return (
     <div className={`title-card${earned ? ' earned' : ''}`}>
       <span className="tc-icon">{icon}</span>
       <div className="tc-body">
         <div className="tc-head">
           <b>{title}</b>
-          {earned && <span className="tc-pv">+2 PV</span>}
+          {earned && <span className="tc-pv"><Trophy size={10} /> +2 PV</span>}
         </div>
         <div className="tc-owner">{owner}</div>
         <div className="tc-hint">{hint}</div>
       </div>
     </div>
   );
+}
+
+function Stat({ icon, label, hl }: { icon: ReactNode; label: string; hl?: boolean }) {
+  return <span className={`nstat${hl ? ' hl' : ''}`}>{icon} {label}</span>;
+}
+
+function TitleBadge({ icon, label }: { icon: ReactNode; label: string }) {
+  return <span className="title-badge">{icon} {label} <Trophy size={10} /> +2</span>;
 }
 
 function soundForEvent(e: GameEvent): SoundKind | null {

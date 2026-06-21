@@ -1,3 +1,6 @@
+import type { ReactNode } from 'react';
+import { Zap, Users, Trophy, Hexagon, ShieldCheck, Sparkles, Map } from 'lucide-react';
+
 const RESOURCE_PILLS: { label: string; color: string }[] = [
   { label: 'Tijolo', color: '#c0563a' },
   { label: 'Madeira', color: '#6e4a2f' },
@@ -6,13 +9,13 @@ const RESOURCE_PILLS: { label: string; color: string }[] = [
   { label: 'Pedra', color: '#6b7480' },
 ];
 
-const FEATURES: { icon: string; title: string; text: string }[] = [
-  { icon: '⚡', title: 'Partidas rápidas', text: 'Encontre um jogo em segundos com matchmaking por elo.' },
-  { icon: '👥', title: 'Salões privados', text: 'Convide amigos por link, defina regras, expansões e bots.' },
-  { icon: '🏆', title: 'Ranqueadas', text: 'Suba do Colono a Grão-Mestre em temporadas mensais.' },
-  { icon: '⬡', title: 'Mapas customizados', text: 'Beira-mar, Cavaleiros, Cidades & Cavalaria e mais.' },
-  { icon: '🛡️', title: 'Jogo justo', text: 'Detecção anti-conluio e relógio de turno configurável.' },
-  { icon: '✦', title: 'Replays', text: 'Revise cada lance, cada troca, cada cartão de progresso.' },
+const FEATURES: { icon: ReactNode; title: string; text: string }[] = [
+  { icon: <Zap size={20} />, title: 'Partidas rápidas', text: 'Encontre um jogo em segundos com matchmaking por elo.' },
+  { icon: <Users size={20} />, title: 'Salões privados', text: 'Convide amigos por link, defina regras, expansões e bots.' },
+  { icon: <Trophy size={20} />, title: 'Ranqueadas', text: 'Suba do Colono a Grão-Mestre em temporadas mensais.' },
+  { icon: <Map size={20} />, title: 'Mapas customizados', text: 'Beira-mar, Cavaleiros, Cidades & Cavalaria e mais.' },
+  { icon: <ShieldCheck size={20} />, title: 'Jogo justo', text: 'Detecção anti-conluio e relógio de turno configurável.' },
+  { icon: <Sparkles size={20} />, title: 'Replays', text: 'Revise cada lance, cada troca, cada cartão de progresso.' },
 ];
 
 const HEX = [
@@ -30,7 +33,7 @@ export function Landing({ onPlay, onWatch }: { onPlay: () => void; onWatch: () =
     <div className="landing">
       <section className="hero">
         <div className="hero-copy">
-          <span className="badge-pill">✦ BETA ABERTA · GRÁTIS PARA JOGAR</span>
+          <span className="badge-pill"><Sparkles size={13} /> BETA ABERTA · GRÁTIS PARA JOGAR</span>
           <h1>Construa, troque e <span className="accent-text">conquiste</span> a ilha.</h1>
           <p>
             Hexkeep é o jeito mais rápido de jogar colonização hexagonal com amigos. Sem download,
@@ -41,23 +44,18 @@ export function Landing({ onPlay, onWatch }: { onPlay: () => void; onWatch: () =
             <button className="ghost big" onClick={onWatch}>Ver uma partida</button>
           </div>
           <div className="hero-stats">
-            <span>👥 12,4k jogadores online</span>
-            <span>✓ Anticheat ativo</span>
-            <span>⚡ Servidor BR</span>
+            <span><Users size={15} /> 12,4k jogadores online</span>
+            <span><ShieldCheck size={15} /> Anticheat ativo</span>
+            <span><Zap size={15} /> Servidor BR</span>
           </div>
         </div>
         <div className="hero-art">
           <svg viewBox="0 0 300 200" width="100%" aria-hidden="true">
             {HEX.map((h, i) => (
               <g key={i}>
-                <polygon
-                  points={hexPts(h.x, h.y, 30)}
-                  fill={h.c}
-                  stroke="rgba(0,0,0,0.15)"
-                  strokeWidth={1.5}
-                />
+                <polygon points={hexPts(h.x, h.y, 30)} fill={h.c} stroke="rgba(0,0,0,0.15)" strokeWidth={1.5} />
                 {h.label && (
-                  <text x={h.x} y={h.y + 4} textAnchor="middle" fontSize={11} fontWeight={700} fill="#2f2a26" fontFamily="Fraunces, serif">
+                  <text x={h.x} y={h.y + 4} textAnchor="middle" fontSize={11} fontWeight={700} fill="#2f2a26" fontFamily="DM Serif Display, serif">
                     {h.label}
                   </text>
                 )}
@@ -91,7 +89,7 @@ export function Landing({ onPlay, onWatch }: { onPlay: () => void; onWatch: () =
       </section>
 
       <footer className="site-footer">
-        <span>⬡ Hexkeep © 2026</span>
+        <span className="foot-brand"><Hexagon size={15} /> Hexkeep © 2026</span>
         <span className="foot-links"><a>Regras</a> <a>Discord</a> <a>Contato</a></span>
       </footer>
     </div>

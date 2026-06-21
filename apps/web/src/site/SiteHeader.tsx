@@ -1,10 +1,12 @@
+import { Hexagon } from 'lucide-react';
+
 export type Page = 'landing' | 'lobby' | 'setup' | 'game' | 'profile';
 
 export function SiteHeader({ page, onNav }: { page: Page; onNav: (p: Page) => void }) {
   return (
     <header className="site-header">
       <button className="brand" onClick={() => onNav('landing')}>
-        <span className="brand-mark">⬡</span> Hexkeep
+        <span className="brand-mark"><Hexagon size={18} strokeWidth={2.5} /></span> Hexkeep
       </button>
       <nav className="site-nav">
         <button className={page === 'lobby' ? 'on' : ''} onClick={() => onNav('lobby')}>Lobby</button>

@@ -1,3 +1,5 @@
+import { Zap, Users, Lock, Search, Filter, Plus, Globe } from 'lucide-react';
+
 interface Room {
   name: string;
   host: string;
@@ -18,11 +20,7 @@ const ROOMS: Room[] = [
   { name: 'Rush Madeira', host: 'ana_p', map: 'Base', mode: 'Velocidade', cur: 2, max: 4, ping: 19 },
 ];
 
-const MODE_CLASS: Record<Room['mode'], string> = {
-  Casual: 'casual',
-  Ranqueada: 'ranked',
-  Velocidade: 'speed',
-};
+const MODE_CLASS: Record<Room['mode'], string> = { Casual: 'casual', Ranqueada: 'ranked', Velocidade: 'speed' };
 
 export function RoomBrowser({ onPlay }: { onPlay: () => void }) {
   return (
@@ -32,24 +30,24 @@ export function RoomBrowser({ onPlay }: { onPlay: () => void }) {
           <span className="eyebrow">LOBBY</span>
           <h1>Escolha uma mesa.</h1>
         </div>
-        <button className="cta" onClick={onPlay}>+ Criar salão</button>
+        <button className="cta" onClick={onPlay}><Plus size={16} /> Criar salão</button>
       </div>
 
       <div className="quick-cards">
         <div className="quick-card">
-          <span className="quick-icon">⚡</span>
+          <span className="quick-icon"><Zap size={18} /></span>
           <h3>Jogo rápido</h3>
           <p>Entramos em qualquer mesa casual aberta.</p>
           <button className="dark" onClick={onPlay}>Jogar</button>
         </div>
         <div className="quick-card green">
-          <span className="quick-icon">👥</span>
+          <span className="quick-icon"><Users size={18} /></span>
           <h3>Ranqueada</h3>
           <p>Suba sua pontuação na temporada de junho.</p>
           <button className="dark" onClick={onPlay}>Encontrar partida</button>
         </div>
         <div className="quick-card">
-          <span className="quick-icon">🔒</span>
+          <span className="quick-icon"><Lock size={18} /></span>
           <h3>Partida privada</h3>
           <p>Crie um link e chame quem você quiser.</p>
           <button className="dark" onClick={onPlay}>Gerar link</button>
@@ -57,9 +55,12 @@ export function RoomBrowser({ onPlay }: { onPlay: () => void }) {
       </div>
 
       <div className="room-toolbar">
-        <input placeholder="🔎  Buscar por nome do salão ou host…" />
-        <button className="ghost">▽ Mapa</button>
-        <button className="ghost">▽ Modo</button>
+        <span className="search-box">
+          <Search size={16} />
+          <input placeholder="Buscar por nome do salão ou host…" />
+        </span>
+        <button className="ghost"><Filter size={14} /> Mapa</button>
+        <button className="ghost"><Filter size={14} /> Modo</button>
       </div>
 
       <div className="room-table">
@@ -69,15 +70,13 @@ export function RoomBrowser({ onPlay }: { onPlay: () => void }) {
         {ROOMS.map((r) => (
           <div key={r.name} className="room-row">
             <span className="room-name">
-              <b>{r.locked ? '🔒 ' : '🟢 '}{r.name}</b>
+              <b>{r.locked ? <Lock size={13} /> : <Globe size={13} className="room-online" />} {r.name}</b>
               <small>por @{r.host}</small>
             </span>
             <span>{r.map}</span>
             <span><span className={`mode ${MODE_CLASS[r.mode]}`}>{r.mode}</span></span>
             <span className="seats">
-              {Array.from({ length: r.max }, (_, i) => (
-                <i key={i} className={i < r.cur ? 'on' : ''} />
-              ))}
+              {Array.from({ length: r.max }, (_, i) => <i key={i} className={i < r.cur ? 'on' : ''} />)}
               <small> {r.cur}/{r.max}</small>
             </span>
             <span className="ping">{r.ping}ms</span>

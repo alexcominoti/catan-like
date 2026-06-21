@@ -1,8 +1,11 @@
-const STATS = [
-  { icon: '🏆', label: 'ELO', value: '1.842', sub: '+24' },
-  { icon: '◎', label: 'PARTIDAS', value: '217', sub: '+3 hoje' },
-  { icon: '📈', label: 'VITÓRIAS', value: '58%', sub: '125V / 92D' },
-  { icon: '🔥', label: 'SEQUÊNCIA', value: '3', sub: 'vitórias' },
+import type { ReactNode } from 'react';
+import { Trophy, CircleDot, TrendingUp, Flame, Award, Settings } from 'lucide-react';
+
+const STATS: { icon: ReactNode; label: string; value: string; sub: string }[] = [
+  { icon: <Trophy size={14} />, label: 'ELO', value: '1.842', sub: '+24' },
+  { icon: <CircleDot size={14} />, label: 'PARTIDAS', value: '217', sub: '+3 hoje' },
+  { icon: <TrendingUp size={14} />, label: 'VITÓRIAS', value: '58%', sub: '125V / 92D' },
+  { icon: <Flame size={14} />, label: 'SEQUÊNCIA', value: '3', sub: 'vitórias' },
 ];
 
 const MATCHES = [
@@ -35,13 +38,13 @@ export function Profile() {
           <h1>você_jogador</h1>
           <span className="muted-note">Entrou em fev/2026 · Servidor BR-Sul</span>
         </div>
-        <button className="ghost">⚙ Editar perfil</button>
+        <button className="ghost"><Settings size={15} /> Editar perfil</button>
       </div>
 
       <div className="stat-row">
         {STATS.map((s) => (
           <div key={s.label} className="card stat-box">
-            <span className="eyebrow">{s.icon} {s.label}</span>
+            <span className="eyebrow stat-eyebrow">{s.icon} {s.label}</span>
             <span className="stat-value">{s.value}</span>
             <span className="muted-note">{s.sub}</span>
           </div>
@@ -75,7 +78,7 @@ export function Profile() {
           <div className="ach-grid">
             {ACHIEVEMENTS.map((a) => (
               <div key={a.name} className={`ach${a.on ? '' : ' off'}`}>
-                <span className="ach-medal">🎖️</span>
+                <Award size={22} className={a.on ? 'ic-primary' : ''} />
                 <span>{a.name}</span>
               </div>
             ))}

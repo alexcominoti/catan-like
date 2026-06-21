@@ -49,7 +49,7 @@ function CardPile({
   playable?: boolean;
   onPlay?: () => void;
 }) {
-  const width = 50 + (count - 1) * 8;
+  const width = 64 + (count - 1) * 9;
   return (
     <button
       type="button"
@@ -60,7 +60,7 @@ function CardPile({
     >
       <span className="card-pile-inner" style={{ width }}>
         {Array.from({ length: count }, (_, i) => (
-          <img key={i} src={img} alt={title} className="play-img" style={{ left: i * 8 }} loading="lazy" />
+          <img key={i} src={img} alt={title} className="play-img" style={{ left: i * 9 }} loading="lazy" />
         ))}
       </span>
       <span className="card-count">{count}</span>
