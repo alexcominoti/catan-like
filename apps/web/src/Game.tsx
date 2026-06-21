@@ -14,6 +14,7 @@ import {
   type ProgressCard,
   type Resource,
 } from '@hexgame/engine';
+import { planBotAction } from '@hexgame/bot';
 import { Board, type InteractionMode } from './board/Board.js';
 import { Dice } from './ui/Dice.js';
 import { Toasts, useToasts, type ToastTone } from './ui/Toasts.js';
@@ -57,14 +58,21 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   const [help, setHelp] = useState(false);
   const { toasts, push } = useToasts();
 
+  const isBot = useMemo(() => {
+    const set = new Set(config.bots);
+    return (c: PlayerColor) => set.has(c);
+  }, [config.bots]);
+  const botTurn = isBot(state.currentPlayer);
+
   const effMode: InteractionMode = useMemo(() => {
+    if (isBot(state.currentPlayer)) return 'idle'; // humano nao age na vez do bot
     if (state.phase === 'setup1' || state.phase === 'setup2') {
       return state.setupLastVertex ? 'placeRoad' : 'placeSettlement';
     }
     if (state.phase === 'moveBlocker') return 'moveBlocker';
     if (state.phase === 'main') return mode;
     return 'idle';
-  }, [state.phase, state.setupLastVertex, mode]);
+  }, [state.phase, state.setupLastVertex, state.currentPlayer, mode, isBot]);
 
   function resetTransient() {
     setArming(null);
@@ -106,6 +114,17 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  // Auto-jogo dos bots: a cada mudanca de estado, se ha uma acao de bot pendente
+  // (turno do bot, descarte, mover bloqueador, ou aceitar troca), agenda e aplica.
+  useEffect(() => {
+    const move = planBotAction(state, isBot);
+    if (!move) return;
+    const delay = state.phase === 'setup1' || state.phase === 'setup2' ? 360 : 620;
+    const id = setTimeout(() => dispatch(move.action, move.by), delay);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, isBot]);
 
   function onVertex(vid: string) {
     if (effMode === 'placeSettlement') dispatch({ t: 'placeSettlement', vertexId: vid });
@@ -176,7 +195,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
           {state.players.map((p) => (
             <div key={p.color} className={`player-row${p.color === state.currentPlayer ? ' active' : ''}`}>
               <span className="swatch" style={{ background: PLAYER_FILL[p.color] }} />
-              <span className="name">{p.name}</span>
+              <span className="name">{p.name}{isBot(p.color) && <span title="Bot"> 🤖</span>}</span>
               {state.longestRoad.owner === p.color && <span className="badge" title="Estrada Mais Longa">📏</span>}
               {state.largestArmy.owner === p.color && <span className="badge" title="Maior Exército">⚔️</span>}
               <span className="pts">{scoreOf(state, p.color)}⭐ · {handTotal(p)}🂠 · {p.progressCards.length}🃏</span>
@@ -229,6 +248,8 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
           <span className="hint">🏆 {PLAYER_LABEL[state.winner!]} venceu! Clique em “Novo jogo”.</span>
         ) : state.phase === 'discard' ? (
           <DiscardControls state={state} dispatch={dispatch} />
+        ) : botTurn ? (
+          <span className="hint">🤖 {cur.name} está jogando…</span>
         ) : effMode === 'moveBlocker' ? (
           <span className="hint">Clique em um hex para mover o bloqueador (rouba de um vizinho).</span>
         ) : effMode === 'placeSettlement' ? (

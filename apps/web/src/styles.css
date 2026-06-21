@@ -374,6 +374,15 @@ input:not([type]) {
   border-color: transparent;
 }
 
+.seg.small button {
+  min-width: 34px;
+  padding: 5px 7px;
+}
+
+.lobby-player {
+  flex-wrap: wrap;
+}
+
 .lobby-players {
   display: flex;
   flex-direction: column;

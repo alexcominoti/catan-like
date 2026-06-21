@@ -33,8 +33,9 @@ navegador (Fase 1) e rodará no servidor (Fase 2+) sem reescrita.
 catan-like/
   packages/
     engine/    # regras puras e determinísticas (testável isolado)
+    bot/       # bot heurístico puro: (estado, cor) -> ação
   apps/
-    web/       # React + Vite, tabuleiro em SVG (UI hotseat)
+    web/       # React + Vite, tabuleiro em SVG (UI hotseat + bots)
 ```
 
 ## Como rodar
@@ -75,9 +76,17 @@ marítimo com portos** (4:1 / 3:1 / 2:1) · **comércio entre jogadores** (propo
 aceitar / fechar) · Estrada Mais Longa (≥5) · Maior Exército (≥3) · vitória (10
 pontos). UI com destaque de alvos válidos, peça-fantasma no hover e ESC cancela.
 
+### Bots (`@hexgame/bot`)
+
+Bot heurístico (guloso, mas sensato): setup em bons vértices, constrói por
+prioridade (cidade > vila > estrada), usa cartas/ladrão/portos, troca com o banco
+para destravar metas, e caça Estrada Mais Longa / Maior Exército. No lobby cada
+assento é **Humano** ou **Bot**; na vez de um bot a UI joga sozinha. É puro e
+reutilizável no servidor (Fase 2+). Testes simulam partidas 4-bots até a vitória.
+
 ### Próximos passos
 
-- Variantes/refino de UX (atalhos, animações, tema claro).
+- Variantes/refino de UX (atalhos, animações, tema claro), bots mais fortes.
 - Fase 2: servidor `ws` autoritativo + `projectFor` (fog of war) para jogar de
   abas/PCs diferentes.
 

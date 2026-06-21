@@ -6,7 +6,8 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vite/client"],
     "paths": {
-      "@hexgame/engine": ["../../packages/engine/src/index.ts"]
+      "@hexgame/engine": ["../../packages/engine/src/index.ts"],
+      "@hexgame/bot": ["../../packages/bot/src/index.ts"]
     }
   },
   "include": ["src"]

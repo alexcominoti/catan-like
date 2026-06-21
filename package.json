@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "test": "npm run test --workspace @hexgame/engine",
+    "test": "npm run test --workspaces --if-present",
     "dev": "npm run dev --workspace @hexgame/web",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },

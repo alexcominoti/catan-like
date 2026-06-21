@@ -2,17 +2,22 @@ import { useState } from 'react';
 import { PLAYER_COLORS, type PlayerColor } from '@hexgame/engine';
 import { PLAYER_FILL, PLAYER_LABEL } from '../game/theme.js';
 
+export type SeatKind = 'human' | 'bot';
+
 export interface GameConfig {
   players: { color: PlayerColor; name: string }[];
+  bots: PlayerColor[];
   seed: number;
 }
 
-const DEFAULT_NAMES = ['Jogador 1', 'Jogador 2', 'Jogador 3', 'Jogador 4'];
+const DEFAULT_NAMES = ['Você', 'Bot 2', 'Bot 3', 'Bot 4'];
+const DEFAULT_KINDS: SeatKind[] = ['human', 'bot', 'bot', 'bot'];
 
 export function Lobby({ onStart }: { onStart: (cfg: GameConfig) => void }) {
   const [count, setCount] = useState(4);
   const [names, setNames] = useState<string[]>([...DEFAULT_NAMES]);
   const [colors, setColors] = useState<PlayerColor[]>([...PLAYER_COLORS]);
+  const [kinds, setKinds] = useState<SeatKind[]>([...DEFAULT_KINDS]);
   const [seedText, setSeedText] = useState('');
 
   function setColor(slot: number, color: PlayerColor) {
@@ -31,7 +36,8 @@ export function Lobby({ onStart }: { onStart: (cfg: GameConfig) => void }) {
       color: colors[i]!,
       name: names[i]!.trim() || DEFAULT_NAMES[i]!,
     }));
-    onStart({ players, seed });
+    const bots = players.filter((_, i) => kinds[i] === 'bot').map((p) => p.color);
+    onStart({ players, bots, seed });
   }
 
   return (
@@ -60,6 +66,17 @@ export function Lobby({ onStart }: { onStart: (cfg: GameConfig) => void }) {
                 maxLength={16}
                 onChange={(e) => setNames((p) => { const n = [...p]; n[i] = e.target.value; return n; })}
               />
+              <div className="seg small">
+                {(['human', 'bot'] as SeatKind[]).map((k) => (
+                  <button
+                    key={k}
+                    className={kinds[i] === k ? 'active' : ''}
+                    onClick={() => setKinds((p) => { const n = [...p]; n[i] = k; return n; })}
+                  >
+                    {k === 'human' ? '🙂' : '🤖'}
+                  </button>
+                ))}
+              </div>
               <div className="color-pick">
                 {PLAYER_COLORS.map((c) => (
                   <button
