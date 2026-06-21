@@ -793,9 +793,24 @@ input:not([type]) {
 .hand-cards {
   display: flex;
   align-items: center;
-  gap: 12px;
-  overflow-x: auto;
+  flex-wrap: wrap;
+  gap: 12px 16px;
   padding: 2px 0;
+  flex: 1;
+}
+
+.card-stack.clickable {
+  cursor: pointer;
+}
+
+.card-stack.playable .play-card.front {
+  outline: 2px solid #ffce47;
+  outline-offset: 1px;
+}
+
+.card-stack.clickable:hover {
+  transform: translateY(-4px);
+  transition: transform 0.1s;
 }
 
 .card-group {
@@ -842,14 +857,16 @@ input:not([type]) {
 /* ---------- Painel de oponentes ---------- */
 .player-card {
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 7px 9px;
-  margin-bottom: 6px;
+  border-left: 4px solid var(--pc, var(--border));
+  border-radius: 10px;
+  padding: 9px 10px;
+  margin-bottom: 8px;
   background: var(--panel-2);
 }
 
 .player-card.active {
-  outline: 2px solid var(--turn-color, var(--accent));
+  outline: 2px solid var(--pc, var(--accent));
+  box-shadow: 0 0 12px -2px var(--pc, transparent);
 }
 
 .player-card-top {
@@ -858,30 +875,71 @@ input:not([type]) {
   gap: 8px;
 }
 
+.player-card-top .pc-color {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
 .player-card-top .name {
   flex: 1;
-  font-weight: 600;
-  font-size: 14px;
+  font-weight: 700;
+  font-size: 15px;
 }
 
-.player-card-top .vp {
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
+.vp-badge {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  font-size: 18px;
+  font-weight: 800;
   color: var(--warn);
-}
-
-.player-card-stats {
-  display: flex;
-  gap: 12px;
-  margin-top: 5px;
-  font-size: 12px;
-  color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 
-.player-card-stats .hl {
+.vp-badge i {
+  font-size: 13px;
+  font-style: normal;
+}
+
+.player-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.player-stats .stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 5px 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.player-stats .stat b {
+  font-size: 16px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.player-stats .stat i {
+  font-size: 13px;
+  font-style: normal;
+  opacity: 0.85;
+}
+
+.player-stats .stat.on {
+  border-color: var(--good);
+  background: rgba(76, 175, 118, 0.16);
+}
+
+.player-stats .stat.on b {
   color: var(--good);
-  font-weight: 700;
 }
 
 .modal.confirm {

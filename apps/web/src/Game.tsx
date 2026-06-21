@@ -43,13 +43,6 @@ function costIcons(cost: Partial<Record<Resource, number>>): string {
     .join('');
 }
 
-const PLAYABLE_CARDS: { card: Exclude<ProgressCard, 'victoryPoint'>; label: string }[] = [
-  { card: 'knight', label: '⚔️ Cavaleiro' },
-  { card: 'roadBuilding', label: '🛣️ 2 Estradas' },
-  { card: 'yearOfPlenty', label: '🎁 +2 Recursos' },
-  { card: 'monopoly', label: '📦 Monopólio' },
-];
-
 export function Game({ config, onExit }: { config: GameConfig; onExit: () => void }) {
   const [state, setState] = useState<GameState>(() =>
     createInitialState({
@@ -258,7 +251,6 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   const myMain = myTurn && state.phase === 'main';
   const myRoll = myTurn && state.phase === 'roll';
   const bestRate = maritimeRate(state, localColor, give);
-  const devCounts = countCards(localPlayer.progressCards);
   const playerColor = PLAYER_FILL[state.currentPlayer];
 
   return (
@@ -296,36 +288,24 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
         <div className="card">
           <h2>Jogadores</h2>
           {state.players.map((p) => (
-            <div key={p.color} className={`player-card${p.color === state.currentPlayer ? ' active' : ''}`}>
+            <div
+              key={p.color}
+              className={`player-card${p.color === state.currentPlayer ? ' active' : ''}`}
+              style={{ ['--pc' as string]: PLAYER_FILL[p.color] }}
+            >
               <div className="player-card-top">
-                <span className="swatch" style={{ background: PLAYER_FILL[p.color] }} />
+                <span className="pc-color" style={{ background: PLAYER_FILL[p.color] }} />
                 <span className="name">{p.name}{isBot(p.color) && <span title="Bot"> 🤖</span>}</span>
-                <span className="vp">{publicScoreOf(state, p.color)} ⭐</span>
+                <span className="vp-badge">{publicScoreOf(state, p.color)}<i>⭐</i></span>
               </div>
-              <div className="player-card-stats">
-                <span title="Cartas na mão">🂠 {handTotal(p)}</span>
-                <span title="Cartas de progresso">🃏 {p.progressCards.length}</span>
-                <span title="Cavaleiros jogados" className={state.largestArmy.owner === p.color ? 'hl' : ''}>⚔️ {p.knightsPlayed}</span>
-                <span title="Maior estrada" className={state.longestRoad.owner === p.color ? 'hl' : ''}>📏 {longestRoadLength(state, p.color)}</span>
+              <div className="player-stats">
+                <span className="stat" title="Cartas na mão"><b>{handTotal(p)}</b><i>🂠</i></span>
+                <span className="stat" title="Cartas de progresso"><b>{p.progressCards.length}</b><i>🃏</i></span>
+                <span className={`stat${state.largestArmy.owner === p.color ? ' on' : ''}`} title="Cavaleiros jogados"><b>{p.knightsPlayed}</b><i>⚔️</i></span>
+                <span className={`stat${state.longestRoad.owner === p.color ? ' on' : ''}`} title="Maior estrada"><b>{longestRoadLength(state, p.color)}</b><i>📏</i></span>
               </div>
             </div>
           ))}
-        </div>
-
-        <div className="card">
-          <h2>Suas cartas de progresso</h2>
-          {localPlayer.progressCards.length === 0 ? (
-            <p className="muted-note">Nenhuma carta.</p>
-          ) : (
-            <div className="dev-cards">
-              {PLAYABLE_CARDS.map(({ card, label }) =>
-                devCounts[card] ? (
-                  <button key={card} disabled={!canPlay(card)} onClick={() => playCard(card)}>{label} ×{devCounts[card]}</button>
-                ) : null,
-              )}
-              {devCounts.victoryPoint ? <span className="res-chip">⭐ Ponto ×{devCounts.victoryPoint}</span> : null}
-            </div>
-          )}
         </div>
 
         <div className="card">
@@ -343,7 +323,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
         </div>
       </aside>
 
-      <HandBar hand={localPlayer.hand} devCards={localPlayer.progressCards} name={localPlayer.name} />
+      <HandBar hand={localPlayer.hand} devCards={localPlayer.progressCards} name={localPlayer.name} canPlay={canPlay} onPlay={playCard} />
 
       <div className="actionbar">
         <div className="action-status">{statusText(state, myTurn, botTurn, cur.name)}{error && <span className="error"> · ⚠ {error}</span>}</div>
@@ -710,11 +690,6 @@ function DiscardModal({
   );
 }
 
-function countCards(cards: ProgressCard[]): Record<ProgressCard, number> {
-  const out = { knight: 0, roadBuilding: 0, yearOfPlenty: 0, monopoly: 0, victoryPoint: 0 };
-  for (const c of cards) out[c] += 1;
-  return out;
-}
 
 function getPlayer(state: GameState, color: PlayerColor) {
   return state.players.find((p) => p.color === color)!;
