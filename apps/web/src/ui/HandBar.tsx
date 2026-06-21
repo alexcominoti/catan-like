@@ -1,71 +1,82 @@
 import { RESOURCES, type ProgressCard, type Resource } from '@hexgame/engine';
-import { RESOURCE_ICON, RESOURCE_LABEL } from '../game/theme.js';
+import { RESOURCE_LABEL } from '../game/theme.js';
+import cardBrick from '../assets/card-brick.jpg';
+import cardWood from '../assets/card-wood.jpg';
+import cardSheep from '../assets/card-sheep.jpg';
+import cardWheat from '../assets/card-wheat.jpg';
+import cardOre from '../assets/card-ore.jpg';
+import cardKnight from '../assets/card-knight.jpg';
+import cardRoad from '../assets/card-road.jpg';
+import cardVictory from '../assets/card-victory.jpg';
 
-const CARD_FILL: Record<Resource, string> = {
-  wood: '#2f7d45',
-  brick: '#b5562f',
-  wool: '#7fae3f',
-  grain: '#e3b23c',
-  ore: '#8d97a3',
+const RES_IMG: Record<Resource, string> = {
+  wood: cardWood,
+  brick: cardBrick,
+  wool: cardSheep,
+  grain: cardWheat,
+  ore: cardOre,
 };
 
-const DEV_META: Record<ProgressCard, { icon: string; label: string }> = {
-  knight: { icon: '⚔️', label: 'Cavaleiro' },
-  roadBuilding: { icon: '🛣️', label: '2 Estradas' },
-  yearOfPlenty: { icon: '🎁', label: '+2 Recursos' },
-  monopoly: { icon: '📦', label: 'Monopólio' },
-  victoryPoint: { icon: '⭐', label: 'Ponto de Vitória' },
+const DEV_IMG: Record<ProgressCard, string> = {
+  knight: cardKnight,
+  roadBuilding: cardRoad,
+  yearOfPlenty: cardVictory,
+  monopoly: cardVictory,
+  victoryPoint: cardVictory,
+};
+
+const DEV_LABEL: Record<ProgressCard, string> = {
+  knight: 'Cavaleiro',
+  roadBuilding: '2 Estradas',
+  yearOfPlenty: '+2 Recursos',
+  monopoly: 'Monopólio',
+  victoryPoint: 'Ponto de Vitória',
 };
 
 const DEV_ORDER: ProgressCard[] = ['knight', 'roadBuilding', 'yearOfPlenty', 'monopoly', 'victoryPoint'];
 
-/** Uma pilha de cartas do mesmo tipo: cartas de tras (cobertas) + a da frente. */
-function CardStack({
+/** Pilha de cartas (imagens) do mesmo tipo, com contador. */
+function CardPile({
   count,
-  fill,
-  icon,
+  img,
   title,
-  dev,
   playable,
   onPlay,
 }: {
   count: number;
-  fill?: string;
-  icon: string;
+  img: string;
   title: string;
-  dev?: boolean;
   playable?: boolean;
   onPlay?: () => void;
 }) {
-  const backs = Math.min(count - 1, 3);
+  const width = 50 + (count - 1) * 8;
   return (
-    <div
-      className={`card-stack${onPlay ? ' clickable' : ''}${playable ? ' playable' : ''}`}
+    <button
+      type="button"
+      className={`card-pile${onPlay ? ' clickable' : ''}${playable ? ' playable' : ''}`}
       title={`${title}${count > 1 ? ` ×${count}` : ''}${playable ? ' — clique para jogar' : ''}`}
       onClick={onPlay}
+      disabled={!onPlay}
     >
-      {Array.from({ length: backs }, (_, i) => (
-        <div key={i} className={`play-card back${dev ? ' dev' : ''}`} style={{ left: (i + 1) * 5, background: fill }} />
-      ))}
-      <div className={`play-card front${dev ? ' dev' : ''}`} style={{ background: fill }}>
-        <span className="play-card-icon">{icon}</span>
-        {count > 1 && <span className="card-count">{count}</span>}
-      </div>
-    </div>
+      <span className="card-pile-inner" style={{ width }}>
+        {Array.from({ length: count }, (_, i) => (
+          <img key={i} src={img} alt={title} className="play-img" style={{ left: i * 8 }} loading="lazy" />
+        ))}
+      </span>
+      <span className="card-count">{count}</span>
+    </button>
   );
 }
 
-/** Mão do jogador local: recursos e cartas de progresso no mesmo bloco. */
+/** Mão do jogador local: recursos e cartas de progresso (imagens), num só bloco. */
 export function HandBar({
   hand,
   devCards,
-  name,
   canPlay,
   onPlay,
 }: {
   hand: Record<Resource, number>;
   devCards: ProgressCard[];
-  name: string;
   canPlay: (c: ProgressCard) => boolean;
   onPlay: (c: ProgressCard) => void;
 }) {
@@ -75,32 +86,25 @@ export function HandBar({
   const devList = DEV_ORDER.filter((c) => devCounts.has(c));
 
   return (
-    <div className="hand-bar">
-      <div className="hand-bar-name">{name}</div>
-      <div className="hand-cards">
-        {total === 0 && devList.length === 0 && <span className="muted-note">Sem cartas</span>}
-        {RESOURCES.filter((r) => hand[r] > 0).map((r) => (
-          <CardStack key={r} count={hand[r]} fill={CARD_FILL[r]} icon={RESOURCE_ICON[r]} title={RESOURCE_LABEL[r]} />
-        ))}
-        {devList.length > 0 && (
-          <div className="dev-divider">
-            {devList.map((c) => {
-              const ok = c !== 'victoryPoint' && canPlay(c);
-              return (
-                <CardStack
-                  key={c}
-                  count={devCounts.get(c)!}
-                  icon={DEV_META[c].icon}
-                  title={DEV_META[c].label}
-                  dev
-                  playable={ok}
-                  onPlay={ok ? () => onPlay(c) : undefined}
-                />
-              );
-            })}
-          </div>
-        )}
-      </div>
+    <div className="hand-cards">
+      {total === 0 && devList.length === 0 && <span className="muted-note">Sem cartas</span>}
+      {RESOURCES.filter((r) => hand[r] > 0).map((r) => (
+        <CardPile key={r} count={hand[r]} img={RES_IMG[r]} title={RESOURCE_LABEL[r]} />
+      ))}
+      {devList.length > 0 && <span className="hand-divider" aria-hidden="true" />}
+      {devList.map((c) => {
+        const ok = c !== 'victoryPoint' && canPlay(c);
+        return (
+          <CardPile
+            key={c}
+            count={devCounts.get(c)!}
+            img={DEV_IMG[c]}
+            title={DEV_LABEL[c]}
+            playable={ok}
+            onPlay={ok ? () => onPlay(c) : undefined}
+          />
+        );
+      })}
     </div>
   );
 }

@@ -25,7 +25,7 @@ const DEFAULT_NAMES = ['Você', 'Bot 2', 'Bot 3', 'Bot 4'];
 const DEFAULT_KINDS: SeatKind[] = ['human', 'bot', 'bot', 'bot'];
 const DIFF_LABEL: Record<Difficulty, string> = { easy: 'Fácil', medium: 'Médio', hard: 'Difícil' };
 
-export function Lobby({ onStart }: { onStart: (cfg: GameConfig) => void }) {
+export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void; onBack?: () => void }) {
   const [count, setCount] = useState(4);
   const [names, setNames] = useState<string[]>([...DEFAULT_NAMES]);
   const [colors, setColors] = useState<PlayerColor[]>([...PLAYER_COLORS]);
@@ -121,8 +121,9 @@ export function Lobby({ onStart }: { onStart: (cfg: GameConfig) => void }) {
         </aside>
 
         <main className="lobby-main">
-          <h1>⬡ HexGame</h1>
-          <p className="lobby-sub">Colonização hexagonal · jogo base · mesma tela (hotseat)</p>
+          {onBack && <button className="lobby-back" onClick={onBack}>← Voltar ao lobby</button>}
+          <h1>⬡ Hexkeep</h1>
+          <p className="lobby-sub">Criar sala · jogo base · mesma tela (hotseat)</p>
 
           <section className="lobby-section">
             <h3>Tabuleiro</h3>
