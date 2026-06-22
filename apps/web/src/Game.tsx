@@ -226,7 +226,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
           for (const vid of hex.corners) {
             const b = newState.buildings[vid];
             if (!b) continue;
-            const to = destForOwner(b.owner, localColor);
+            const to = handDest(resource, b.owner, localColor);
             if (!to) continue;
             const n = b.kind === 'city' ? 2 : 1;
             for (let k = 0; k < n; k++) {
@@ -897,6 +897,15 @@ function anchorCenter(selector: string): Pt | null {
 function destForOwner(color: PlayerColor, localColor: PlayerColor): Pt | null {
   if (color === localColor) return anchorCenter('.hand-cards');
   return anchorCenter(`[data-noble="${color}"]`);
+}
+
+/**
+ * Destino de uma carta ganha: para mim, a pilha exata daquele recurso na mão
+ * (assim a carta pousa onde ela fica de fato); para outro, o avatar dele.
+ */
+function handDest(resource: Resource, owner: PlayerColor, localColor: PlayerColor): Pt | null {
+  if (owner !== localColor) return anchorCenter(`[data-noble="${owner}"]`);
+  return anchorCenter(`.hand-cards [data-card="${resource}"]`) ?? anchorCenter('.hand-cards');
 }
 
 /** Recursos gastos por uma ação (para a animação mão -> banco). */

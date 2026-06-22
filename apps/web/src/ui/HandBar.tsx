@@ -17,12 +17,14 @@ function CardPile({
   count,
   img,
   title,
+  dataKey,
   playable,
   onPlay,
 }: {
   count: number;
   img: string;
   title: string;
+  dataKey: string;
   playable?: boolean;
   onPlay?: () => void;
 }) {
@@ -34,6 +36,7 @@ function CardPile({
       title={`${title}${count > 1 ? ` ×${count}` : ''}${playable ? ' — clique para jogar' : ''}`}
       onClick={onPlay}
       disabled={!onPlay}
+      data-card={dataKey}
     >
       <span className="card-pile-inner" style={{ width }}>
         {Array.from({ length: count }, (_, i) => (
@@ -66,7 +69,7 @@ export function HandBar({
     <div className="hand-cards">
       {total === 0 && devList.length === 0 && <span className="muted-note">Sem cartas</span>}
       {RESOURCES.filter((r) => hand[r] > 0).map((r) => (
-        <CardPile key={r} count={hand[r]} img={RES_IMG[r]} title={RESOURCE_LABEL[r]} />
+        <CardPile key={r} count={hand[r]} img={RES_IMG[r]} title={RESOURCE_LABEL[r]} dataKey={r} />
       ))}
       {devList.length > 0 && <span className="hand-divider" aria-hidden="true" />}
       {devList.map((c) => {
@@ -77,6 +80,7 @@ export function HandBar({
             count={devCounts.get(c)!}
             img={DEV_IMG[c]}
             title={DEV_LABEL[c]}
+            dataKey={c}
             playable={ok}
             onPlay={ok ? () => onPlay(c) : undefined}
           />
