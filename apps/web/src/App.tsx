@@ -10,12 +10,9 @@ export function App() {
   const [page, setPage] = useState<Page>('landing');
   const [config, setConfig] = useState<GameConfig | null>(null);
 
-  // Jogo e configuracao de sala ocupam a tela inteira (sem o header do site).
+  // O jogo ocupa a tela inteira (sem o header do site).
   if (page === 'game' && config) {
     return <Game key={config.seed} config={config} onExit={() => { setConfig(null); setPage('lobby'); }} />;
-  }
-  if (page === 'setup') {
-    return <Lobby onStart={(cfg) => { setConfig(cfg); setPage('game'); }} onBack={() => setPage('lobby')} />;
   }
 
   return (
@@ -23,6 +20,9 @@ export function App() {
       <SiteHeader page={page} onNav={setPage} />
       {page === 'landing' && <Landing onPlay={() => setPage('lobby')} onWatch={() => setPage('lobby')} />}
       {page === 'lobby' && <RoomBrowser onPlay={() => setPage('setup')} />}
+      {page === 'setup' && (
+        <Lobby onStart={(cfg) => { setConfig(cfg); setPage('game'); }} onBack={() => setPage('lobby')} />
+      )}
       {page === 'profile' && <Profile />}
     </div>
   );

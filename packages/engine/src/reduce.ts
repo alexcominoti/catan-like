@@ -560,8 +560,8 @@ function proposeTrade(
   if (by !== state.currentPlayer) return err('Nao e a sua vez.');
   const g = sanitizeResMap(give);
   const w = sanitizeResMap(want);
-  if (Object.keys(g).length === 0 && Object.keys(w).length === 0) {
-    return err('Proposta vazia.');
+  if (Object.keys(g).length === 0 || Object.keys(w).length === 0) {
+    return err('A troca precisa de recursos dos dois lados.');
   }
   const next = clone(state);
   const p = getPlayer(next, by);
@@ -588,7 +588,7 @@ function counterTrade(
   if (!trade.to.includes(by)) return err('Voce nao foi convidado a essa troca.');
   const g = sanitizeResMap(give);
   const w = sanitizeResMap(want);
-  if (Object.keys(g).length === 0 && Object.keys(w).length === 0) return err('Contraproposta vazia.');
+  if (Object.keys(g).length === 0 || Object.keys(w).length === 0) return err('A troca precisa de recursos dos dois lados.');
   const next = clone(state);
   const p = getPlayer(next, by);
   if (!canAfford(p, g)) return err('Voce nao tem os recursos oferecidos.');

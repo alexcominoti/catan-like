@@ -1,11 +1,8 @@
 import { useState } from 'react';
-import {
-  PLAYER_COLORS,
-  type DesertPlacement,
-  type NumberLayout,
-  type PlayerColor,
-} from '@hexgame/engine';
+import { PLAYER_COLORS, type DesertPlacement, type NumberLayout, type PlayerColor } from '@hexgame/engine';
 import type { Difficulty } from '@hexgame/bot';
+import type { ReactNode } from 'react';
+import { Users, Smile, Bot, Dices, Target, Play, ArrowLeft, Shuffle } from 'lucide-react';
 import { PLAYER_FILL, PLAYER_LABEL } from '../game/theme.js';
 
 export type SeatKind = 'human' | 'bot';
@@ -62,111 +59,100 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
       }
     });
     onStart({
-      players,
-      bots,
-      botDifficulty: botDifficulty as Record<PlayerColor, Difficulty>,
-      seed,
-      numberLayout,
-      desert,
-      pointsToWin,
-      discardLimit,
+      players, bots, botDifficulty: botDifficulty as Record<PlayerColor, Difficulty>,
+      seed, numberLayout, desert, pointsToWin, discardLimit,
     });
   }
 
   return (
-    <div className="lobby">
-      <div className="lobby-shell">
-        <aside className="lobby-players">
-          <h2>Jogadores ({count}/4)</h2>
-          <div className="seg full">
+    <div className="page setup-page">
+      <div className="page-head">
+        <div>
+          {onBack && <button className="back-link" onClick={onBack}><ArrowLeft size={15} /> Voltar ao lobby</button>}
+          <span className="eyebrow">CRIAR SALA</span>
+          <h1>Monte sua mesa.</h1>
+        </div>
+      </div>
+
+      <div className="setup-grid">
+        <div className="card su-players">
+          <h2 className="su-h"><Users size={18} className="ic-primary" /> Jogadores ({count}/4)</h2>
+          <div className="su-seg full">
             {[3, 4].map((n) => (
-              <button key={n} className={count === n ? 'active' : ''} onClick={() => setCount(n)}>{n} jogadores</button>
+              <button key={n} className={count === n ? 'on' : ''} onClick={() => setCount(n)}>{n} jogadores</button>
             ))}
           </div>
           {Array.from({ length: count }, (_, i) => (
-            <div key={i} className="seat" style={{ borderLeftColor: PLAYER_FILL[colors[i]!] }}>
-              <div className="seat-top">
-                <input
-                  value={names[i]}
-                  maxLength={16}
-                  onChange={(e) => setNames((p) => { const n = [...p]; n[i] = e.target.value; return n; })}
-                />
-                <div className="seg small">
-                  {(['human', 'bot'] as SeatKind[]).map((k) => (
-                    <button key={k} className={kinds[i] === k ? 'active' : ''} onClick={() => setKinds((p) => { const n = [...p]; n[i] = k; return n; })}>
-                      {k === 'human' ? '🙂' : '🤖'}
-                    </button>
-                  ))}
+            <div key={i} className="su-seat" style={{ borderLeftColor: PLAYER_FILL[colors[i]!] }}>
+              <div className="su-seat-top">
+                <input value={names[i]} maxLength={16}
+                  onChange={(e) => setNames((p) => { const n = [...p]; n[i] = e.target.value; return n; })} />
+                <div className="su-seg sm">
+                  <button className={kinds[i] === 'human' ? 'on' : ''} title="Humano"
+                    onClick={() => setKinds((p) => { const n = [...p]; n[i] = 'human'; return n; })}><Smile size={15} /></button>
+                  <button className={kinds[i] === 'bot' ? 'on' : ''} title="Bot"
+                    onClick={() => setKinds((p) => { const n = [...p]; n[i] = 'bot'; return n; })}><Bot size={15} /></button>
                 </div>
               </div>
-              <div className="seat-bottom">
-                <div className="color-pick">
+              <div className="su-seat-bottom">
+                <div className="su-colors">
                   {PLAYER_COLORS.map((c) => (
-                    <button key={c} title={PLAYER_LABEL[c]} className={`color-dot${colors[i] === c ? ' active' : ''}`}
+                    <button key={c} title={PLAYER_LABEL[c]} className={`su-dot${colors[i] === c ? ' on' : ''}`}
                       style={{ background: PLAYER_FILL[c] }} onClick={() => setColor(i, c)} />
                   ))}
                 </div>
                 {kinds[i] === 'bot' && (
-                  <div className="seg tiny">
+                  <div className="su-seg xs">
                     {(['easy', 'medium', 'hard'] as Difficulty[]).map((d) => (
-                      <button key={d} className={diffs[i] === d ? 'active' : ''} onClick={() => setDiffs((p) => { const n = [...p]; n[i] = d; return n; })}>
-                        {DIFF_LABEL[d]}
-                      </button>
+                      <button key={d} className={diffs[i] === d ? 'on' : ''}
+                        onClick={() => setDiffs((p) => { const n = [...p]; n[i] = d; return n; })}>{DIFF_LABEL[d]}</button>
                     ))}
                   </div>
                 )}
               </div>
             </div>
           ))}
-        </aside>
+        </div>
 
-        <main className="lobby-main">
-          {onBack && <button className="lobby-back" onClick={onBack}>← Voltar ao lobby</button>}
-          <h1>⬡ Hexkeep</h1>
-          <p className="lobby-sub">Criar sala · jogo base · mesma tela (hotseat)</p>
+        <div className="card su-settings">
+          <h3 className="su-sub">Tabuleiro</h3>
+          <div className="su-tiles">
+            <SetupTile icon={<Dices size={20} />} label="Números equilibrados" hint="6 e 8 nunca vizinhos"
+              active={numberLayout === 'balanced'} onClick={() => setNumberLayout((v) => (v === 'balanced' ? 'random' : 'balanced'))} />
+            <SetupTile icon={<Target size={20} />} label="Deserto no centro" hint="ladrão começa no meio"
+              active={desert === 'center'} onClick={() => setDesert((v) => (v === 'center' ? 'random' : 'center'))} />
+          </div>
 
-          <section className="lobby-section">
-            <h3>Tabuleiro</h3>
-            <div className="tile-row">
-              <Tile icon="🎲" label="Números equilibrados" hint="6 e 8 nunca vizinhos"
-                active={numberLayout === 'balanced'} onClick={() => setNumberLayout((v) => (v === 'balanced' ? 'random' : 'balanced'))} />
-              <Tile icon="🌵" label="Deserto no centro" hint="ladrão começa no meio"
-                active={desert === 'center'} onClick={() => setDesert((v) => (v === 'center' ? 'random' : 'center'))} />
+          <h3 className="su-sub">Configurações avançadas</h3>
+          <div className="su-slider">
+            <label>Pontos para vencer <b>{pointsToWin}</b></label>
+            <input type="range" min={3} max={15} value={pointsToWin} onChange={(e) => setPointsToWin(+e.target.value)} />
+          </div>
+          <div className="su-slider">
+            <label>Limite de cartas (descarte no 7) <b>{discardLimit}</b></label>
+            <input type="range" min={5} max={15} value={discardLimit} onChange={(e) => setDiscardLimit(+e.target.value)} />
+          </div>
+          <div className="su-slider">
+            <label>Seed (opcional)</label>
+            <div className="su-seed">
+              <input value={seedText} placeholder="aleatória" onChange={(e) => setSeedText(e.target.value)} />
+              <button onClick={() => setSeedText('')}><Shuffle size={14} /> Aleatória</button>
             </div>
-          </section>
+          </div>
 
-          <section className="lobby-section">
-            <h3>Configurações avançadas</h3>
-            <div className="slider-row">
-              <label>Pontos para vencer <b>{pointsToWin}</b></label>
-              <input type="range" min={3} max={15} value={pointsToWin} onChange={(e) => setPointsToWin(+e.target.value)} />
-            </div>
-            <div className="slider-row">
-              <label>Limite de cartas (descarte no 7) <b>{discardLimit}</b></label>
-              <input type="range" min={5} max={15} value={discardLimit} onChange={(e) => setDiscardLimit(+e.target.value)} />
-            </div>
-            <div className="slider-row">
-              <label>Seed (opcional)</label>
-              <div className="seed-row">
-                <input value={seedText} placeholder="aleatória" onChange={(e) => setSeedText(e.target.value)} />
-                <button onClick={() => setSeedText('')}>🎲 Aleatória</button>
-              </div>
-            </div>
-          </section>
-
-          <button className="lobby-start" onClick={start}>Começar partida</button>
-        </main>
+          <button className="cta big su-start" onClick={start}><Play size={16} /> Começar partida</button>
+        </div>
       </div>
     </div>
   );
 }
 
-function Tile({ icon, label, hint, active, onClick }: { icon: string; label: string; hint: string; active: boolean; onClick: () => void }) {
+function SetupTile({ icon, label, hint, active, onClick }: { icon: ReactNode; label: string; hint: string; active: boolean; onClick: () => void }) {
   return (
-    <button className={`tile${active ? ' active' : ''}`} onClick={onClick}>
-      <span className="tile-icon">{icon}</span>
-      <span className="tile-label">{label}</span>
-      <span className="tile-hint">{hint}</span>
+    <button className={`su-tile${active ? ' active' : ''}`} onClick={onClick}>
+      <span className="su-tile-icon">{icon}</span>
+      <span className="su-tile-label">{label}</span>
+      <span className="su-tile-hint">{hint}</span>
     </button>
   );
 }

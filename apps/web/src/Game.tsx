@@ -26,6 +26,7 @@ import { Dice } from './ui/Dice.js';
 import { HandBar } from './ui/HandBar.js';
 import { Toasts, useToasts, type ToastTone } from './ui/Toasts.js';
 import { play as playSound, setMuted, unlockAudio, type SoundKind } from './ui/sound.js';
+import { saveReplay } from './ui/replays.js';
 import type { GameConfig } from './ui/Lobby.js';
 import { PLAYER_FILL, PLAYER_LABEL, RESOURCE_ICON, RESOURCE_LABEL } from './game/theme.js';
 
@@ -33,6 +34,11 @@ interface PendingBuild {
   action: Action;
   label: string;
 }
+
+type LogEntry =
+  | { kind: 'event'; text: string }
+  | { kind: 'chat'; color: PlayerColor; name: string; text: string }
+  | { kind: 'sep' };
 
 function zeroRes(): Record<Resource, number> {
   return { wood: 0, brick: 0, wool: 0, grain: 0, ore: 0 };
@@ -66,7 +72,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
       discardLimit: config.discardLimit,
     }),
   );
-  const [log, setLog] = useState<string[]>(['Partida iniciada. Coloquem as vilas iniciais.']);
+  const [log, setLog] = useState<LogEntry[]>([{ kind: 'event', text: 'Partida iniciada. Coloquem as vilas iniciais.' }]);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<InteractionMode>('idle');
   const [give, setGive] = useState<Resource>('wood');
@@ -84,6 +90,8 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   const [elapsed, setElapsed] = useState(0); // cronometro da partida (segundos)
   const [turnCount, setTurnCount] = useState(1); // contador de turno
   const [chatInput, setChatInput] = useState('');
+  // Historico de acoes da partida (para replay + treino da IA).
+  const historyRef = useRef<{ by: PlayerColor; action: Action }[]>([]);
   const { toasts, push } = useToasts();
 
   // Cronometro: conta enquanto a partida nao terminou.
@@ -96,7 +104,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   function sendChat() {
     const t = chatInput.trim();
     if (!t) return;
-    setLog((prev) => [`💬 ${localPlayer.name}: ${t}`, ...prev].slice(0, 200));
+    setLog((prev) => [{ kind: 'chat' as const, color: localColor, name: localPlayer.name, text: t }, ...prev].slice(0, 200));
     setChatInput('');
   }
 
@@ -148,8 +156,30 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
     }
     setError(null);
     setState(res.state);
-    const lines = res.events.map((e) => describeEvent(e, res.state)).filter(Boolean);
-    setLog((prev) => [...lines, ...prev].slice(0, 200));
+    historyRef.current.push({ by, action });
+    if (res.events.some((e) => e.t === 'gameWon')) {
+      saveReplay({
+        id: `${config.seed}-${Date.now()}`,
+        date: Date.now(),
+        seed: config.seed,
+        players: config.players,
+        humans: config.players.map((p) => p.color).filter((c) => !isBot(c)),
+        winner: res.state.winner,
+        pointsToWin: config.pointsToWin,
+        discardLimit: config.discardLimit,
+        numberLayout: config.numberLayout,
+        desert: config.desert,
+        turns: turnCount,
+        durationSec: elapsed,
+        actions: historyRef.current,
+      });
+    }
+    const lines: LogEntry[] = res.events
+      .map((e) => describeEvent(e, res.state))
+      .filter(Boolean)
+      .map((text) => ({ kind: 'event' as const, text }));
+    const sep: LogEntry[] = res.events.some((e) => e.t === 'turnEnded') ? [{ kind: 'sep' as const }] : [];
+    setLog((prev) => [...lines, ...sep, ...prev].slice(0, 200));
     for (const e of res.events) {
       const t = toastForEvent(e, res.state);
       if (t) push(t.text, t.tone);
@@ -194,21 +224,22 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, isBot, difficultyOf]);
 
-  // Durante a vez de um BOT com uma troca ativa (oferta do bot OU contraproposta
-  // de humano), da uma janela e entao resolve (fecha com quem aceitou, ou cancela).
+  // Resolucao automatica de trocas (janela de 20s). Vale quando o proponente e o
+  // jogador local (humano propos/contrapropos) ou quando um bot propos na sua vez.
   useEffect(() => {
     const t = state.activeTrade;
-    if (!t || !isBot(state.currentPlayer)) return;
+    if (!t) return;
     let wait: number;
-    if (t.from === state.currentPlayer) wait = t.accepted.length > 0 ? 1200 : 10000; // oferta do bot: 10s
-    else wait = t.accepted.length > 0 ? 1000 : 4000; // contraproposta do humano
+    if (t.from === localColor) wait = 20000; // eu propus: janela de 20s (ou Fecho antes)
+    else if (isBot(t.from) && isBot(state.currentPlayer)) wait = t.accepted.length > 0 ? 1500 : 20000; // bot propos
+    else return;
     const id = setTimeout(() => {
       const mv = resolveBotProposal(state);
       if (mv) dispatch(mv.action, mv.by);
     }, wait);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state, isBot]);
+  }, [state, isBot, localColor]);
 
   // Toca um som quando vira a minha vez (entrada na fase de rolar).
   const wasMyRoll = useRef(false);
@@ -219,13 +250,15 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   }, [myTurn, state.phase]);
 
   function onVertex(vid: string) {
+    // Confirmacao apenas nas colocacoes iniciais (setup); construcoes seguintes
+    // sao imediatas.
     if (effMode === 'placeSettlement') setPendingBuild({ action: { t: 'placeSettlement', vertexId: vid }, label: 'Colocar vila aqui?' });
-    else if (effMode === 'buildSettlement') setPendingBuild({ action: { t: 'buildSettlement', vertexId: vid }, label: 'Construir vila aqui?' });
-    else if (effMode === 'buildCity') setPendingBuild({ action: { t: 'buildCity', vertexId: vid }, label: 'Construir cidade aqui?' });
+    else if (effMode === 'buildSettlement') dispatch({ t: 'buildSettlement', vertexId: vid });
+    else if (effMode === 'buildCity') dispatch({ t: 'buildCity', vertexId: vid });
   }
   function onEdge(eid: string) {
     if (effMode === 'placeRoad') setPendingBuild({ action: { t: 'placeRoad', edgeId: eid }, label: 'Colocar estrada aqui?' });
-    else if (effMode === 'buildRoad') setPendingBuild({ action: { t: 'buildRoad', edgeId: eid }, label: 'Construir estrada aqui?' });
+    else if (effMode === 'buildRoad') dispatch({ t: 'buildRoad', edgeId: eid });
   }
   function onHex(hid: string) {
     if (effMode !== 'moveBlocker') return;
@@ -410,7 +443,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
         <aside className="pergaminho">
           <div className="card scroll-card">
             <h2><MessageSquare size={16} className="ic-primary" /> Pergaminho</h2>
-            <div className="log">{log.map((line, i) => <div key={i}>{line}</div>)}</div>
+            <div className="log">{log.map((entry, i) => <LogLine key={i} entry={entry} />)}</div>
             <div className="chat-row">
               <input value={chatInput} placeholder="Mensagem ou /comando"
                 onChange={(e) => setChatInput(e.target.value)}
@@ -603,7 +636,7 @@ function TradeBuilderModal({
             <h4>Você dá</h4>
             {RESOURCES.map((r) => (
               <div key={r} className="trade-row">
-                <span>{RESOURCE_ICON[r]} {RESOURCE_LABEL[r]}</span>
+                <span>{RESOURCE_ICON[r]} {RESOURCE_LABEL[r]} <small className="have">({cur.hand[r]})</small></span>
                 <Stepper value={tradeGive[r]} max={cur.hand[r]} onChange={(v) => setTradeGive({ ...tradeGive, [r]: v })} />
               </div>
             ))}
@@ -631,7 +664,7 @@ function TradeBuilderModal({
           </div>
         )}
         <div className="modal-actions">
-          <button className="primary" disabled={(total(tradeGive) === 0 && total(tradeWant) === 0) || (!counter && to.length === 0)}
+          <button className="primary" disabled={total(tradeGive) === 0 || total(tradeWant) === 0 || (!counter && to.length === 0)}
             onClick={() => onPropose(to)}>{counter ? 'Enviar contraproposta' : 'Propor'}</button>
           <button onClick={onClose}>Cancelar (ESC)</button>
         </div>
@@ -659,8 +692,8 @@ function ActiveTradePopup({
     (Object.entries(m) as [Resource, number][]).filter(([, n]) => n > 0).map(([r, n]) => `${n}${RESOURCE_ICON[r]}`).join(' ') || '—';
   const iAmProposer = t.from === localColor;
   const iAmRecipient = t.to.includes(localColor);
-  // Barra de tempo só na oferta de um bot para mim (janela de 10s).
-  const showTimer = botOffer && iAmRecipient;
+  // Barra de tempo (20s): na oferta de um bot para mim, ou quando EU proponho.
+  const showTimer = iAmProposer || (botOffer && iAmRecipient);
   return (
     <div className="trade-popup">
       <h3>{PLAYER_LABEL[t.from]} quer trocar</h3>
@@ -826,6 +859,25 @@ function TitleBadge({ icon, label }: { icon: ReactNode; label: string }) {
   return <span className="title-badge">{icon} {label} <Trophy size={10} /> +2</span>;
 }
 
+const LABEL_COLOR = (Object.entries(PLAYER_LABEL) as [PlayerColor, string][]).map(([c, label]) => ({ label, color: PLAYER_FILL[c] }));
+const NAME_RE = new RegExp(`(${LABEL_COLOR.map((x) => x.label).join('|')})`, 'g');
+
+/** Pinta os nomes dos jogadores (cores) em negrito dentro de uma linha de log. */
+function colorizeNames(text: string): ReactNode[] {
+  return text.split(NAME_RE).map((part, i) => {
+    const m = LABEL_COLOR.find((x) => x.label === part);
+    return m ? <b key={i} style={{ color: m.color }}>{part}</b> : <span key={i}>{part}</span>;
+  });
+}
+
+function LogLine({ entry }: { entry: LogEntry }) {
+  if (entry.kind === 'sep') return <div className="log-sep" />;
+  if (entry.kind === 'chat') {
+    return <div className="log-chat"><b style={{ color: PLAYER_FILL[entry.color] }}>{entry.name}:</b> {entry.text}</div>;
+  }
+  return <div className="log-line">{colorizeNames(entry.text)}</div>;
+}
+
 function soundForEvent(e: GameEvent): SoundKind | null {
   switch (e.t) {
     case 'diceRolled':
@@ -841,7 +893,7 @@ function soundForEvent(e: GameEvent): SoundKind | null {
     case 'tradeExecuted':
     case 'tradeProposed':
     case 'tradeCountered':
-      return 'trade';
+      return null; // sem som de comércio
     case 'longestRoad':
       return e.owner ? 'longestRoad' : null;
     case 'largestArmy':
