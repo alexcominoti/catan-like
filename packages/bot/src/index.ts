@@ -11,9 +11,13 @@ import {
   RESOURCES,
   TERRAIN_RESOURCE,
   distanceRuleOk,
+  handTotal,
+  longestRoadLength,
   maritimeRate,
   publicScoreOf,
+  reduce,
   roadConnects,
+  scoreOf,
   vertexTouchesPlayerRoad,
   type Action,
   type GameState,
@@ -72,15 +76,23 @@ export function planBotAction(
       return { by: me, action: planBlocker(state, me, level) };
     case 'setup1':
     case 'setup2':
-      return state.setupLastVertex
-        ? { by: me, action: { t: 'placeRoad', edgeId: bestSetupRoad(state, me) } }
-        : { by: me, action: { t: 'placeSettlement', vertexId: bestSetupVertex(state, level) } };
+      if (state.setupLastVertex) return { by: me, action: { t: 'placeRoad', edgeId: bestSetupRoad(state, me) } };
+      return {
+        by: me,
+        action: {
+          t: 'placeSettlement',
+          vertexId: level === 'hard' ? bestSetupVertexByValue(state, me) : bestSetupVertex(state, level),
+        },
+      };
     case 'roll': {
       const knight = maybeKnight(state, me);
       return { by: me, action: knight ?? { t: 'rollDice' } };
     }
     case 'main':
-      return { by: me, action: planMain(state, me, level, humans) };
+      return {
+        by: me,
+        action: level === 'hard' ? planMainByValue(state, me, humans) : planMain(state, me, level, humans),
+      };
     default:
       return null;
   }
@@ -339,6 +351,246 @@ function tradeTowardGoal(state: GameState, me: PlayerColor, level: Difficulty): 
 }
 
 // ---------------------------------------------------------------------------
+// Nivel "dificil": funcao de valor + escolha por simulacao (ValueFunctionPlayer)
+//
+// Inspirado no catanatron (https://github.com/bcollazo/catanatron): em Catan, a
+// busca Alpha-Beta/expectimax com uma funcao de valor feita a mao supera ML
+// (RL/MCTS decepcionaram). Aqui fazemos a versao 1-ply: enumerar as construcoes
+// legais, aplicar o `reduce` puro do engine e escolher a que maximiza a funcao
+// de valor do estado resultante. Ver passos 3-4 (busca de profundidade 2 e
+// auto-ajuste de pesos por self-play) no bloco FUTURE FEATURES no fim do arquivo.
+// ---------------------------------------------------------------------------
+
+/** Pesos da funcao de valor (em "pips equivalentes"). Ajustaveis por self-play. */
+const W = {
+  vp: 4.0, // por ponto de vitoria (publico + cartas +1PV proprias)
+  production: 1.0, // por pip de producao propria efetiva
+  variety: 0.8, // por recurso distinto que produzo
+  enemyProduction: -0.4, // por pip de producao do adversario mais forte
+  buildablePips: 0.7, // por pip de um no vazio JA construivel (oportunidade imediata)
+  buildableCount: 0.4, // por no construivel (variedade de opcoes de expansao)
+  reachable1Pips: 0.25, // por pip de um no alcancavel com +1 estrada
+  handSynergy: 0.3, // proximidade da mao de comprar cidade/vila (negativo => perto e melhor)
+  handCards: 0.04, // liquidez
+  overflow: -0.7, // por carta acima de 7 (risco de descarte no 7)
+  longestRoadLen: 0.3, // por segmento da minha maior estrada (caca ao titulo)
+  knights: 0.3, // por cavaleiro jogado (caca ao Maior Exercito)
+  devCards: 0.25, // por carta de desenvolvimento na mao
+};
+
+/** Producao efetiva de um jogador: soma de pips (cidade conta dobrado) + variedade. */
+function production(state: GameState, color: PlayerColor): { pips: number; variety: number } {
+  let pips = 0;
+  const res = new Set<Resource>();
+  for (const b of Object.values(state.buildings)) {
+    if (b.owner !== color) continue;
+    const v = state.board.vertices[b.vertexId];
+    if (!v) continue;
+    const mult = b.kind === 'city' ? 2 : 1;
+    for (const hid of v.hexes) {
+      const hex = state.board.hexes[hid]!;
+      const r = TERRAIN_RESOURCE[hex.terrain];
+      if (!r) continue;
+      pips += pip(hex.number) * mult;
+      res.add(r);
+    }
+  }
+  return { pips, variety: res.size };
+}
+
+/** Potencial de producao (pips) de um vertice vazio, para avaliar expansao. */
+function vertexPips(state: GameState, vid: string): number {
+  const v = state.board.vertices[vid];
+  if (!v) return 0;
+  let sum = 0;
+  for (const hid of v.hexes) sum += pip(state.board.hexes[hid]!.number);
+  return sum;
+}
+
+/**
+ * Espaco de expansao: nos vazios JA construiveis (ponderados por pips, +contagem)
+ * e producao alcancavel com +1 estrada. Ponderar por pips faz a estrada que abre
+ * um otimo vertice valer a pena (catanatron pesa muito os `buildable_nodes`).
+ */
+function expansionReach(state: GameState, me: PlayerColor): { buildablePips: number; buildableCount: number; reachable1Pips: number } {
+  let buildablePips = 0;
+  let buildableCount = 0;
+  let reachable1Pips = 0;
+  for (const vid of state.board.vertexOrder) {
+    if (state.buildings[vid] || !distanceRuleOk(state, vid)) continue;
+    if (vertexTouchesPlayerRoad(state, me, vid)) {
+      buildablePips += vertexPips(state, vid);
+      buildableCount += 1;
+      continue;
+    }
+    const v = state.board.vertices[vid]!;
+    if (v.edges.some((eid) => !state.roads[eid] && roadConnects(state, me, eid))) {
+      reachable1Pips += vertexPips(state, vid);
+    }
+  }
+  return { buildablePips, buildableCount, reachable1Pips };
+}
+
+/** Quao longe a mao esta de comprar cidade/vila (0 = pronto; maior = mais longe). */
+function handDistance(hand: Record<Resource, number>): number {
+  const city = Math.max(2 - hand.grain, 0) + Math.max(3 - hand.ore, 0);
+  const settle =
+    Math.max(1 - hand.grain, 0) +
+    Math.max(1 - hand.wool, 0) +
+    Math.max(1 - hand.brick, 0) +
+    Math.max(1 - hand.wood, 0);
+  return city + settle;
+}
+
+/**
+ * Funcao de valor: avalia a posicao de `me`. Combina producao (e a do adversario
+ * mais forte, negativa), expansao, pontos, sinergia da mao e cacas a titulos.
+ */
+function evaluate(state: GameState, me: PlayerColor): number {
+  const mine = production(state, me);
+  let enemyPips = 0;
+  for (const p of state.players) {
+    if (p.color === me) continue;
+    enemyPips = Math.max(enemyPips, production(state, p.color).pips);
+  }
+  const { buildablePips, buildableCount, reachable1Pips } = expansionReach(state, me);
+  const p = getPlayer(state, me);
+  const cards = handTotal(p);
+  return (
+    W.vp * scoreOf(state, me) +
+    W.production * mine.pips +
+    W.variety * mine.variety +
+    W.enemyProduction * enemyPips +
+    W.buildablePips * buildablePips +
+    W.buildableCount * buildableCount +
+    W.reachable1Pips * reachable1Pips +
+    W.handSynergy * -handDistance(p.hand) +
+    W.handCards * cards +
+    W.overflow * Math.max(0, cards - 7) +
+    W.longestRoadLen * longestRoadLength(state, me) +
+    W.knights * p.knightsPlayed +
+    W.devCards * p.progressCards.length
+  );
+}
+
+/** Vertice de setup que maximiza a funcao de valor (simula a colocacao). */
+function bestSetupVertexByValue(state: GameState, me: PlayerColor): string {
+  const valid = state.board.vertexOrder.filter((vid) => distanceRuleOk(state, vid));
+  if (valid.length === 0) return state.board.vertexOrder[0]!;
+  let best = valid[0]!;
+  let bestV = -Infinity;
+  for (const vid of valid) {
+    const r = reduce(state, me, { t: 'placeSettlement', vertexId: vid });
+    if (!r.ok) continue;
+    const v = evaluate(r.state, me);
+    if (v > bestV) {
+      bestV = v;
+      best = vid;
+    }
+  }
+  return best;
+}
+
+/** Dentre as acoes candidatas, a que maximiza a funcao de valor (simulando cada uma). */
+function bestActionByValue(state: GameState, me: PlayerColor, candidates: Action[]): Action | null {
+  let best: Action | null = null;
+  let bestV = -Infinity;
+  for (const a of candidates) {
+    const r = reduce(state, me, a);
+    if (!r.ok) continue;
+    const v = evaluate(r.state, me);
+    if (v > bestV) {
+      bestV = v;
+      best = a;
+    }
+  }
+  return best;
+}
+
+/**
+ * Fase principal do nivel dificil (HIBRIDO). Mantem a MESMA ordem de prioridades
+ * do nivel medio — que ja expande e fecha jogos com eficiencia (cidade > vila >
+ * estrada que destrava > troca > carta) — mas escolhe ONDE construir pela funcao
+ * de valor (simula cada alvo e pega o de maior valor de TABULEIRO, ciente da
+ * producao do adversario e do espaco de expansao), em vez do pip local.
+ *
+ * Por que hibrido e nao 1-ply puro: medimos por self-play que o ValueFunctionPlayer
+ * guloso de 1 lance NAO supera esta lista de prioridades (a forca do catanatron vem
+ * da busca de profundidade 2 — passo 3). O hibrido nunca regride abaixo do medio e
+ * decide as colocacoes melhor.
+ */
+function planMainByValue(state: GameState, me: PlayerColor, humans: PlayerColor[]): Action {
+  const p = getPlayer(state, me);
+
+  // 1. Carta util (heuristica ja boa; evita "espiar" o baralho ao simular compra).
+  const card = planPlayCard(state, me, 'hard');
+  if (card) return card;
+
+  // 2. Estrada gratis pendente (carta "2 Estradas").
+  if (state.pendingFreeRoads > 0 && p.pieces.roads > 0) {
+    const road = roadToUnlock(state, me, 'hard') ?? anyLegalRoad(state, me);
+    if (road) return { t: 'buildRoad', edgeId: road };
+  }
+
+  // 3. Cidade (2 PV): escolhe QUAL vila promover pela funcao de valor.
+  if (p.pieces.cities > 0 && canAfford(p.hand, COSTS.city)) {
+    const cands: Action[] = [];
+    for (const [vid, b] of Object.entries(state.buildings)) {
+      if (b.owner === me && b.kind === 'settlement') cands.push({ t: 'buildCity', vertexId: vid });
+    }
+    const a = bestActionByValue(state, me, cands);
+    if (a) return a;
+  }
+
+  // 4. Vila (expansao): escolhe O MELHOR vertice pela funcao de valor.
+  if (p.pieces.settlements > 0 && canAfford(p.hand, COSTS.settlement)) {
+    const cands: Action[] = [];
+    for (const vid of state.board.vertexOrder) {
+      if (!state.buildings[vid] && distanceRuleOk(state, vid) && vertexTouchesPlayerRoad(state, me, vid)) {
+        cands.push({ t: 'buildSettlement', vertexId: vid });
+      }
+    }
+    const a = bestActionByValue(state, me, cands);
+    if (a) return a;
+  }
+
+  // 5. Estrada que destrava uma nova vila: escolhe a melhor pela funcao de valor.
+  if (p.pieces.roads > 0 && p.pieces.settlements > 0 && canAfford(p.hand, COSTS.road)) {
+    const cands: Action[] = [];
+    for (const eid of state.board.edgeOrder) {
+      if (state.roads[eid] || !roadConnects(state, me, eid)) continue;
+      const e = state.board.edges[eid]!;
+      // So estradas que abrem um vertice novo e legal (rumo a expansao).
+      const opens = e.v.some(
+        (far) => !state.buildings[far] && distanceRuleOk(state, far) && !vertexTouchesPlayerRoad(state, me, far),
+      );
+      if (opens) cands.push({ t: 'buildRoad', edgeId: eid });
+    }
+    const a = bestActionByValue(state, me, cands);
+    if (a) return a;
+  }
+
+  // 6. Oferecer troca a um humano (uma por turno) rumo a expansao.
+  const offer = planTradeProposal(state, me, 'hard', humans);
+  if (offer) return offer;
+
+  // 7. Trocar com o banco rumo a expansao.
+  const trade = tradeTowardGoal(state, me, 'hard');
+  if (trade) return trade;
+
+  // 8. Sem expandir agora: usar a sobra comprando carta (PV/cavaleiro).
+  if (state.devDeck.length > 0 && canAfford(p.hand, COSTS.progressCard)) return { t: 'buyProgressCard' };
+
+  // 9. Estender estrada (caca a Estrada Mais Longa).
+  if (p.pieces.roads > 0 && canAfford(p.hand, COSTS.road)) {
+    const road = roadToUnlock(state, me, 'hard') ?? anyLegalRoad(state, me);
+    if (road) return { t: 'buildRoad', edgeId: road };
+  }
+
+  return { t: 'endTurn' };
+}
+
+// ---------------------------------------------------------------------------
 // Cartas de progresso
 // ---------------------------------------------------------------------------
 
@@ -528,3 +780,24 @@ function tradeFavorable(state: GameState, c: PlayerColor, trade: TradeOffer): bo
   const totalGive = (Object.values(trade.want) as number[]).reduce((s, n) => s + (n ?? 0), 0);
   return totalGet > 0 && totalGet >= totalGive;
 }
+
+// ===========================================================================
+// FUTURE FEATURES — proximos passos da IA (ver memoria catan-ai-research)
+// ===========================================================================
+//
+// FEITO (passos 1-2): funcao de valor `evaluate()` + ValueFunctionPlayer 1-ply no
+// nivel "dificil" (`planMainByValue` / `bestSetupVertexByValue`). easy/medio intactos.
+//
+// PASSO 3 — Busca expectimax de profundidade 2 (nivel "mestre"):
+//   Sobre a melhor jogada, ramificar pelos resultados dos dados 2..12 ponderados
+//   pela probabilidade (2/12:1, ... 7:6, ... ), pegando o valor ESPERADO dos
+//   estados-filhos (como o AlphaBetaPlayer n=2 do catanatron, que modela a
+//   incerteza do dado/roubo/compra). Alpha-beta para podar. Aproveitar que o
+//   `reduce` e puro/deterministico e ja temos `evaluate()` como folha.
+//
+// PASSO 4 — Auto-ajuste de pesos por self-play:
+//   Como o engine e deterministico e gravamos partidas (apps/web/src/ui/replays.ts),
+//   rodar N partidas bot-vs-bot variando os pesos `W` (hill-climbing / coordinate
+//   descent ou um GA simples) e selecionar o conjunto com maior win-rate contra a
+//   versao atual. Usar o harness de self-play (packages/bot/test) como base e
+//   fixar seeds para reprodutibilidade.
