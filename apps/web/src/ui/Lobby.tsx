@@ -4,6 +4,7 @@ import type { Difficulty } from '@hexgame/bot';
 import type { ReactNode } from 'react';
 import { Users, Bot, Dices, Target, Play, ArrowLeft, Shuffle, UserPlus, X, Crown } from 'lucide-react';
 import { PLAYER_FILL, PLAYER_LABEL } from '../game/theme.js';
+import { pickBotName } from '../game/botNames.js';
 
 export interface GameConfig {
   players: { color: PlayerColor; name: string }[];
@@ -20,7 +21,7 @@ export interface GameConfig {
 const CREST: Record<PlayerColor, string> = { red: '👑', blue: '🌿', white: '⚒️', orange: '🪓' };
 const DIFF_LABEL: Record<Difficulty, string> = { easy: 'Fácil', medium: 'Médio', hard: 'Difícil' };
 
-type Seat = { type: 'host' } | { type: 'open' } | { type: 'bot'; diff: Difficulty };
+type Seat = { type: 'host' } | { type: 'open' } | { type: 'bot'; diff: Difficulty; name: string };
 
 export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void; onBack?: () => void }) {
   const [roomSize, setRoomSize] = useState(4);
@@ -54,6 +55,15 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
     });
   }
 
+  function addBot(i: number) {
+    setSeats((prev) => {
+      const used = [hostName.trim(), ...prev.flatMap((s) => (s.type === 'bot' ? [s.name] : []))];
+      const next = [...prev];
+      next[i] = { type: 'bot', diff: 'medium', name: pickBotName(used).name };
+      return next;
+    });
+  }
+
   function start() {
     if (!canStart) return;
     const seed = seedText.trim() === '' ? Math.floor(Math.random() * 0x7fffffff) : hashSeed(seedText.trim());
@@ -67,7 +77,7 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
       if (s.type === 'host') {
         players.push({ color, name: hostName.trim() || 'Você' });
       } else {
-        players.push({ color, name: `Bot ${ci}` });
+        players.push({ color, name: s.name });
         bots.push(color);
         botDifficulty[color] = s.diff;
       }
@@ -106,31 +116,32 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
               return (
                 <div key={i} className="su-seat open">
                   <span className="su-open-label"><UserPlus size={16} /> Vaga aberta <em>aguardando jogador</em></span>
-                  <button className="su-addbot" onClick={() => setSeat(i, { type: 'bot', diff: 'medium' })}><Bot size={15} /> Adicionar bot</button>
+                  <button className="su-addbot" onClick={() => addBot(i)}><Bot size={15} /> Adicionar bot</button>
                 </div>
               );
             }
             const c = color!;
-            return (
-              <div key={i} className="su-seat filled" style={{ borderLeftColor: PLAYER_FILL[c] }}>
-                <span className="su-crest" style={{ background: PLAYER_FILL[c] }} title={PLAYER_LABEL[c]}>{CREST[c]}</span>
-                {s.type === 'host' ? (
+            if (s.type === 'host') {
+              return (
+                <div key={i} className="su-seat filled" style={{ borderLeftColor: PLAYER_FILL[c] }}>
+                  <span className="su-crest" style={{ background: PLAYER_FILL[c] }} title={PLAYER_LABEL[c]}>{CREST[c]}</span>
                   <input className="su-name" value={hostName} maxLength={16} onChange={(e) => setHostName(e.target.value)} />
-                ) : (
-                  <span className="su-name bot-name"><Bot size={14} /> Bot {i + 1}</span>
-                )}
-                {s.type === 'host' ? (
                   <span className="su-tag host"><Crown size={12} /> Anfitrião</span>
-                ) : (
-                  <>
-                    <div className="su-seg xs">
-                      {(['easy', 'medium', 'hard'] as Difficulty[]).map((d) => (
-                        <button key={d} className={s.diff === d ? 'on' : ''} onClick={() => setSeat(i, { type: 'bot', diff: d })}>{DIFF_LABEL[d]}</button>
-                      ))}
-                    </div>
-                    <button className="su-remove" title="Liberar vaga" onClick={() => setSeat(i, { type: 'open' })}><X size={15} /></button>
-                  </>
-                )}
+                </div>
+              );
+            }
+            return (
+              <div key={i} className="su-seat filled bot" style={{ borderLeftColor: PLAYER_FILL[c] }}>
+                <div className="su-seat-row">
+                  <span className="su-crest" style={{ background: PLAYER_FILL[c] }} title={PLAYER_LABEL[c]}>{CREST[c]}</span>
+                  <span className="su-name bot-name"><Bot size={14} /> {s.name}</span>
+                  <button className="su-remove" title="Liberar vaga" onClick={() => setSeat(i, { type: 'open' })}><X size={15} /></button>
+                </div>
+                <div className="su-seg xs su-seat-diff">
+                  {(['easy', 'medium', 'hard'] as Difficulty[]).map((d) => (
+                    <button key={d} className={s.diff === d ? 'on' : ''} onClick={() => setSeat(i, { type: 'bot', diff: d, name: s.name })}>{DIFF_LABEL[d]}</button>
+                  ))}
+                </div>
               </div>
             );
           })}

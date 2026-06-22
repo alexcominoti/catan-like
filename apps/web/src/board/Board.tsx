@@ -249,10 +249,11 @@ export function Board({ state, mode, hintVertex, onVertex, onEdge, onHex }: Boar
         const road = roads[eid];
         if (road) {
           return (
-            <g key={eid} className="piece-enter" filter="url(#softShadow)">
-              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0c1118" strokeWidth={11} strokeLinecap="round" />
-              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PLAYER_FILL[road.owner]} strokeWidth={7.5} strokeLinecap="round" />
-              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#ffffff" strokeOpacity={0.28} strokeWidth={2.4} strokeLinecap="round" />
+            <g key={eid} className="piece-enter">
+              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0c1118" strokeWidth={11} strokeLinecap="round" opacity={0.55} />
+              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0c1118" strokeWidth={10} strokeLinecap="round" />
+              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PLAYER_FILL[road.owner]} strokeWidth={7} strokeLinecap="round" />
+              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#ffffff" strokeOpacity={0.28} strokeWidth={2.2} strokeLinecap="round" />
             </g>
           );
         }
@@ -311,12 +312,22 @@ export function Board({ state, mode, hintVertex, onVertex, onEdge, onHex }: Boar
   );
 }
 
+function starPath(cx: number, cy: number, outer: number, inner: number, points = 5): string {
+  let d = '';
+  for (let i = 0; i < points * 2; i++) {
+    const r = i % 2 === 0 ? outer : inner;
+    const a = -Math.PI / 2 + (i * Math.PI) / points;
+    d += `${i === 0 ? 'M' : 'L'}${(cx + r * Math.cos(a)).toFixed(1)} ${(cy + r * Math.sin(a)).toFixed(1)}`;
+  }
+  return `${d}Z`;
+}
+
 function SpotHint({ x, y }: { x: number; y: number }) {
   return (
     <g pointerEvents="none" className="spot-hint">
-      <circle cx={x} cy={y} r={11} fill="none" stroke="#2e9e57" strokeWidth={3} className="spot-ring" />
+      <circle cx={x} cy={y} r={11} fill="none" stroke="#e8b53a" strokeWidth={3} className="spot-ring" />
       <g className="spot-arrow" filter="url(#softShadow)">
-        <path d={`M ${x} ${y - 17} l 7 -10 l -4 0 l 0 -9 l -6 0 l 0 9 l -4 0 Z`} fill="#2e9e57" stroke="#fdfbf6" strokeWidth={1.4} strokeLinejoin="round" />
+        <path d={starPath(x, y - 26, 9.5, 4)} fill="#e8b53a" stroke="#ffffff" strokeWidth={1.6} strokeLinejoin="round" />
       </g>
     </g>
   );

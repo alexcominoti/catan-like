@@ -79,11 +79,14 @@ function buildCard(resource: Resource): string {
         <stop offset="45%" stop-color="#ffffff" stop-opacity="0.06"/>
         <stop offset="100%" stop-color="#000000" stop-opacity="0.18"/>
       </linearGradient>
+      <clipPath id="face"><rect x="6" y="6" width="94" height="138" rx="10"/></clipPath>
     </defs>
     <rect x="2" y="2" width="102" height="146" rx="13" fill="#fdfbf6"/>
-    <rect x="6" y="6" width="94" height="138" rx="10" fill="${bg}"/>
-    ${MOTIF[resource]}
-    <rect x="6" y="6" width="94" height="138" rx="10" fill="url(#sky)"/>
+    <g clip-path="url(#face)">
+      <rect x="6" y="6" width="94" height="138" fill="${bg}"/>
+      ${MOTIF[resource]}
+      <rect x="6" y="6" width="94" height="138" fill="url(#sky)"/>
+    </g>
     <rect x="6" y="6" width="94" height="138" rx="10" fill="none" stroke="rgba(0,0,0,0.28)" stroke-width="1.5"/>
   </svg>`;
   return `data:image/svg+xml,${encodeURIComponent(svg.replace(/\s+/g, ' ').trim())}`;

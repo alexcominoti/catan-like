@@ -248,6 +248,12 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
         const b = newState.board.hexes[moved.hexId];
         if (a && b) fly({ kind: 'robber', from: svgScreen(svg, a.cx, a.cy), to: svgScreen(svg, b.cx, b.cy), duration: 650 });
       }
+      // Roubo pelo ladrão: carta da vítima -> ladrão (após o ladrão pousar).
+      if (moved && moved.stoleFrom && moved.resource) {
+        const from = destForOwner(moved.stoleFrom, localColor);
+        const to = destForOwner(by, localColor);
+        if (from && to) fly({ kind: 'card', img: RES_IMG[moved.resource], from, to, delay: 380, duration: 560 });
+      }
       // Gasto/descarte: mão (ou avatar) -> Banco.
       if (spend) {
         const from = destForOwner(by, localColor);
