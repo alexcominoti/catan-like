@@ -95,6 +95,17 @@ descarte**. Mãos dos adversários ficam ocultas (só a contagem aparece); carta
 
 ### Próximos passos
 
+- **IA do bot — passo 3:** busca **expectimax de profundidade 2** (valor esperado
+  sobre os resultados dos dados 2–12, ponderados por probabilidade) com poda
+  alfa-beta, reaproveitando a função de valor `evaluate()` como folha. É onde está
+  o maior salto de força (o `AlphaBetaPlayer n=2` é o bot forte do catanatron).
+- **IA do bot — passo 4:** **auto-ajuste dos pesos** `W` da função de valor por
+  self-play (hill-climbing / algoritmo genético), usando o harness determinístico
+  em `packages/bot/test/selfplay.test.ts`. _(Passos 1–2 — função de valor +
+  seleção de jogada por simulação no nível difícil — já entregues; ver bloco
+  `FUTURE FEATURES` em `packages/bot/src/index.ts`.)_
+- Visualizador de **replay** (partidas já são gravadas em
+  `apps/web/src/ui/replays.ts`; falta a tela de listar/assistir).
 - Refino de UX, acessibilidade/mobile, tema claro.
 - Fase 2: servidor `ws` autoritativo + `projectFor` (fog of war) para jogar de
   abas/PCs diferentes.
