@@ -109,6 +109,14 @@ export function resolveBotProposal(state: GameState): BotMove | null {
   return { by: t.from, action: { t: 'cancelTrade' } };
 }
 
+/**
+ * Sugere o melhor vertice para a vila inicial (mesma avaliacao do nivel dificil).
+ * Usado pela UI para destacar um bom spot ao humano durante o setup.
+ */
+export function suggestSetupSettlement(state: GameState, color: PlayerColor): string {
+  return bestSetupVertexByValue(state, color);
+}
+
 // ---------------------------------------------------------------------------
 // Avaliacao de posicoes (sensivel ao nivel)
 // ---------------------------------------------------------------------------

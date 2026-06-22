@@ -1,11 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { PLAYER_COLORS, type DesertPlacement, type NumberLayout, type PlayerColor } from '@hexgame/engine';
 import type { Difficulty } from '@hexgame/bot';
 import type { ReactNode } from 'react';
-import { Users, Smile, Bot, Dices, Target, Play, ArrowLeft, Shuffle } from 'lucide-react';
+import { Users, Bot, Dices, Target, Play, ArrowLeft, Shuffle, UserPlus, X, Crown } from 'lucide-react';
 import { PLAYER_FILL, PLAYER_LABEL } from '../game/theme.js';
-
-export type SeatKind = 'human' | 'bot';
 
 export interface GameConfig {
   players: { color: PlayerColor; name: string }[];
@@ -18,44 +16,60 @@ export interface GameConfig {
   discardLimit: number;
 }
 
-const DEFAULT_NAMES = ['Você', 'Bot 2', 'Bot 3', 'Bot 4'];
-const DEFAULT_KINDS: SeatKind[] = ['human', 'bot', 'bot', 'bot'];
+/** Crests por cor (mesmos do jogo) para a UI ficar coerente. */
+const CREST: Record<PlayerColor, string> = { red: '👑', blue: '🌿', white: '⚒️', orange: '🪓' };
 const DIFF_LABEL: Record<Difficulty, string> = { easy: 'Fácil', medium: 'Médio', hard: 'Difícil' };
 
+type Seat = { type: 'host' } | { type: 'open' } | { type: 'bot'; diff: Difficulty };
+
 export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void; onBack?: () => void }) {
-  const [count, setCount] = useState(4);
-  const [names, setNames] = useState<string[]>([...DEFAULT_NAMES]);
-  const [colors, setColors] = useState<PlayerColor[]>([...PLAYER_COLORS]);
-  const [kinds, setKinds] = useState<SeatKind[]>([...DEFAULT_KINDS]);
-  const [diffs, setDiffs] = useState<Difficulty[]>(['medium', 'medium', 'medium', 'medium']);
+  const [roomSize, setRoomSize] = useState(4);
+  const [hostName, setHostName] = useState('Você');
+  // Sala recem-criada: so o anfitriao; as demais vagas comecam ABERTAS.
+  const [seats, setSeats] = useState<Seat[]>([{ type: 'host' }, { type: 'open' }, { type: 'open' }, { type: 'open' }]);
   const [numberLayout, setNumberLayout] = useState<NumberLayout>('balanced');
   const [desert, setDesert] = useState<DesertPlacement>('random');
   const [pointsToWin, setPointsToWin] = useState(10);
   const [discardLimit, setDiscardLimit] = useState(7);
   const [seedText, setSeedText] = useState('');
 
-  function setColor(slot: number, color: PlayerColor) {
-    setColors((prev) => {
+  const visible = seats.slice(0, roomSize);
+
+  // Cada assento ocupado recebe uma cor na ORDEM de preenchimento (host, depois bots).
+  const colorByIndex = useMemo(() => {
+    const out: (PlayerColor | null)[] = [];
+    let ci = 0;
+    for (const s of visible) out.push(s.type === 'open' ? null : PLAYER_COLORS[ci++]!);
+    return out;
+  }, [visible]);
+
+  const filledCount = colorByIndex.filter(Boolean).length;
+  const canStart = filledCount >= 3;
+
+  function setSeat(i: number, s: Seat) {
+    setSeats((prev) => {
       const next = [...prev];
-      const other = next.indexOf(color);
-      if (other >= 0) next[other] = next[slot]!;
-      next[slot] = color;
+      next[i] = s;
       return next;
     });
   }
 
   function start() {
+    if (!canStart) return;
     const seed = seedText.trim() === '' ? Math.floor(Math.random() * 0x7fffffff) : hashSeed(seedText.trim());
-    const players = Array.from({ length: count }, (_, i) => ({
-      color: colors[i]!,
-      name: names[i]!.trim() || DEFAULT_NAMES[i]!,
-    }));
+    const players: { color: PlayerColor; name: string }[] = [];
     const bots: PlayerColor[] = [];
     const botDifficulty: Record<string, Difficulty> = {};
-    players.forEach((p, i) => {
-      if (kinds[i] === 'bot') {
-        bots.push(p.color);
-        botDifficulty[p.color] = diffs[i]!;
+    let ci = 0;
+    visible.forEach((s) => {
+      if (s.type === 'open') return;
+      const color = PLAYER_COLORS[ci++]!;
+      if (s.type === 'host') {
+        players.push({ color, name: hostName.trim() || 'Você' });
+      } else {
+        players.push({ color, name: `Bot ${ci}` });
+        bots.push(color);
+        botDifficulty[color] = s.diff;
       }
     });
     onStart({
@@ -76,42 +90,50 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
 
       <div className="setup-grid">
         <div className="card su-players">
-          <h2 className="su-h"><Users size={18} className="ic-primary" /> Jogadores ({count}/4)</h2>
-          <div className="su-seg full">
-            {[3, 4].map((n) => (
-              <button key={n} className={count === n ? 'on' : ''} onClick={() => setCount(n)}>{n} jogadores</button>
-            ))}
+          <div className="su-players-head">
+            <h2 className="su-h"><Users size={18} className="ic-primary" /> Jogadores <span className="su-count">{filledCount}/{roomSize}</span></h2>
+            <div className="su-seg sm">
+              {[3, 4].map((n) => (
+                <button key={n} className={roomSize === n ? 'on' : ''} onClick={() => setRoomSize(n)}>{n}</button>
+              ))}
+            </div>
           </div>
-          {Array.from({ length: count }, (_, i) => (
-            <div key={i} className="su-seat" style={{ borderLeftColor: PLAYER_FILL[colors[i]!] }}>
-              <div className="su-seat-top">
-                <input value={names[i]} maxLength={16}
-                  onChange={(e) => setNames((p) => { const n = [...p]; n[i] = e.target.value; return n; })} />
-                <div className="su-seg sm">
-                  <button className={kinds[i] === 'human' ? 'on' : ''} title="Humano"
-                    onClick={() => setKinds((p) => { const n = [...p]; n[i] = 'human'; return n; })}><Smile size={15} /></button>
-                  <button className={kinds[i] === 'bot' ? 'on' : ''} title="Bot"
-                    onClick={() => setKinds((p) => { const n = [...p]; n[i] = 'bot'; return n; })}><Bot size={15} /></button>
+          <p className="su-note">Convide amigos pelo link ou preencha as vagas com bots.</p>
+
+          {visible.map((s, i) => {
+            const color = colorByIndex[i];
+            if (s.type === 'open') {
+              return (
+                <div key={i} className="su-seat open">
+                  <span className="su-open-label"><UserPlus size={16} /> Vaga aberta <em>aguardando jogador</em></span>
+                  <button className="su-addbot" onClick={() => setSeat(i, { type: 'bot', diff: 'medium' })}><Bot size={15} /> Adicionar bot</button>
                 </div>
-              </div>
-              <div className="su-seat-bottom">
-                <div className="su-colors">
-                  {PLAYER_COLORS.map((c) => (
-                    <button key={c} title={PLAYER_LABEL[c]} className={`su-dot${colors[i] === c ? ' on' : ''}`}
-                      style={{ background: PLAYER_FILL[c] }} onClick={() => setColor(i, c)} />
-                  ))}
-                </div>
-                {kinds[i] === 'bot' && (
-                  <div className="su-seg xs">
-                    {(['easy', 'medium', 'hard'] as Difficulty[]).map((d) => (
-                      <button key={d} className={diffs[i] === d ? 'on' : ''}
-                        onClick={() => setDiffs((p) => { const n = [...p]; n[i] = d; return n; })}>{DIFF_LABEL[d]}</button>
-                    ))}
-                  </div>
+              );
+            }
+            const c = color!;
+            return (
+              <div key={i} className="su-seat filled" style={{ borderLeftColor: PLAYER_FILL[c] }}>
+                <span className="su-crest" style={{ background: PLAYER_FILL[c] }} title={PLAYER_LABEL[c]}>{CREST[c]}</span>
+                {s.type === 'host' ? (
+                  <input className="su-name" value={hostName} maxLength={16} onChange={(e) => setHostName(e.target.value)} />
+                ) : (
+                  <span className="su-name bot-name"><Bot size={14} /> Bot {i + 1}</span>
+                )}
+                {s.type === 'host' ? (
+                  <span className="su-tag host"><Crown size={12} /> Anfitrião</span>
+                ) : (
+                  <>
+                    <div className="su-seg xs">
+                      {(['easy', 'medium', 'hard'] as Difficulty[]).map((d) => (
+                        <button key={d} className={s.diff === d ? 'on' : ''} onClick={() => setSeat(i, { type: 'bot', diff: d })}>{DIFF_LABEL[d]}</button>
+                      ))}
+                    </div>
+                    <button className="su-remove" title="Liberar vaga" onClick={() => setSeat(i, { type: 'open' })}><X size={15} /></button>
+                  </>
                 )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="card su-settings">
@@ -140,7 +162,9 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
             </div>
           </div>
 
-          <button className="cta big su-start" onClick={start}><Play size={16} /> Começar partida</button>
+          <button className="cta big su-start" disabled={!canStart} onClick={start}>
+            <Play size={16} /> {canStart ? 'Começar partida' : 'Mínimo de 3 jogadores'}
+          </button>
         </div>
       </div>
     </div>

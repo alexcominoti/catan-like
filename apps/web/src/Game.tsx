@@ -21,7 +21,7 @@ import {
   Dices, ArrowLeftRight, Hand, MessageSquare, Send, Landmark,
   Volume2, VolumeX, HelpCircle, LogOut,
 } from 'lucide-react';
-import { planBotAction, resolveBotProposal } from '@hexgame/bot';
+import { planBotAction, resolveBotProposal, suggestSetupSettlement } from '@hexgame/bot';
 import { Board, type InteractionMode } from './board/Board.js';
 import { Dice } from './ui/Dice.js';
 import { HandBar } from './ui/HandBar.js';
@@ -143,6 +143,12 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
     if (state.phase === 'main') return mode;
     return 'idle';
   }, [state.phase, state.setupLastVertex, state.currentPlayer, mode, isBot]);
+
+  // Dica do melhor spot: so durante o setup, quando o humano vai colocar a vila.
+  const setupHint = useMemo(
+    () => (effMode === 'placeSettlement' ? suggestSetupSettlement(state, state.currentPlayer) : null),
+    [effMode, state],
+  );
 
   function resetTransient() {
     setArming(null);
@@ -458,7 +464,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
           </div>
 
           <div className="board-wrap" style={{ borderColor: playerColor }}>
-            <Board state={state} mode={effMode} onVertex={onVertex} onEdge={onEdge} onHex={onHex} />
+            <Board state={state} mode={effMode} hintVertex={setupHint} onVertex={onVertex} onEdge={onEdge} onHex={onHex} />
             {state.activeTrade && (
               <ActiveTradePopup state={state} dispatch={dispatch} localColor={localColor}
                 botOffer={isBot(state.activeTrade.from)} onCounter={() => openCounter(state.activeTrade!)} />

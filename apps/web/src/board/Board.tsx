@@ -21,6 +21,8 @@ export type InteractionMode =
 interface BoardProps {
   state: GameState;
   mode: InteractionMode;
+  /** Vertice sugerido (melhor spot) para destacar no setup. */
+  hintVertex?: string | null;
   onVertex: (vertexId: string) => void;
   onEdge: (edgeId: string) => void;
   onHex: (hexId: string) => void;
@@ -83,7 +85,7 @@ function norm(v: Pt): Pt {
   return { x: v.x / l, y: v.y / l };
 }
 
-export function Board({ state, mode, onVertex, onEdge, onHex }: BoardProps) {
+export function Board({ state, mode, hintVertex, onVertex, onEdge, onHex }: BoardProps) {
   const { board, buildings, roads, blocker } = state;
   const me = state.currentPlayer;
   const hexMode = mode === 'moveBlocker';
@@ -247,9 +249,10 @@ export function Board({ state, mode, onVertex, onEdge, onHex }: BoardProps) {
         const road = roads[eid];
         if (road) {
           return (
-            <g key={eid} className="piece-enter">
-              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0c1118" strokeWidth={12} strokeLinecap="round" opacity={0.35} />
-              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PLAYER_FILL[road.owner]} strokeWidth={8} strokeLinecap="round" />
+            <g key={eid} className="piece-enter" filter="url(#softShadow)">
+              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0c1118" strokeWidth={11} strokeLinecap="round" />
+              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PLAYER_FILL[road.owner]} strokeWidth={7.5} strokeLinecap="round" />
+              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#ffffff" strokeOpacity={0.28} strokeWidth={2.4} strokeLinecap="round" />
             </g>
           );
         }
@@ -299,7 +302,23 @@ export function Board({ state, mode, onVertex, onEdge, onHex }: BoardProps) {
           </g>
         );
       })}
+
+      {/* Dica do melhor spot (setup): anel pulsante + seta saltitante */}
+      {hintVertex && board.vertices[hintVertex] && !buildings[hintVertex] && (
+        <SpotHint x={board.vertices[hintVertex]!.x} y={board.vertices[hintVertex]!.y} />
+      )}
     </svg>
+  );
+}
+
+function SpotHint({ x, y }: { x: number; y: number }) {
+  return (
+    <g pointerEvents="none" className="spot-hint">
+      <circle cx={x} cy={y} r={11} fill="none" stroke="#2e9e57" strokeWidth={3} className="spot-ring" />
+      <g className="spot-arrow" filter="url(#softShadow)">
+        <path d={`M ${x} ${y - 17} l 7 -10 l -4 0 l 0 -9 l -6 0 l 0 9 l -4 0 Z`} fill="#2e9e57" stroke="#fdfbf6" strokeWidth={1.4} strokeLinejoin="round" />
+      </g>
+    </g>
   );
 }
 
@@ -433,18 +452,39 @@ function Tuft({ x, y, c }: { x: number; y: number; c: string }) {
 }
 
 function BuildingGlyph({ x, y, kind, fill }: { x: number; y: number; kind: 'settlement' | 'city'; fill: string }) {
+  const dark = '#0c1118';
   if (kind === 'city') {
+    // Cidade: torre central com ameias entre duas alas mais baixas (maior que a vila).
     return (
       <g pointerEvents="none" className="piece-enter" filter="url(#softShadow)">
-        <rect x={x - 11} y={y - 4} width={22} height={14} rx={2} fill={fill} stroke="#0c1118" strokeWidth={1.5} />
-        <polygon points={`${x - 11},${y - 4} ${x},${y - 13} ${x + 11},${y - 4}`} fill={fill} stroke="#0c1118" strokeWidth={1.5} />
-        <rect x={x - 3} y={y + 1} width={6} height={9} fill="#0c1118" opacity={0.55} />
+        {/* alas laterais */}
+        <rect x={x - 15} y={y} width={11} height={12} rx={1.5} fill={fill} stroke={dark} strokeWidth={1.4} />
+        <rect x={x + 4} y={y} width={11} height={12} rx={1.5} fill={fill} stroke={dark} strokeWidth={1.4} />
+        {/* sombra das alas */}
+        <rect x={x - 15} y={y} width={11} height={12} rx={1.5} fill="#000" opacity={0.12} />
+        <rect x={x + 4} y={y} width={11} height={12} rx={1.5} fill="#000" opacity={0.12} />
+        {/* torre central */}
+        <rect x={x - 6} y={y - 13} width={12} height={25} rx={1.5} fill={fill} stroke={dark} strokeWidth={1.5} />
+        {/* ameias (merloes) */}
+        <rect x={x - 6} y={y - 16} width={3.4} height={4} fill={fill} stroke={dark} strokeWidth={1.2} />
+        <rect x={x - 1.7} y={y - 16} width={3.4} height={4} fill={fill} stroke={dark} strokeWidth={1.2} />
+        <rect x={x + 2.6} y={y - 16} width={3.4} height={4} fill={fill} stroke={dark} strokeWidth={1.2} />
+        {/* janelas e porta */}
+        <rect x={x - 2.4} y={y - 9} width={4.8} height={5} rx={1} fill={dark} opacity={0.55} />
+        <rect x={x - 2.4} y={y + 2} width={4.8} height={10} rx={1} fill={dark} opacity={0.62} />
       </g>
     );
   }
+  // Vila: casinha com telhado e porta (um pouco maior que o modelo antigo).
   return (
     <g pointerEvents="none" className="piece-enter" filter="url(#softShadow)">
-      <polygon points={`${x - 8},${y + 7} ${x - 8},${y - 2} ${x},${y - 9} ${x + 8},${y - 2} ${x + 8},${y + 7}`} fill={fill} stroke="#0c1118" strokeWidth={1.5} />
+      {/* paredes */}
+      <rect x={x - 10} y={y - 1} width={20} height={11} rx={1.5} fill={fill} stroke={dark} strokeWidth={1.5} />
+      {/* telhado */}
+      <polygon points={`${x - 12},${y} ${x},${y - 13} ${x + 12},${y}`} fill={fill} stroke={dark} strokeWidth={1.5} strokeLinejoin="round" />
+      <polygon points={`${x - 12},${y} ${x},${y - 13} ${x + 12},${y}`} fill="#000" opacity={0.16} />
+      {/* porta */}
+      <rect x={x - 2.6} y={y + 2} width={5.2} height={8} rx={1} fill={dark} opacity={0.55} />
     </g>
   );
 }
