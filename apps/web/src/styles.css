@@ -1430,3 +1430,9 @@ button.link {
 .su-start { width: 100%; margin-top: 10px; justify-content: center; }
 
 @media (max-width: 760px) { .setup-grid { grid-template-columns: 1fr; } }
+
+/* Camada de animação (cartas/ladrão voando) */
+.fly-layer { position: fixed; inset: 0; pointer-events: none; z-index: 200; overflow: hidden; }
+.fly-el { position: absolute; top: 0; left: 0; will-change: transform, opacity; }
+.fly-card { border-radius: 5px; border: 2px solid #fdfbf6; object-fit: cover; box-shadow: 2px 4px 9px rgba(0, 0, 0, 0.35); }
+.fly-robber { border-radius: 50% 50% 45% 45%; background: #2b2b2b; box-shadow: 0 0 0 2px #111, 0 4px 8px rgba(0, 0, 0, 0.45); }

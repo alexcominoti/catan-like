@@ -1,29 +1,6 @@
 import { RESOURCES, type ProgressCard, type Resource } from '@hexgame/engine';
 import { RESOURCE_LABEL } from '../game/theme.js';
-import cardBrick from '../assets/card-brick.jpg';
-import cardWood from '../assets/card-wood.jpg';
-import cardSheep from '../assets/card-sheep.jpg';
-import cardWheat from '../assets/card-wheat.jpg';
-import cardOre from '../assets/card-ore.jpg';
-import cardKnight from '../assets/card-knight.jpg';
-import cardRoad from '../assets/card-road.jpg';
-import cardVictory from '../assets/card-victory.jpg';
-
-const RES_IMG: Record<Resource, string> = {
-  wood: cardWood,
-  brick: cardBrick,
-  wool: cardSheep,
-  grain: cardWheat,
-  ore: cardOre,
-};
-
-const DEV_IMG: Record<ProgressCard, string> = {
-  knight: cardKnight,
-  roadBuilding: cardRoad,
-  yearOfPlenty: cardVictory,
-  monopoly: cardVictory,
-  victoryPoint: cardVictory,
-};
+import { RES_IMG, DEV_IMG } from '../game/cards.js';
 
 const DEV_LABEL: Record<ProgressCard, string> = {
   knight: 'Cavaleiro',

@@ -8,6 +8,7 @@ import {
   maritimeRate,
   COSTS,
   RESOURCES,
+  TERRAIN_RESOURCE,
   type Action,
   type GameEvent,
   type GameState,
@@ -24,6 +25,8 @@ import { planBotAction, resolveBotProposal } from '@hexgame/bot';
 import { Board, type InteractionMode } from './board/Board.js';
 import { Dice } from './ui/Dice.js';
 import { HandBar } from './ui/HandBar.js';
+import { useFlyer, FlyLayer, type Pt } from './ui/FlyLayer.js';
+import { RES_IMG } from './game/cards.js';
 import { Toasts, useToasts, type ToastTone } from './ui/Toasts.js';
 import { play as playSound, setMuted, unlockAudio, type SoundKind } from './ui/sound.js';
 import { saveReplay } from './ui/replays.js';
@@ -93,6 +96,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   // Historico de acoes da partida (para replay + treino da IA).
   const historyRef = useRef<{ by: PlayerColor; action: Action }[]>([]);
   const { toasts, push } = useToasts();
+  const { items: flyItems, fly } = useFlyer();
 
   // Cronometro: conta enquanto a partida nao terminou.
   useEffect(() => {
@@ -148,6 +152,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   }
 
   function dispatch(action: Action, by: PlayerColor = state.currentPlayer) {
+    const prevBlocker = state.blocker.hexId;
     const res = reduce(state, by, action);
     if (!res.ok) {
       setError(res.error);
@@ -188,8 +193,70 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
     }
     if (res.events.some((e) => e.t === 'turnEnded' || e.t === 'gameWon')) setMode('idle');
     if (res.events.some((e) => e.t === 'turnEnded')) setTurnCount((n) => n + 1);
+    scheduleAnimations(res.events, res.state, action, by, prevBlocker);
     resetTransient();
     return true;
+  }
+
+  /** Anima cartas/peças voando após uma jogada (espera o DOM atualizar). */
+  function scheduleAnimations(
+    events: GameEvent[],
+    newState: GameState,
+    action: Action,
+    by: PlayerColor,
+    prevBlocker: string,
+  ) {
+    const rolled = events.find((e) => e.t === 'diceRolled');
+    const producedSum = rolled && events.some((e) => e.t === 'produced') ? rolled.sum : null;
+    const moved = events.find((e) => e.t === 'blockerMoved');
+    const spend = spentResources(action, events);
+    if (producedSum === null && !moved && !spend) return;
+
+    raf2(() => {
+      const svg = document.querySelector<SVGSVGElement>('.board-wrap > svg');
+      // Ganho de recurso: hexágono -> mão (meu) ou avatar do dono.
+      if (producedSum !== null && svg) {
+        let delay = 0;
+        for (const hid of newState.board.hexOrder) {
+          const hex = newState.board.hexes[hid]!;
+          if (hex.number !== producedSum || newState.blocker.hexId === hid) continue;
+          const resource = TERRAIN_RESOURCE[hex.terrain];
+          if (!resource) continue;
+          const from = svgScreen(svg, hex.cx, hex.cy);
+          for (const vid of hex.corners) {
+            const b = newState.buildings[vid];
+            if (!b) continue;
+            const to = destForOwner(b.owner, localColor);
+            if (!to) continue;
+            const n = b.kind === 'city' ? 2 : 1;
+            for (let k = 0; k < n; k++) {
+              fly({ kind: 'card', img: RES_IMG[resource], from, to, delay });
+              delay += 70;
+            }
+          }
+        }
+      }
+      // Ladrão: movimento do hex antigo para o novo.
+      if (moved && svg && prevBlocker !== moved.hexId) {
+        const a = newState.board.hexes[prevBlocker];
+        const b = newState.board.hexes[moved.hexId];
+        if (a && b) fly({ kind: 'robber', from: svgScreen(svg, a.cx, a.cy), to: svgScreen(svg, b.cx, b.cy), duration: 650 });
+      }
+      // Gasto/descarte: mão (ou avatar) -> Banco.
+      if (spend) {
+        const from = destForOwner(by, localColor);
+        const to = anchorCenter('[data-anchor="bank"]');
+        if (from && to) {
+          let delay = 0;
+          for (const r of RESOURCES) {
+            for (let k = 0; k < (spend[r] ?? 0); k++) {
+              fly({ kind: 'card', img: RES_IMG[r], from, to, delay });
+              delay += 70;
+            }
+          }
+        }
+      }
+    });
   }
 
   useEffect(() => {
@@ -344,7 +411,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
               <div key={p.color} className={`noble${p.color === state.currentPlayer ? ' active' : ''}`}
                 style={{ ['--pc' as string]: PLAYER_FILL[p.color] }}>
                 <div className="noble-left">
-                  <span className="noble-crest" style={{ background: PLAYER_FILL[p.color] }}>{CREST[p.color]}</span>
+                  <span className="noble-crest" data-noble={p.color} style={{ background: PLAYER_FILL[p.color] }}>{CREST[p.color]}</span>
                   <div className="noble-pts"><b>{publicScoreOf(state, p.color)}</b><span>pts</span></div>
                 </div>
                 <div className="noble-main">
@@ -451,7 +518,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
               <button onClick={sendChat} aria-label="Enviar"><Send size={15} /></button>
             </div>
           </div>
-          <div className="card">
+          <div className="card" data-anchor="bank">
             <h2><Landmark size={16} className="ic-primary" /> Banco</h2>
             <div className="hand">
               {RESOURCES.map((r) => (
@@ -463,6 +530,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
       </div>
 
       <Toasts toasts={toasts} />
+      <FlyLayer items={flyItems} />
 
       {help && <HelpModal onClose={() => setHelp(false)} />}
       {arming === 'monopoly' && (
@@ -798,6 +866,59 @@ function DiscardModal({
 
 function getPlayer(state: GameState, color: PlayerColor) {
   return state.players.find((p) => p.color === color)!;
+}
+
+// ---- Animação (coordenadas em tela) ----
+function raf2(cb: () => void) {
+  requestAnimationFrame(() => requestAnimationFrame(cb));
+}
+
+function svgScreen(svg: SVGSVGElement, x: number, y: number): Pt {
+  const ctm = svg.getScreenCTM();
+  if (!ctm) {
+    const r = svg.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }
+  const p = svg.createSVGPoint();
+  p.x = x;
+  p.y = y;
+  const s = p.matrixTransform(ctm);
+  return { x: s.x, y: s.y };
+}
+
+function anchorCenter(selector: string): Pt | null {
+  const el = document.querySelector(selector);
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+}
+
+/** Onde fica a "mão" do jogador na tela: minha mão, ou o avatar dele nos Nobres. */
+function destForOwner(color: PlayerColor, localColor: PlayerColor): Pt | null {
+  if (color === localColor) return anchorCenter('.hand-cards');
+  return anchorCenter(`[data-noble="${color}"]`);
+}
+
+/** Recursos gastos por uma ação (para a animação mão -> banco). */
+function spentResources(action: Action, events: GameEvent[]): Partial<Record<Resource, number>> | null {
+  switch (action.t) {
+    case 'buildRoad':
+      return COSTS.road;
+    case 'buildSettlement':
+      return COSTS.settlement;
+    case 'buildCity':
+      return COSTS.city;
+    case 'buyProgressCard':
+      return COSTS.progressCard;
+    case 'discard':
+      return action.resources;
+    case 'tradeBank': {
+      const e = events.find((x) => x.t === 'bankTrade');
+      return e && e.t === 'bankTrade' ? ({ [action.give]: e.rate } as Partial<Record<Resource, number>>) : null;
+    }
+    default:
+      return null;
+  }
 }
 
 function phaseLabel(state: GameState): string {
