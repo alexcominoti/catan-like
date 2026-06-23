@@ -203,7 +203,7 @@ function planMain(state: GameState, me: PlayerColor, level: Difficulty, humans: 
 
   // 2. Estrada gratis pendente (carta "2 Estradas").
   if (state.pendingFreeRoads > 0 && p.pieces.roads > 0) {
-    const road = roadToUnlock(state, me, level) ?? anyLegalRoad(state, me);
+    const road = roadToUnlock(state, me, level) ?? bestRoadTowardLand(state, me, level) ?? anyLegalRoad(state, me);
     if (road) return { t: 'buildRoad', edgeId: road };
   }
 
@@ -240,7 +240,7 @@ function planMain(state: GameState, me: PlayerColor, level: Difficulty, humans: 
 
   // 9. Estender estrada (caca a Estrada Mais Longa) — mantem o jogo avancando.
   if (p.pieces.roads > 0 && canAfford(p.hand, COSTS.road)) {
-    const road = roadToUnlock(state, me, level) ?? anyLegalRoad(state, me);
+    const road = roadToUnlock(state, me, level) ?? bestRoadTowardLand(state, me, level) ?? anyLegalRoad(state, me);
     if (road) return { t: 'buildRoad', edgeId: road };
   }
 
@@ -336,6 +336,30 @@ function anyLegalRoad(state: GameState, me: PlayerColor): string | null {
     if (!state.roads[eid] && roadConnects(state, me, eid)) return eid;
   }
   return null;
+}
+
+/**
+ * Melhor estrada para ESTENDER a rede rumo a boa terra (nao destrava uma vila em 1
+ * passo, mas aponta para o vertice livre de maior valor — evita "estrada para o
+ * nada"). Usada como fallback quando nao ha unlock imediato.
+ */
+function bestRoadTowardLand(state: GameState, me: PlayerColor, level: Difficulty): string | null {
+  let best: string | null = null;
+  let bestScore = -1;
+  for (const eid of state.board.edgeOrder) {
+    if (state.roads[eid] || !roadConnects(state, me, eid)) continue;
+    const e = state.board.edges[eid]!;
+    let s = -1;
+    for (const v of e.v) {
+      if (state.buildings[v]) continue; // extremo ocupado nao e fronteira util
+      s = Math.max(s, vertexValue(state, v, level));
+    }
+    if (s > bestScore) {
+      bestScore = s;
+      best = eid;
+    }
+  }
+  return best;
 }
 
 function tradeTowardGoal(state: GameState, me: PlayerColor, level: Difficulty): Action | null {
@@ -537,7 +561,7 @@ function planMainByValue(state: GameState, me: PlayerColor, humans: PlayerColor[
 
   // 2. Estrada gratis pendente (carta "2 Estradas").
   if (state.pendingFreeRoads > 0 && p.pieces.roads > 0) {
-    const road = roadToUnlock(state, me, 'hard') ?? anyLegalRoad(state, me);
+    const road = roadToUnlock(state, me, 'hard') ?? bestRoadTowardLand(state, me, 'hard') ?? anyLegalRoad(state, me);
     if (road) return { t: 'buildRoad', edgeId: road };
   }
 
@@ -592,7 +616,7 @@ function planMainByValue(state: GameState, me: PlayerColor, humans: PlayerColor[
 
   // 9. Estender estrada (caca a Estrada Mais Longa).
   if (p.pieces.roads > 0 && canAfford(p.hand, COSTS.road)) {
-    const road = roadToUnlock(state, me, 'hard') ?? anyLegalRoad(state, me);
+    const road = roadToUnlock(state, me, 'hard') ?? bestRoadTowardLand(state, me, 'hard') ?? anyLegalRoad(state, me);
     if (road) return { t: 'buildRoad', edgeId: road };
   }
 

@@ -75,9 +75,13 @@ com Vercel (frontend) + Fly.io/Render (servidor) é o caminho mais barato.
    por id; servidor WebSocket em `src/index.ts`. Testado (sala só de bots termina
    sozinha; espera a vez do humano; rejeita ação ilegal; projeção esconde info).
    Rodar: `npm run server` (porta 8080, configurável por `PORT`).
-3. ⏳ Cliente: camada de transporte — quando online, o `Game.tsx` envia a ação ao
-   servidor (mensagem `action`) e renderiza o `state` projetado recebido, em vez do
-   `dispatch` local. Como já fala via `reduce`, muda pouco.
+3. 🟡 Cliente — transporte: `apps/web/src/net/client.ts` (`GameClient`: connect/
+   create/join/send + callbacks onState/onJoined/onError). Round-trip real provado
+   por teste de integração (`packages/server/test/ws.test.ts`: criar sala → joined →
+   estado com fog of war → ação → novo estado). FALTA ligar ao `Game.tsx` (quando
+   online, `dispatch` envia ao servidor e a UI renderiza o `state` projetado;
+   desliga o loop de bots e o `reduce` locais; contagens dos oponentes via
+   `hiddenHand`).
 4. ⏳ Lobby real com `roomId` + link de convite (as vagas abertas viram jogadores que
    entram pela mensagem `join`). O lobby atual já modela host + vagas + bots.
 5. ⏳ Reconexão (reenviar o estado projetado ao reconectar); depois SQLite (Fase 3).
