@@ -107,8 +107,9 @@ descarte**. Mãos dos adversários ficam ocultas (só a contagem aparece); carta
 - Visualizador de **replay** (partidas já são gravadas em
   `apps/web/src/ui/replays.ts`; falta a tela de listar/assistir).
 - Refino de UX, acessibilidade/mobile, tema claro.
-- Fase 2: servidor `ws` autoritativo + `projectFor` (fog of war) para jogar de
-  abas/PCs diferentes.
+- **Fase 2 — multiplayer online** (servidor `ws` autoritativo + `projectFor` fog of
+  war): plano de arquitetura e **passo-a-passo de hospedagem** em
+  [`docs/MULTIPLAYER.md`](docs/MULTIPLAYER.md).
 
 ## Licença
 
