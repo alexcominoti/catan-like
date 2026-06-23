@@ -75,4 +75,18 @@ describe('estado inicial', () => {
     expect(s.players).toHaveLength(4);
     expect(s.phase).toBe('setup1');
   });
+
+  it('tabuleiro GRANDE: 30 hexes, 2 desertos, 28 numeros, 11 portos, banco 24, 6 jogadores', () => {
+    const players = (['red', 'blue', 'white', 'orange', 'green', 'brown'] as const).map((c, i) => ({ color: c, name: `J${i + 1}` }));
+    const s = createInitialState({ seed: 3, boardLayout: 'large', players: [...players] });
+    expect(s.board.hexOrder).toHaveLength(30);
+    const deserts = s.board.hexOrder.filter((h) => s.board.hexes[h]!.terrain === 'desert');
+    expect(deserts).toHaveLength(2);
+    const numbered = s.board.hexOrder.filter((h) => s.board.hexes[h]!.number !== null);
+    expect(numbered).toHaveLength(28);
+    expect(s.board.ports).toHaveLength(11);
+    for (const r of RESOURCES) expect(s.bank[r]).toBe(24);
+    expect(s.players).toHaveLength(6);
+    expect(s.board.hexes[s.blocker.hexId]!.terrain).toBe('desert');
+  });
 });

@@ -34,5 +34,6 @@ export {
   hexCorners,
   axialCoords,
   HEX_SIZE,
+  type BoardLayout,
 } from './board.js';
 export { createRng, nextInt, nextFloat, rollDie, shuffle } from './rng.js';

@@ -40,6 +40,8 @@ export const PLAYER_FILL: Record<PlayerColor, string> = {
   blue: '#2e6ad1',
   white: '#e8e8e8',
   orange: '#e08a2e',
+  green: '#3aa655',
+  brown: '#8a5524',
 };
 
 export const PLAYER_LABEL: Record<PlayerColor, string> = {
@@ -47,4 +49,6 @@ export const PLAYER_LABEL: Record<PlayerColor, string> = {
   blue: 'Azul',
   white: 'Branco',
   orange: 'Laranja',
+  green: 'Verde',
+  brown: 'Marrom',
 };

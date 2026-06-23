@@ -28,11 +28,12 @@ function playMixed(seed: number, diffOf: (c: PlayerColor) => Difficulty, maxStep
 describe('self-play: 1 dificil vs 3 medios', () => {
   it('mede o win-rate do nivel dificil (baseline justo 25%)', () => {
     const N = 40; // seeds
+    const seats = PLAYER_COLORS.slice(0, 4); // a partida default tem 4 jogadores
     let hardWins = 0;
     let decided = 0;
     let totalSteps = 0;
     for (let s = 0; s < N; s++) {
-      for (const hardSeat of PLAYER_COLORS) {
+      for (const hardSeat of seats) {
         const diffOf = (c: PlayerColor): Difficulty => (c === hardSeat ? 'hard' : 'medium');
         const { winner, steps } = playMixed(s * 13 + 1, diffOf);
         if (!winner) continue;
@@ -44,7 +45,7 @@ describe('self-play: 1 dificil vs 3 medios', () => {
     const rate = hardWins / decided;
     // eslint-disable-next-line no-console
     console.log(`\n[self-play] decididas: ${decided} | hard venceu ${hardWins} (${(rate * 100).toFixed(1)}%) vs baseline 25% | passos medios ${(totalSteps / decided).toFixed(0)}\n`);
-    expect(decided).toBeGreaterThan(N * PLAYER_COLORS.length * 0.8);
+    expect(decided).toBeGreaterThan(N * seats.length * 0.8);
     // Seeds fixos + bot deterministico => taxa reproduzivel (~28.7% hoje). O nivel
     // dificil deve ganhar acima da fatia justa de 25% contra tres medios. Guarda
     // contra regressao (uma versao 1-ply pura ficou em 21.7%, abaixo do baseline).

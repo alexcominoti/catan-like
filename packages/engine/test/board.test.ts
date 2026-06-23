@@ -45,4 +45,31 @@ describe('grafo do tabuleiro', () => {
     expect(b2.edgeOrder).toEqual(board.edgeOrder);
     expect(b2.hexes['h0']!.corners).toEqual(board.hexes['h0']!.corners);
   });
+
+  it('arestas = vertices + (hexes - 1) [planar e conexo]', () => {
+    // Para um tabuleiro planar conexo: V - E + (H + 1) = 2  =>  E = V + (H - 1).
+    expect(board.edgeOrder.length).toBe(board.vertexOrder.length + board.hexOrder.length - 1);
+  });
+});
+
+describe('grafo do tabuleiro GRANDE (30 hexes)', () => {
+  const board = buildBoardGeometry('large');
+
+  it('tem 30 hexes e 11 portos', () => {
+    expect(board.hexOrder).toHaveLength(30);
+    expect(board.ports).toHaveLength(11);
+  });
+
+  it('e planar e conexo (E = V + H - 1) e cada hex tem 6 cantos', () => {
+    expect(board.edgeOrder.length).toBe(board.vertexOrder.length + board.hexOrder.length - 1);
+    for (const hid of board.hexOrder) {
+      expect(new Set(board.hexes[hid]!.corners).size).toBe(6);
+    }
+  });
+
+  it('e deterministico', () => {
+    const b2 = buildBoardGeometry('large');
+    expect(b2.vertexOrder).toEqual(board.vertexOrder);
+    expect(b2.edgeOrder).toEqual(board.edgeOrder);
+  });
 });

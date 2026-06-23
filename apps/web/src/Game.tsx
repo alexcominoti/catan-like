@@ -58,7 +58,7 @@ function costIcons(cost: Partial<Record<Resource, number>>): string {
 }
 
 /** Brasao por cor (decorativo). */
-const CREST: Record<PlayerColor, string> = { red: '👑', blue: '🌿', white: '⚒️', orange: '🪓' };
+const CREST: Record<PlayerColor, string> = { red: '👑', blue: '🌿', white: '⚒️', orange: '🪓', green: '🍀', brown: '🐗' };
 
 function fmtTime(s: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -68,6 +68,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   const [state, setState] = useState<GameState>(() =>
     createInitialState({
       seed: config.seed,
+      boardLayout: config.boardLayout,
       players: config.players,
       numberLayout: config.numberLayout,
       desert: config.desert,
@@ -178,6 +179,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
         winner: res.state.winner,
         pointsToWin: config.pointsToWin,
         discardLimit: config.discardLimit,
+        boardLayout: config.boardLayout,
         numberLayout: config.numberLayout,
         desert: config.desert,
         turns: turnCount,

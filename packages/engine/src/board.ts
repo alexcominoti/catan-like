@@ -11,8 +11,14 @@ import type { Board, Hex, Vertex, Edge, Port } from './types.js';
 
 export const HEX_SIZE = 60;
 
+/** Tamanho do tabuleiro: classico (19 hexes, 3-4 jogadores) ou grande (30, 5-6). */
+export type BoardLayout = 'standard' | 'large';
+
 /** Raio do tabuleiro em hexes a partir do centro (2 => 19 hexes). */
 const BOARD_RADIUS = 2;
+
+/** Numero de portos por tamanho de tabuleiro. */
+const PORT_COUNT_BY_LAYOUT: Record<BoardLayout, number> = { standard: 9, large: 11 };
 
 export function axialToPixel(q: number, r: number, size = HEX_SIZE): { x: number; y: number } {
   const x = size * (Math.sqrt(3) * q + (Math.sqrt(3) / 2) * r);
@@ -35,7 +41,7 @@ function keyOf(x: number, y: number): string {
   return `${Math.round(x)}:${Math.round(y)}`;
 }
 
-/** Lista de coordenadas axiais (q, r) dos 19 hexes, em ordem por linha. */
+/** Lista de coordenadas axiais (q, r) dos 19 hexes do tabuleiro classico. */
 export function axialCoords(): { q: number; r: number }[] {
   const coords: { q: number; r: number }[] = [];
   for (let r = -BOARD_RADIUS; r <= BOARD_RADIUS; r++) {
@@ -49,10 +55,31 @@ export function axialCoords(): { q: number; r: number }[] {
 }
 
 /**
+ * Coordenadas do tabuleiro grande (30 hexes), o "hexagono gordo" 3-4-5-6-5-4-3
+ * usado em jogos de 5-6 jogadores. Cada linha r (de -3 a 3) e centrada para que
+ * as linhas se encaixem (deslocamento de meio hex); o conjunto e recentralizado
+ * no centroide ao montar a geometria.
+ */
+function largeCoords(): { q: number; r: number }[] {
+  const rowLens = [3, 4, 5, 6, 5, 4, 3];
+  const coords: { q: number; r: number }[] = [];
+  rowLens.forEach((len, i) => {
+    const r = i - 3;
+    const qStart = Math.round(-r / 2 - (len - 1) / 2);
+    for (let k = 0; k < len; k++) coords.push({ q: qStart + k, r });
+  });
+  return coords;
+}
+
+function coordsFor(layout: BoardLayout): { q: number; r: number }[] {
+  return layout === 'large' ? largeCoords() : axialCoords();
+}
+
+/**
  * Constroi o grafo geometrico (sem terreno/numero — isso e atribuido no setup).
  * Hexes nascem com terrain 'desert' e number null como placeholders.
  */
-export function buildBoardGeometry(): Board {
+export function buildBoardGeometry(layout: BoardLayout = 'standard'): Board {
   const hexes: Record<string, Hex> = {};
   const hexOrder: string[] = [];
 
@@ -65,12 +92,20 @@ export function buildBoardGeometry(): Board {
   const edgeKeyToId = new Map<string, string>();
   const edgeAccum = new Map<string, { v: [string, string]; hexes: Set<string> }>();
 
-  const coords = axialCoords();
+  const coords = coordsFor(layout);
+
+  // Centroide dos centros de hex: recentraliza o tabuleiro em (0,0) para que os
+  // portos (normais radiais) e o enquadramento fiquem simetricos.
+  const centers = coords.map(({ q, r }) => axialToPixel(q, r));
+  const ox = centers.reduce((s, p) => s + p.x, 0) / centers.length;
+  const oy = centers.reduce((s, p) => s + p.y, 0) / centers.length;
 
   // Passo 1: cria hexes e registra cantos (vertices) deduplicados.
   coords.forEach(({ q, r }, idx) => {
     const id = `h${idx}`;
-    const { x: cx, y: cy } = axialToPixel(q, r);
+    const p = axialToPixel(q, r);
+    const cx = p.x - ox;
+    const cy = p.y - oy;
     const corners = hexCorners(cx, cy);
     const cornerIds: string[] = [];
 
@@ -166,23 +201,21 @@ export function buildBoardGeometry(): Board {
     hexes[hid]!.corners = hexes[hid]!.corners.map((v) => tmpToVid.get(v)!);
   }
 
-  const ports = buildPorts(edges, vertices, edgeOrder);
+  const ports = buildPorts(edges, vertices, edgeOrder, PORT_COUNT_BY_LAYOUT[layout]);
 
   return { hexes, vertices, edges, ports, hexOrder, vertexOrder, edgeOrder };
 }
 
-/** Numero de portos no tabuleiro classico. */
-const PORT_COUNT = 9;
-
 /**
- * Posiciona 9 portos em arestas costeiras (geometria apenas; o *tipo* de cada
+ * Posiciona N portos em arestas costeiras (geometria apenas; o *tipo* de cada
  * porto e atribuido no setup, com a seed). As arestas costeiras (1 hex vizinho)
- * formam um unico anel; escolhemos 9 posicoes espacadas uniformemente nele.
+ * formam um unico anel; escolhemos N posicoes espacadas uniformemente nele.
  */
 function buildPorts(
   edges: Record<string, Edge>,
   vertices: Record<string, Vertex>,
   edgeOrder: string[],
+  portCount: number,
 ): Port[] {
   const coastal = edgeOrder.filter((e) => edges[e]!.hexes.length === 1);
 
@@ -211,10 +244,10 @@ function buildPorts(
     curEdge = next;
   }
 
-  // Seleciona PORT_COUNT posicoes espacadas no anel.
+  // Seleciona portCount posicoes espacadas no anel.
   const ports: Port[] = [];
-  for (let i = 0; i < PORT_COUNT; i++) {
-    const idx = Math.round((i * ring.length) / PORT_COUNT) % ring.length;
+  for (let i = 0; i < portCount; i++) {
+    const idx = Math.round((i * ring.length) / portCount) % ring.length;
     const eid = ring[idx]!;
     const e = edges[eid]!;
     const a = vertices[e.v[0]]!;

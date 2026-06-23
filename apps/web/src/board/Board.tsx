@@ -5,6 +5,7 @@ import {
   vertexTouchesPlayerRoad,
   type GameState,
   type PlayerColor,
+  type Resource,
   type Terrain,
 } from '@hexgame/engine';
 import { PLAYER_FILL, RESOURCE_ICON, TERRAIN_FILL } from '../game/theme.js';
@@ -162,40 +163,50 @@ export function Board({ state, mode, hintVertex, onVertex, onEdge, onHex }: Boar
         </clipPath>
       </defs>
 
-      {/* Agua: halo amplo + orla mais brilhante */}
-      <g filter="url(#waterBlur)" opacity={0.55}>
+      {/* Mar: agua profunda -> rasa, orla de espuma e praia de areia (litoral suave) */}
+      <g filter="url(#waterBlur)" opacity={0.6}>
         {board.hexOrder.map((hid) => {
           const h = board.hexes[hid]!;
-          return <path key={hid} d={roundedPath(scaled(cornersOf[hid]!, h.cx, h.cy, 1.62), 20)} fill="#3aa9e6" />;
+          return <path key={hid} d={roundedPath(scaled(cornersOf[hid]!, h.cx, h.cy, 1.74), 30)} fill="#2c86c4" />;
+        })}
+      </g>
+      <g filter="url(#waterBlur)" opacity={0.85}>
+        {board.hexOrder.map((hid) => {
+          const h = board.hexes[hid]!;
+          return <path key={hid} d={roundedPath(scaled(cornersOf[hid]!, h.cx, h.cy, 1.46), 28)} fill="#58c0ea" />;
         })}
       </g>
       <g filter="url(#waterBlur)" opacity={0.9}>
         {board.hexOrder.map((hid) => {
           const h = board.hexes[hid]!;
-          return <path key={hid} d={roundedPath(scaled(cornersOf[hid]!, h.cx, h.cy, 1.32), 20)} fill="#6fd0f5" />;
+          return <path key={hid} d={roundedPath(scaled(cornersOf[hid]!, h.cx, h.cy, 1.30), 26)} fill="#b3e6f1" />;
         })}
       </g>
-      {/* Litoral (areia) com leve mottle */}
+      {/* Praia (areia) — banda suave em volta da ilha */}
       <g>
         {board.hexOrder.map((hid) => {
           const h = board.hexes[hid]!;
-          return <path key={hid} d={roundedPath(scaled(cornersOf[hid]!, h.cx, h.cy, 1.16), 22)} fill="url(#coastGrad)" />;
+          return <path key={hid} d={roundedPath(scaled(cornersOf[hid]!, h.cx, h.cy, 1.19), 24)} fill="url(#coastGrad)" />;
+        })}
+      </g>
+      <g opacity={0.45}>
+        {board.hexOrder.map((hid) => {
+          const h = board.hexes[hid]!;
+          return <path key={hid} d={roundedPath(scaled(cornersOf[hid]!, h.cx, h.cy, 1.07), 18)} fill="#c4a06a" />;
         })}
       </g>
 
-      {/* Portos */}
+      {/* Portos como barquinhos ancorados, com docas para os 2 vertices */}
       {board.ports.map((port) => {
         const a = board.vertices[port.vertices[0]]!;
         const b = board.vertices[port.vertices[1]]!;
-        const lx = port.x + port.nx * 30;
-        const ly = port.y + port.ny * 30;
-        const label = port.type === 'generic' ? '3:1' : `${RESOURCE_ICON[port.type]}2:1`;
+        const lx = port.x + port.nx * 36;
+        const ly = port.y + port.ny * 36;
         return (
           <g key={port.id} pointerEvents="none">
-            <line x1={a.x} y1={a.y} x2={lx} y2={ly} stroke="#9c7b46" strokeWidth={2.5} strokeLinecap="round" />
-            <line x1={b.x} y1={b.y} x2={lx} y2={ly} stroke="#9c7b46" strokeWidth={2.5} strokeLinecap="round" />
-            <rect x={lx - 19} y={ly - 11} width={38} height={22} rx={7} fill="#3a2f22" stroke="#b9935a" filter="url(#softShadow)" />
-            <text x={lx} y={ly + 5} textAnchor="middle" fontSize={12} fontWeight={700} fill="#f3e6cd">{label}</text>
+            <line x1={a.x} y1={a.y} x2={lx} y2={ly} stroke="#b07a3e" strokeWidth={3} strokeLinecap="round" strokeDasharray="1 5" />
+            <line x1={b.x} y1={b.y} x2={lx} y2={ly} stroke="#b07a3e" strokeWidth={3} strokeLinecap="round" strokeDasharray="1 5" />
+            <PortBoat x={lx} y={ly} type={port.type} />
           </g>
         );
       })}
@@ -329,6 +340,25 @@ function SpotHint({ x, y }: { x: number; y: number }) {
       <g className="spot-arrow" filter="url(#softShadow)">
         <path d={starPath(x, y - 26, 9.5, 4)} fill="#e8b53a" stroke="#ffffff" strokeWidth={1.6} strokeLinejoin="round" />
       </g>
+    </g>
+  );
+}
+
+/** Barquinho ancorado num porto: vela com o icone e a taxa no casco. */
+function PortBoat({ x, y, type }: { x: number; y: number; type: 'generic' | Resource }) {
+  const rate = type === 'generic' ? '3:1' : '2:1';
+  const icon = type === 'generic' ? '?' : RESOURCE_ICON[type];
+  return (
+    <g transform={`translate(${x} ${y})`} pointerEvents="none" filter="url(#softShadow)">
+      {/* casco */}
+      <path d="M -17 1 Q -19 12 -8 12 L 8 12 Q 19 12 17 1 Z" fill="#9a6a3a" stroke="#5d3a1d" strokeWidth={1.3} />
+      <path d="M -17 1 L 17 1" stroke="#c79a63" strokeWidth={2.4} strokeLinecap="round" />
+      {/* mastro + vela */}
+      <line x1={-1.5} y1={1} x2={-1.5} y2={-19} stroke="#5d3a1d" strokeWidth={1.6} strokeLinecap="round" />
+      <path d="M 0 -18 Q 13 -10 0 -2 Z" fill="#fbf7ee" stroke="#cbb68f" strokeWidth={0.9} />
+      <text x={4.5} y={-8} textAnchor="middle" fontSize={8}>{icon}</text>
+      {/* taxa no casco */}
+      <text x={0} y={10} textAnchor="middle" fontSize={8.5} fontWeight={800} fill="#fff4e0" fontFamily="Georgia, serif">{rate}</text>
     </g>
   );
 }

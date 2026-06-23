@@ -15,6 +15,7 @@ export interface SavedReplay {
   winner: PlayerColor | null;
   pointsToWin: number;
   discardLimit: number;
+  boardLayout: string;
   numberLayout: string;
   desert: string;
   turns: number;

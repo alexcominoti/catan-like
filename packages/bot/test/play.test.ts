@@ -37,4 +37,21 @@ describe('bot heuristico', () => {
   it('so propoe acoes legais (nenhuma rejeicao do reducer)', () => {
     expect(() => playOut(123, 'hard')).not.toThrow();
   });
+
+  it('tabuleiro GRANDE: partida de 6 bots termina com vencedor', () => {
+    const players = (['red', 'blue', 'white', 'orange', 'green', 'brown'] as const).map((c, i) => ({ color: c, name: `J${i + 1}` }));
+    let state = createInitialState({ seed: 9, boardLayout: 'large', players: [...players] });
+    let steps = 0;
+    while (steps < 200000) {
+      const move = planBotAction(state, () => true, () => 'medium');
+      if (!move) break;
+      const r = reduce(state, move.by, move.action);
+      if (!r.ok) throw new Error(`acao ilegal (grande) no passo ${steps}: ${r.error} (${JSON.stringify(move.action)})`);
+      state = r.state;
+      steps++;
+      if (state.phase === 'ended') break;
+    }
+    expect(state.phase).toBe('ended');
+    expect(state.winner).not.toBeNull();
+  });
 });

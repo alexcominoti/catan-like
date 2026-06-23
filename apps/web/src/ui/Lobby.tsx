@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { PLAYER_COLORS, type DesertPlacement, type NumberLayout, type PlayerColor } from '@hexgame/engine';
+import { PLAYER_COLORS, type BoardLayout, type DesertPlacement, type NumberLayout, type PlayerColor } from '@hexgame/engine';
 import type { Difficulty } from '@hexgame/bot';
 import type { ReactNode } from 'react';
 import { Users, Bot, Dices, Target, Play, ArrowLeft, Shuffle, UserPlus, X, Crown } from 'lucide-react';
@@ -11,6 +11,7 @@ export interface GameConfig {
   bots: PlayerColor[];
   botDifficulty: Record<PlayerColor, Difficulty>;
   seed: number;
+  boardLayout: BoardLayout;
   numberLayout: NumberLayout;
   desert: DesertPlacement;
   pointsToWin: number;
@@ -18,7 +19,7 @@ export interface GameConfig {
 }
 
 /** Crests por cor (mesmos do jogo) para a UI ficar coerente. */
-const CREST: Record<PlayerColor, string> = { red: '👑', blue: '🌿', white: '⚒️', orange: '🪓' };
+const CREST: Record<PlayerColor, string> = { red: '👑', blue: '🌿', white: '⚒️', orange: '🪓', green: '🍀', brown: '🐗' };
 const DIFF_LABEL: Record<Difficulty, string> = { easy: 'Fácil', medium: 'Médio', hard: 'Difícil' };
 
 type Seat = { type: 'host' } | { type: 'open' } | { type: 'bot'; diff: Difficulty; name: string };
@@ -26,8 +27,12 @@ type Seat = { type: 'host' } | { type: 'open' } | { type: 'bot'; diff: Difficult
 export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void; onBack?: () => void }) {
   const [roomSize, setRoomSize] = useState(4);
   const [hostName, setHostName] = useState('Você');
-  // Sala recem-criada: so o anfitriao; as demais vagas comecam ABERTAS.
-  const [seats, setSeats] = useState<Seat[]>([{ type: 'host' }, { type: 'open' }, { type: 'open' }, { type: 'open' }]);
+  // Sala recem-criada: so o anfitriao; as demais vagas (ate 5) comecam ABERTAS.
+  const [seats, setSeats] = useState<Seat[]>([
+    { type: 'host' }, { type: 'open' }, { type: 'open' }, { type: 'open' }, { type: 'open' }, { type: 'open' },
+  ]);
+  // Acima de 4 jogadores usamos o tabuleiro GRANDE (30 hexes, 2 desertos).
+  const boardLayout: BoardLayout = roomSize >= 5 ? 'large' : 'standard';
   const [numberLayout, setNumberLayout] = useState<NumberLayout>('balanced');
   const [desert, setDesert] = useState<DesertPlacement>('random');
   const [pointsToWin, setPointsToWin] = useState(10);
@@ -84,7 +89,7 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
     });
     onStart({
       players, bots, botDifficulty: botDifficulty as Record<PlayerColor, Difficulty>,
-      seed, numberLayout, desert, pointsToWin, discardLimit,
+      seed, boardLayout, numberLayout, desert, pointsToWin, discardLimit,
     });
   }
 
@@ -103,12 +108,15 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
           <div className="su-players-head">
             <h2 className="su-h"><Users size={18} className="ic-primary" /> Jogadores <span className="su-count">{filledCount}/{roomSize}</span></h2>
             <div className="su-seg sm">
-              {[3, 4].map((n) => (
+              {[3, 4, 5, 6].map((n) => (
                 <button key={n} className={roomSize === n ? 'on' : ''} onClick={() => setRoomSize(n)}>{n}</button>
               ))}
             </div>
           </div>
-          <p className="su-note">Convide amigos pelo link ou preencha as vagas com bots.</p>
+          <p className="su-note">
+            Convide amigos pelo link ou preencha as vagas com bots.
+            {boardLayout === 'large' && <> <b>Tabuleiro grande</b> (30 hexágonos, 2 desertos) para 5–6 jogadores.</>}
+          </p>
 
           {visible.map((s, i) => {
             const color = colorByIndex[i];

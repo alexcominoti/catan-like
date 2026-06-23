@@ -10,9 +10,10 @@ export type Resource = 'wood' | 'brick' | 'wool' | 'grain' | 'ore';
 
 export const RESOURCES: readonly Resource[] = ['wood', 'brick', 'wool', 'grain', 'ore'];
 
-export type PlayerColor = 'red' | 'blue' | 'white' | 'orange';
+export type PlayerColor = 'red' | 'blue' | 'white' | 'orange' | 'green' | 'brown';
 
-export const PLAYER_COLORS: readonly PlayerColor[] = ['red', 'blue', 'white', 'orange'];
+/** As 4 primeiras sao o jogo classico (3-4); 'green'/'brown' liberam 5-6 jogadores. */
+export const PLAYER_COLORS: readonly PlayerColor[] = ['red', 'blue', 'white', 'orange', 'green', 'brown'];
 
 /** Tipo de terreno de um hex. 'desert' nao produz e comeca com o bloqueador. */
 export type Terrain = 'forest' | 'hills' | 'pasture' | 'field' | 'mountain' | 'desert';
