@@ -87,6 +87,7 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
   function chooseMap(key: BoardLayout) {
     const newLimit = MAPS.find((m) => m.key === key)!.limit;
     if (occupants > newLimit) return; // mapa menor que a lotacao atual: bloqueado
+    if (key !== 'standard') setDesert('random'); // "deserto no centro" so no 3-4
     setSeats((prev) => {
       const taken = prev.filter((s) => s.type !== 'open');
       const compact: Seat[] = [...taken];
@@ -195,8 +196,11 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
           <div className="su-tiles">
             <SetupTile icon={<Dices size={20} />} label="Números equilibrados" hint="6 e 8 nunca vizinhos"
               active={numberLayout === 'balanced'} onClick={() => setNumberLayout((v) => (v === 'balanced' ? 'random' : 'balanced'))} />
-            <SetupTile icon={<Target size={20} />} label="Deserto no centro" hint="ladrão começa no meio"
-              active={desert === 'center'} onClick={() => setDesert((v) => (v === 'center' ? 'random' : 'center'))} />
+            <SetupTile icon={<Target size={20} />} label="Deserto no centro"
+              hint={mapKey === 'standard' ? 'ladrão começa no meio' : 'só no mapa 3–4'}
+              disabled={mapKey !== 'standard'}
+              active={mapKey === 'standard' && desert === 'center'}
+              onClick={() => setDesert((v) => (v === 'center' ? 'random' : 'center'))} />
             <SetupTile icon={<Shield size={20} />} label="Ladrão amigável" hint="não bloqueia quem tem < 3 PV"
               active={friendlyRobber} onClick={() => setFriendlyRobber((v) => !v)} />
           </div>
@@ -227,9 +231,9 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
   );
 }
 
-function SetupTile({ icon, label, hint, active, onClick }: { icon: ReactNode; label: string; hint: string; active: boolean; onClick: () => void }) {
+function SetupTile({ icon, label, hint, active, disabled, onClick }: { icon: ReactNode; label: string; hint: string; active: boolean; disabled?: boolean; onClick: () => void }) {
   return (
-    <button className={`su-tile${active ? ' active' : ''}`} onClick={onClick}>
+    <button className={`su-tile${active ? ' active' : ''}`} disabled={disabled} onClick={onClick}>
       <span className="su-tile-icon">{icon}</span>
       <span className="su-tile-label">{label}</span>
       <span className="su-tile-hint">{hint}</span>

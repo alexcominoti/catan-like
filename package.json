@@ -12,6 +12,8 @@
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "dev": "npm run dev --workspace @hexgame/web",
+    "server": "npm start --workspace @hexgame/server",
+    "dev:server": "npm run dev --workspace @hexgame/server",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "engines": {

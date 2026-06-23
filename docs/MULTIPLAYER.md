@@ -65,11 +65,19 @@ Comece pela **Opção A** (túnel) assim que a Fase 2 existir, para validar o
 multiplayer com os amigos sem custo. Quando quiser algo permanente, **Opção B**
 com Vercel (frontend) + Fly.io/Render (servidor) é o caminho mais barato.
 
-## Ordem de implementação da Fase 2 (próxima sessão)
-1. `projectFor(state, color)` no engine (fog of war) + testes.
-2. `packages/server`: sala em memória, validação de turno/dono, broadcast.
-3. Cliente: camada de transporte (trocar o `dispatch` local por envio ao servidor
-   quando online) — o `Game.tsx` muda pouco porque já fala via `reduce`.
-4. Lobby real com `roomId` + link de convite (as vagas abertas viram jogadores
-   que entram).
-5. Reconexão; depois SQLite (Fase 3).
+## Ordem de implementação da Fase 2 — progresso
+1. ✅ **`projectFor(state, color)`** no engine (fog of war): esconde a composição da
+   mão e as cartas dos adversários (mantém só as contagens em `hiddenHand`/
+   `hiddenDevCount`), a ordem do baralho (`devDeckCount`) e a semente do PRNG.
+   Testado em `packages/engine/test/project.test.ts`.
+2. ✅ **`packages/server`** (Node + `ws`): `GameRoom` autoritativo — valida cada ação
+   pelo `reduce`, auto-joga os bots e projeta o estado por jogador; `RoomManager`
+   por id; servidor WebSocket em `src/index.ts`. Testado (sala só de bots termina
+   sozinha; espera a vez do humano; rejeita ação ilegal; projeção esconde info).
+   Rodar: `npm run server` (porta 8080, configurável por `PORT`).
+3. ⏳ Cliente: camada de transporte — quando online, o `Game.tsx` envia a ação ao
+   servidor (mensagem `action`) e renderiza o `state` projetado recebido, em vez do
+   `dispatch` local. Como já fala via `reduce`, muda pouco.
+4. ⏳ Lobby real com `roomId` + link de convite (as vagas abertas viram jogadores que
+   entram pela mensagem `join`). O lobby atual já modela host + vagas + bots.
+5. ⏳ Reconexão (reenviar o estado projetado ao reconectar); depois SQLite (Fase 3).

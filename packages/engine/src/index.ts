@@ -13,6 +13,7 @@ export {
   type DesertPlacement,
 } from './setup.js';
 export { reduce } from './reduce.js';
+export { projectFor } from './project.js';
 export {
   COSTS,
   VICTORY_POINTS_TO_WIN,

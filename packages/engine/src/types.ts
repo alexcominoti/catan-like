@@ -63,6 +63,10 @@ export interface Player {
   knightsPlayed: number;
   /** Pecas restantes no estoque do jogador. */
   pieces: { roads: number; settlements: number; cities: number };
+  /** Apenas em estados PROJETADOS (fog of war): total de cartas na mao do adversario (composicao oculta). */
+  hiddenHand?: number;
+  /** Apenas em estados PROJETADOS: quantas cartas de progresso o adversario tem (identidades ocultas). */
+  hiddenDevCount?: number;
 }
 
 /**
@@ -190,6 +194,8 @@ export interface GameState {
   roads: Record<string, Road>; // por edgeId
   bank: Record<Resource, number>;
   devDeck: ProgressCard[];
+  /** Apenas em estados PROJETADOS: quantas cartas restam no baralho (ordem oculta). */
+  devDeckCount?: number;
   blocker: { hexId: string };
   dice: [number, number] | null;
   /** Bonus de Estrada Mais Longa e Maior Exercito (dono atual ou null). */

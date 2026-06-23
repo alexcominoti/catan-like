@@ -1463,6 +1463,7 @@ button.link {
 .su-tiles { display: flex; gap: 12px; margin-bottom: 4px; }
 .su-tile { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 16px 8px; background: var(--panel-2); border: 2px solid var(--border); border-radius: 12px; color: var(--text); cursor: pointer; }
 .su-tile.active { border-color: var(--accent); background: rgba(192, 86, 58, 0.1); }
+.su-tile:disabled { opacity: 0.45; cursor: not-allowed; }
 .su-tile-icon { color: var(--accent); display: inline-flex; }
 .su-tile-label { font-weight: 600; font-size: 14px; }
 .su-tile-hint { font-size: 11px; color: var(--muted); }

@@ -19,7 +19,7 @@ Construído em fases, cada uma jogável de ponta a ponta antes da próxima:
 | Fase | Entrega | Status |
 |---|---|---|
 | **1** | Motor + UI hotseat (1 máquina, mesma tela) | 🟢 em andamento |
-| 2 | Servidor local + WebSocket (várias abas/PCs) | ⚪ futuro |
+| 2 | Servidor local + WebSocket (várias abas/PCs) | 🟡 base pronta (server + fog of war) |
 | 3 | Persistência (SQLite) + reconexão + relógio | ⚪ futuro |
 | 4 | Contas / matchmaking / deploy (escala real) | ⚪ futuro |
 
@@ -34,6 +34,7 @@ catan-like/
   packages/
     engine/    # regras puras e determinísticas (testável isolado)
     bot/       # bot heurístico puro: (estado, cor) -> ação
+    server/    # Fase 2: servidor WebSocket autoritativo (GameRoom + fog of war)
   apps/
     web/       # React + Vite, tabuleiro em SVG (UI hotseat + bots)
 ```
