@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   distanceRuleOk,
+  robberAllowed,
   roadConnects,
   vertexTouchesPlayerRoad,
   type GameState,
@@ -90,6 +91,12 @@ export function Board({ state, mode, hintVertex, onVertex, onEdge, onHex }: Boar
   const { board, buildings, roads, blocker } = state;
   const me = state.currentPlayer;
   const hexMode = mode === 'moveBlocker';
+  // Ladrao amigavel: so destaca/permite hexes validos (se houver alternativa).
+  const enforceFriendly =
+    hexMode && state.friendlyRobber &&
+    board.hexOrder.some((h) => h !== blocker.hexId && robberAllowed(state, h, me));
+  const canBlock = (hid: string) =>
+    hexMode && hid !== blocker.hexId && (!enforceFriendly || robberAllowed(state, hid, me));
   const ghostCity = mode === 'buildCity';
   const [hoverV, setHoverV] = useState<string | null>(null);
   const [hoverE, setHoverE] = useState<string | null>(null);
@@ -221,14 +228,17 @@ export function Board({ state, mode, hintVertex, onVertex, onEdge, onHex }: Boar
             <TerrainMotif terrain={hex.terrain} cx={hex.cx} cy={hex.cy} />
             <path d={path} fill="url(#hexLight)" pointerEvents="none" />
             <path d={path} fill="url(#hexShade)" pointerEvents="none" />
+            {hexMode && enforceFriendly && !canBlock(hid) && (
+              <path d={path} fill="rgba(0,0,0,0.28)" pointerEvents="none" />
+            )}
             <path
               d={path}
               fill="transparent"
-              stroke={hexMode ? '#ffe08a' : 'rgba(0,0,0,0.38)'}
-              strokeWidth={hexMode ? 4 : 2}
+              stroke={canBlock(hid) ? '#ffe08a' : 'rgba(0,0,0,0.38)'}
+              strokeWidth={canBlock(hid) ? 4 : 2}
               strokeLinejoin="round"
-              style={{ cursor: hexMode ? 'pointer' : 'default' }}
-              onClick={() => hexMode && onHex(hid)}
+              style={{ cursor: canBlock(hid) ? 'pointer' : 'default' }}
+              onClick={() => canBlock(hid) && onHex(hid)}
             />
           </g>
         );

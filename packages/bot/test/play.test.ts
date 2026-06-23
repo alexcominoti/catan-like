@@ -38,6 +38,23 @@ describe('bot heuristico', () => {
     expect(() => playOut(123, 'hard')).not.toThrow();
   });
 
+  it('ladrao amigavel: bots jogam legalmente e a partida termina', () => {
+    for (const seed of [4, 17, 99]) {
+      let state = createInitialState({ seed, friendlyRobber: true });
+      let steps = 0;
+      while (steps < 80000) {
+        const move = planBotAction(state, () => true, () => 'hard');
+        if (!move) break;
+        const r = reduce(state, move.by, move.action);
+        if (!r.ok) throw new Error(`ladrao amigavel ilegal (seed ${seed}, passo ${steps}): ${r.error}`);
+        state = r.state;
+        steps++;
+        if (state.phase === 'ended') break;
+      }
+      expect(state.phase).toBe('ended');
+    }
+  });
+
   it('tabuleiro GRANDE: partida de 6 bots termina com vencedor', () => {
     const players = (['red', 'blue', 'white', 'orange', 'green', 'brown'] as const).map((c, i) => ({ color: c, name: `J${i + 1}` }));
     let state = createInitialState({ seed: 9, boardLayout: 'large', players: [...players] });

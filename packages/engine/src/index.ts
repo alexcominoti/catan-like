@@ -25,6 +25,7 @@ export {
   maritimeRate,
   computeProduction,
   distanceRuleOk,
+  robberAllowed,
   roadConnects,
   vertexTouchesPlayerRoad,
 } from './rules.js';

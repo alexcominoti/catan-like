@@ -79,6 +79,21 @@ export function publicScoreOf(state: GameState, color: PlayerColor): number {
   return pts;
 }
 
+/**
+ * Sob o LADRAO AMIGAVEL, um hex so e alvo valido se NAO toca construcao de um
+ * adversario com menos de 3 PV publicos (cartas +1PV nao contam). Sem a regra
+ * ligada, qualquer hex vale. `by` move o bloqueador (a si mesmo nunca conta).
+ */
+export function robberAllowed(state: GameState, hexId: string, by: PlayerColor): boolean {
+  if (!state.friendlyRobber) return true;
+  const hex = state.board.hexes[hexId];
+  if (!hex) return false;
+  return !hex.corners.some((vid) => {
+    const b = state.buildings[vid];
+    return b && b.owner !== by && publicScoreOf(state, b.owner) < 3;
+  });
+}
+
 /** Regra de distancia: o vertice e seus vizinhos imediatos devem estar livres. */
 export function distanceRuleOk(state: GameState, vertexId: string): boolean {
   if (state.buildings[vertexId]) return false;

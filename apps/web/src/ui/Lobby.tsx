@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { PLAYER_COLORS, type BoardLayout, type DesertPlacement, type NumberLayout, type PlayerColor } from '@hexgame/engine';
 import type { Difficulty } from '@hexgame/bot';
 import type { ReactNode } from 'react';
-import { Users, Bot, Dices, Target, Play, ArrowLeft, Shuffle, UserPlus, X, Crown } from 'lucide-react';
+import { Users, Bot, Dices, Target, Play, ArrowLeft, Shuffle, UserPlus, X, Crown, Shield } from 'lucide-react';
 import { PLAYER_FILL, PLAYER_LABEL } from '../game/theme.js';
 import { pickBotName } from '../game/botNames.js';
 
@@ -16,6 +16,7 @@ export interface GameConfig {
   desert: DesertPlacement;
   pointsToWin: number;
   discardLimit: number;
+  friendlyRobber: boolean;
 }
 
 /** Crests por cor (mesmos do jogo) para a UI ficar coerente. */
@@ -46,6 +47,7 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
   const [desert, setDesert] = useState<DesertPlacement>('random');
   const [pointsToWin, setPointsToWin] = useState(10);
   const [discardLimit, setDiscardLimit] = useState(7);
+  const [friendlyRobber, setFriendlyRobber] = useState(false);
   const [seedText, setSeedText] = useState('');
 
   const limit = MAPS.find((m) => m.key === mapKey)!.limit;
@@ -114,7 +116,7 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
     });
     onStart({
       players, bots, botDifficulty: botDifficulty as Record<PlayerColor, Difficulty>,
-      seed, boardLayout: mapKey, numberLayout, desert, pointsToWin, discardLimit,
+      seed, boardLayout: mapKey, numberLayout, desert, pointsToWin, discardLimit, friendlyRobber,
     });
   }
 
@@ -195,6 +197,8 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
               active={numberLayout === 'balanced'} onClick={() => setNumberLayout((v) => (v === 'balanced' ? 'random' : 'balanced'))} />
             <SetupTile icon={<Target size={20} />} label="Deserto no centro" hint="ladrão começa no meio"
               active={desert === 'center'} onClick={() => setDesert((v) => (v === 'center' ? 'random' : 'center'))} />
+            <SetupTile icon={<Shield size={20} />} label="Ladrão amigável" hint="não bloqueia quem tem < 3 PV"
+              active={friendlyRobber} onClick={() => setFriendlyRobber((v) => !v)} />
           </div>
 
           <h3 className="su-sub">Configurações avançadas</h3>

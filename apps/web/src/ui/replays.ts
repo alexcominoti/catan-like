@@ -16,6 +16,7 @@ export interface SavedReplay {
   pointsToWin: number;
   discardLimit: number;
   boardLayout: string;
+  friendlyRobber: boolean;
   numberLayout: string;
   desert: string;
   turns: number;

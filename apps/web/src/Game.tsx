@@ -74,6 +74,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
       desert: config.desert,
       pointsToWin: config.pointsToWin,
       discardLimit: config.discardLimit,
+      friendlyRobber: config.friendlyRobber,
     }),
   );
   const [log, setLog] = useState<LogEntry[]>([{ kind: 'event', text: 'Partida iniciada. Coloquem as vilas iniciais.' }]);
@@ -180,6 +181,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
         pointsToWin: config.pointsToWin,
         discardLimit: config.discardLimit,
         boardLayout: config.boardLayout,
+        friendlyRobber: config.friendlyRobber,
         numberLayout: config.numberLayout,
         desert: config.desert,
         turns: turnCount,
@@ -348,7 +350,11 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
     const victims = [...new Set(
       hex.corners
         .map((vid) => state.buildings[vid]?.owner)
-        .filter((o): o is PlayerColor => !!o && o !== me && handTotal(getPlayer(state, o)) > 0),
+        .filter((o): o is PlayerColor =>
+          !!o && o !== me && handTotal(getPlayer(state, o)) > 0 &&
+          // Ladrao amigavel: nao oferece roubar de quem tem <3 PV.
+          (!state.friendlyRobber || publicScoreOf(state, o) >= 3),
+        ),
     )];
     if (victims.length >= 2) {
       setRobberChoice({ hexId: hid, victims }); // humano escolhe de quem roubar

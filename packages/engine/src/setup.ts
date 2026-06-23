@@ -160,6 +160,8 @@ export interface SetupOptions {
   pointsToWin?: number;
   /** Limite de cartas antes do descarte no 7 (default 7). */
   discardLimit?: number;
+  /** Ladrao amigavel: nao bloquear/roubar quem tem <3 PV publicos (default false). */
+  friendlyRobber?: boolean;
 }
 
 /**
@@ -243,6 +245,7 @@ export function createInitialState(opts: SetupOptions): GameState {
     tradeOffersThisTurn: 0,
     victoryTarget: opts.pointsToWin ?? 10,
     discardLimit: opts.discardLimit ?? 7,
+    friendlyRobber: opts.friendlyRobber ?? false,
     board,
     buildings: {},
     roads: {},

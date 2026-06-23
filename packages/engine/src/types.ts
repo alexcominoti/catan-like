@@ -183,6 +183,8 @@ export interface GameState {
   victoryTarget: number;
   /** Acima deste numero de cartas, descarta metade ao rolar 7 (padrao 7). */
   discardLimit: number;
+  /** Ladrao amigavel: impede bloquear/roubar quem tem menos de 3 PV publicos. */
+  friendlyRobber: boolean;
   board: Board;
   buildings: Record<string, Building>; // por vertexId
   roads: Record<string, Road>; // por edgeId

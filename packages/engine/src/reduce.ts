@@ -11,7 +11,9 @@ import {
   longestRoadLength,
   maritimeRate,
   payToBank,
+  publicScoreOf,
   roadConnects,
+  robberAllowed,
   scoreOf,
   vertexTouchesPlayerRoad,
 } from './rules.js';
@@ -271,6 +273,20 @@ function moveBlocker(
   if (by !== state.currentPlayer) return err('Nao e a sua vez.');
   if (!state.board.hexes[hexId]) return err('Hex inexistente.');
   if (state.blocker.hexId === hexId) return err('O bloqueador precisa mudar de lugar.');
+
+  // Ladrao amigavel: nao pode bloquear um hex que toca quem tem <3 PV (se houver
+  // alternativa) nem roubar de quem tem <3 PV.
+  if (state.friendlyRobber) {
+    const anyAllowed = state.board.hexOrder.some(
+      (h) => h !== state.blocker.hexId && robberAllowed(state, h, by),
+    );
+    if (anyAllowed && !robberAllowed(state, hexId, by)) {
+      return err('Ladrão amigável: não pode bloquear quem tem menos de 3 pontos.');
+    }
+    if (stealFrom && stealFrom !== by && publicScoreOf(state, stealFrom) < 3) {
+      return err('Ladrão amigável: não pode roubar de quem tem menos de 3 pontos.');
+    }
+  }
 
   const next = clone(state);
   next.blocker = { hexId };
