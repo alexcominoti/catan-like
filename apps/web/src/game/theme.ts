@@ -42,6 +42,8 @@ export const PLAYER_FILL: Record<PlayerColor, string> = {
   orange: '#e08a2e',
   green: '#3aa655',
   brown: '#8a5524',
+  purple: '#8e44ad',
+  pink: '#e0529c',
 };
 
 export const PLAYER_LABEL: Record<PlayerColor, string> = {
@@ -51,4 +53,6 @@ export const PLAYER_LABEL: Record<PlayerColor, string> = {
   orange: 'Laranja',
   green: 'Verde',
   brown: 'Marrom',
+  purple: 'Roxo',
+  pink: 'Rosa',
 };

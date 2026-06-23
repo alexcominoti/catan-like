@@ -19,27 +19,39 @@ export interface GameConfig {
 }
 
 /** Crests por cor (mesmos do jogo) para a UI ficar coerente. */
-const CREST: Record<PlayerColor, string> = { red: '👑', blue: '🌿', white: '⚒️', orange: '🪓', green: '🍀', brown: '🐗' };
+const CREST: Record<PlayerColor, string> = { red: '👑', blue: '🌿', white: '⚒️', orange: '🪓', green: '🍀', brown: '🐗', purple: '🔮', pink: '🌸' };
 const DIFF_LABEL: Record<Difficulty, string> = { easy: 'Fácil', medium: 'Médio', hard: 'Difícil' };
+
+/** Os tres mapas: cada um define o LIMITE de jogadores e o tabuleiro. */
+const MAPS: { key: BoardLayout; label: string; hint: string; limit: number }[] = [
+  { key: 'standard', label: '3–4 jogadores', hint: '19 hexágonos', limit: 4 },
+  { key: 'large', label: '5–6 jogadores', hint: '30 hexágonos · 2 desertos', limit: 6 },
+  { key: 'huge', label: '7–8 jogadores', hint: '37 hexágonos · 2 desertos', limit: 8 },
+];
+const MAX_SEATS = 8;
 
 type Seat = { type: 'host' } | { type: 'open' } | { type: 'bot'; diff: Difficulty; name: string };
 
+const initialSeats = (): Seat[] => [
+  { type: 'host' },
+  ...Array.from({ length: MAX_SEATS - 1 }, () => ({ type: 'open' }) as Seat),
+];
+
 export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void; onBack?: () => void }) {
-  const [roomSize, setRoomSize] = useState(4);
+  const [mapKey, setMapKey] = useState<BoardLayout>('standard');
   const [hostName, setHostName] = useState('Você');
-  // Sala recem-criada: so o anfitriao; as demais vagas (ate 5) comecam ABERTAS.
-  const [seats, setSeats] = useState<Seat[]>([
-    { type: 'host' }, { type: 'open' }, { type: 'open' }, { type: 'open' }, { type: 'open' }, { type: 'open' },
-  ]);
-  // Acima de 4 jogadores usamos o tabuleiro GRANDE (30 hexes, 2 desertos).
-  const boardLayout: BoardLayout = roomSize >= 5 ? 'large' : 'standard';
+  // Sala recem-criada: so o anfitriao; as demais vagas comecam ABERTAS.
+  const [seats, setSeats] = useState<Seat[]>(initialSeats);
   const [numberLayout, setNumberLayout] = useState<NumberLayout>('balanced');
   const [desert, setDesert] = useState<DesertPlacement>('random');
   const [pointsToWin, setPointsToWin] = useState(10);
   const [discardLimit, setDiscardLimit] = useState(7);
   const [seedText, setSeedText] = useState('');
 
-  const visible = seats.slice(0, roomSize);
+  const limit = MAPS.find((m) => m.key === mapKey)!.limit;
+  const visible = seats.slice(0, limit);
+  // Jogadores ocupando assentos (anfitriao + bots), em qualquer assento.
+  const occupants = seats.filter((s) => s.type !== 'open').length;
 
   // Cada assento ocupado recebe uma cor na ORDEM de preenchimento (host, depois bots).
   const colorByIndex = useMemo(() => {
@@ -50,7 +62,7 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
   }, [visible]);
 
   const filledCount = colorByIndex.filter(Boolean).length;
-  const canStart = filledCount >= 3;
+  const canStart = filledCount >= 1; // anfitriao sozinho ja vale (ate o limite do mapa)
 
   function setSeat(i: number, s: Seat) {
     setSeats((prev) => {
@@ -67,6 +79,19 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
       next[i] = { type: 'bot', diff: 'medium', name: pickBotName(used).name };
       return next;
     });
+  }
+
+  /** Troca o mapa, compactando os jogadores para os primeiros assentos (cabem no novo limite). */
+  function chooseMap(key: BoardLayout) {
+    const newLimit = MAPS.find((m) => m.key === key)!.limit;
+    if (occupants > newLimit) return; // mapa menor que a lotacao atual: bloqueado
+    setSeats((prev) => {
+      const taken = prev.filter((s) => s.type !== 'open');
+      const compact: Seat[] = [...taken];
+      while (compact.length < MAX_SEATS) compact.push({ type: 'open' });
+      return compact;
+    });
+    setMapKey(key);
   }
 
   function start() {
@@ -89,7 +114,7 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
     });
     onStart({
       players, bots, botDifficulty: botDifficulty as Record<PlayerColor, Difficulty>,
-      seed, boardLayout, numberLayout, desert, pointsToWin, discardLimit,
+      seed, boardLayout: mapKey, numberLayout, desert, pointsToWin, discardLimit,
     });
   }
 
@@ -105,18 +130,26 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
 
       <div className="setup-grid">
         <div className="card su-players">
-          <div className="su-players-head">
-            <h2 className="su-h"><Users size={18} className="ic-primary" /> Jogadores <span className="su-count">{filledCount}/{roomSize}</span></h2>
-            <div className="su-seg sm">
-              {[3, 4, 5, 6].map((n) => (
-                <button key={n} className={roomSize === n ? 'on' : ''} onClick={() => setRoomSize(n)}>{n}</button>
-              ))}
-            </div>
+          <h2 className="su-h"><Users size={18} className="ic-primary" /> Jogadores <span className="su-count">{filledCount}/{limit}</span></h2>
+
+          <div className="su-maps">
+            {MAPS.map((m) => {
+              const disabled = occupants > m.limit;
+              return (
+                <button
+                  key={m.key}
+                  className={`su-map${mapKey === m.key ? ' on' : ''}`}
+                  disabled={disabled}
+                  title={disabled ? `Remova jogadores para usar este mapa (máx. ${m.limit})` : undefined}
+                  onClick={() => chooseMap(m.key)}
+                >
+                  <b>{m.label}</b>
+                  <small>{m.hint}</small>
+                </button>
+              );
+            })}
           </div>
-          <p className="su-note">
-            Convide amigos pelo link ou preencha as vagas com bots.
-            {boardLayout === 'large' && <> <b>Tabuleiro grande</b> (30 hexágonos, 2 desertos) para 5–6 jogadores.</>}
-          </p>
+          <p className="su-note">Convide amigos pelo link ou preencha as vagas com bots — jogue de 1 até {limit}.</p>
 
           {visible.map((s, i) => {
             const color = colorByIndex[i];
@@ -143,7 +176,7 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
                 <div className="su-seat-row">
                   <span className="su-crest" style={{ background: PLAYER_FILL[c] }} title={PLAYER_LABEL[c]}>{CREST[c]}</span>
                   <span className="su-name bot-name"><Bot size={14} /> {s.name}</span>
-                  <button className="su-remove" title="Liberar vaga" onClick={() => setSeat(i, { type: 'open' })}><X size={15} /></button>
+                  <button className="su-remove" title="Remover da sala" onClick={() => setSeat(i, { type: 'open' })}><X size={15} /></button>
                 </div>
                 <div className="su-seg xs su-seat-diff">
                   {(['easy', 'medium', 'hard'] as Difficulty[]).map((d) => (
@@ -182,7 +215,7 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
           </div>
 
           <button className="cta big su-start" disabled={!canStart} onClick={start}>
-            <Play size={16} /> {canStart ? 'Começar partida' : 'Mínimo de 3 jogadores'}
+            <Play size={16} /> Começar partida
           </button>
         </div>
       </div>

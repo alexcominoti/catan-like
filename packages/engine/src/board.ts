@@ -11,14 +11,17 @@ import type { Board, Hex, Vertex, Edge, Port } from './types.js';
 
 export const HEX_SIZE = 60;
 
-/** Tamanho do tabuleiro: classico (19 hexes, 3-4 jogadores) ou grande (30, 5-6). */
-export type BoardLayout = 'standard' | 'large';
+/**
+ * Tamanho do tabuleiro: classico (19 hexes, 3-4), grande (30, 5-6) ou
+ * gigante (37, 7-8 jogadores).
+ */
+export type BoardLayout = 'standard' | 'large' | 'huge';
 
 /** Raio do tabuleiro em hexes a partir do centro (2 => 19 hexes). */
 const BOARD_RADIUS = 2;
 
 /** Numero de portos por tamanho de tabuleiro. */
-const PORT_COUNT_BY_LAYOUT: Record<BoardLayout, number> = { standard: 9, large: 11 };
+const PORT_COUNT_BY_LAYOUT: Record<BoardLayout, number> = { standard: 9, large: 11, huge: 13 };
 
 export function axialToPixel(q: number, r: number, size = HEX_SIZE): { x: number; y: number } {
   const x = size * (Math.sqrt(3) * q + (Math.sqrt(3) / 2) * r);
@@ -41,17 +44,22 @@ function keyOf(x: number, y: number): string {
   return `${Math.round(x)}:${Math.round(y)}`;
 }
 
-/** Lista de coordenadas axiais (q, r) dos 19 hexes do tabuleiro classico. */
-export function axialCoords(): { q: number; r: number }[] {
+/** Coordenadas axiais (q, r) de um hexagono regular de raio R (R=2 => 19, R=3 => 37). */
+function hexRadiusCoords(R: number): { q: number; r: number }[] {
   const coords: { q: number; r: number }[] = [];
-  for (let r = -BOARD_RADIUS; r <= BOARD_RADIUS; r++) {
-    for (let q = -BOARD_RADIUS; q <= BOARD_RADIUS; q++) {
-      if (Math.abs(q) <= BOARD_RADIUS && Math.abs(r) <= BOARD_RADIUS && Math.abs(q + r) <= BOARD_RADIUS) {
+  for (let r = -R; r <= R; r++) {
+    for (let q = -R; q <= R; q++) {
+      if (Math.abs(q) <= R && Math.abs(r) <= R && Math.abs(q + r) <= R) {
         coords.push({ q, r });
       }
     }
   }
   return coords;
+}
+
+/** Lista de coordenadas axiais (q, r) dos 19 hexes do tabuleiro classico. */
+export function axialCoords(): { q: number; r: number }[] {
+  return hexRadiusCoords(BOARD_RADIUS);
 }
 
 /**
@@ -72,7 +80,9 @@ function largeCoords(): { q: number; r: number }[] {
 }
 
 function coordsFor(layout: BoardLayout): { q: number; r: number }[] {
-  return layout === 'large' ? largeCoords() : axialCoords();
+  if (layout === 'large') return largeCoords();
+  if (layout === 'huge') return hexRadiusCoords(3); // 37 hexes (7-8 jogadores)
+  return axialCoords();
 }
 
 /**

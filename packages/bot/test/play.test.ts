@@ -54,4 +54,21 @@ describe('bot heuristico', () => {
     expect(state.phase).toBe('ended');
     expect(state.winner).not.toBeNull();
   });
+
+  it('tabuleiro GIGANTE: partida de 8 bots termina com vencedor', () => {
+    const players = (['red', 'blue', 'white', 'orange', 'green', 'brown', 'purple', 'pink'] as const).map((c, i) => ({ color: c, name: `J${i + 1}` }));
+    let state = createInitialState({ seed: 11, boardLayout: 'huge', players: [...players] });
+    let steps = 0;
+    while (steps < 300000) {
+      const move = planBotAction(state, () => true, () => 'medium');
+      if (!move) break;
+      const r = reduce(state, move.by, move.action);
+      if (!r.ok) throw new Error(`acao ilegal (gigante) no passo ${steps}: ${r.error}`);
+      state = r.state;
+      steps++;
+      if (state.phase === 'ended') break;
+    }
+    expect(state.phase).toBe('ended');
+    expect(state.winner).not.toBeNull();
+  });
 });

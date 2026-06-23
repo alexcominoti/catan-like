@@ -344,21 +344,26 @@ function SpotHint({ x, y }: { x: number; y: number }) {
   );
 }
 
-/** Barquinho ancorado num porto: vela com o icone e a taxa no casco. */
+/** Barquinho ancorado num porto: vela larga com o icone do recurso bem visivel e a taxa no casco. */
 function PortBoat({ x, y, type }: { x: number; y: number; type: 'generic' | Resource }) {
   const rate = type === 'generic' ? '3:1' : '2:1';
-  const icon = type === 'generic' ? '?' : RESOURCE_ICON[type];
   return (
     <g transform={`translate(${x} ${y})`} pointerEvents="none" filter="url(#softShadow)">
       {/* casco */}
-      <path d="M -17 1 Q -19 12 -8 12 L 8 12 Q 19 12 17 1 Z" fill="#9a6a3a" stroke="#5d3a1d" strokeWidth={1.3} />
-      <path d="M -17 1 L 17 1" stroke="#c79a63" strokeWidth={2.4} strokeLinecap="round" />
-      {/* mastro + vela */}
-      <line x1={-1.5} y1={1} x2={-1.5} y2={-19} stroke="#5d3a1d" strokeWidth={1.6} strokeLinecap="round" />
-      <path d="M 0 -18 Q 13 -10 0 -2 Z" fill="#fbf7ee" stroke="#cbb68f" strokeWidth={0.9} />
-      <text x={4.5} y={-8} textAnchor="middle" fontSize={8}>{icon}</text>
-      {/* taxa no casco */}
-      <text x={0} y={10} textAnchor="middle" fontSize={8.5} fontWeight={800} fill="#fff4e0" fontFamily="Georgia, serif">{rate}</text>
+      <path d="M -20 1 Q -22 14 -10 14 L 10 14 Q 22 14 20 1 Z" fill="#9a6a3a" stroke="#5d3a1d" strokeWidth={1.4} />
+      <path d="M -20 1 L 20 1" stroke="#c79a63" strokeWidth={2.8} strokeLinecap="round" />
+      {/* mastro */}
+      <line x1={-1.5} y1={1} x2={-1.5} y2={-23} stroke="#5d3a1d" strokeWidth={1.8} strokeLinecap="round" />
+      {/* vela larga (mostra bem o icone / a taxa generica) */}
+      <path d="M 1 -22 Q 19 -16 19 -10 Q 19 -4 1 -2 Z" fill="#fbf7ee" stroke="#cbb68f" strokeWidth={1} />
+      {type === 'generic' ? (
+        <text x={9.5} y={-8.5} textAnchor="middle" fontSize={11} fontWeight={800} fill="#3a2f22" fontFamily="Georgia, serif">3:1</text>
+      ) : (
+        <>
+          <text x={9.5} y={-7.5} textAnchor="middle" fontSize={15}>{RESOURCE_ICON[type]}</text>
+          <text x={0} y={11.5} textAnchor="middle" fontSize={9} fontWeight={800} fill="#fff4e0" fontFamily="Georgia, serif">{rate}</text>
+        </>
+      )}
     </g>
   );
 }

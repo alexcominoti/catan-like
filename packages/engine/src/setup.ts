@@ -80,6 +80,36 @@ const LARGE_DEV_DECK_BAG: ProgressCard[] = [
   ...Array<ProgressCard>(2).fill('monopoly'),
 ];
 
+/**
+ * Distribuicoes do tabuleiro GIGANTE (37 hexes, 7-8 jogadores): 2 desertos, 35
+ * tokens numericos, 13 portos, banco 30, baralho de progresso 45.
+ */
+const HUGE_TERRAIN_BAG: Terrain[] = [
+  ...Array<Terrain>(7).fill('forest'),
+  ...Array<Terrain>(7).fill('pasture'),
+  ...Array<Terrain>(7).fill('field'),
+  ...Array<Terrain>(7).fill('hills'),
+  ...Array<Terrain>(7).fill('mountain'),
+  ...Array<Terrain>(2).fill('desert'),
+];
+
+const HUGE_NUMBER_BAG: number[] = [
+  2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 8, 8, 8, 9, 9, 9, 9, 10, 10, 10, 10, 11, 11, 11, 11, 12, 12,
+];
+
+const HUGE_PORT_TYPE_BAG: ('generic' | Resource)[] = [
+  'generic', 'generic', 'generic', 'generic', 'generic', 'generic', 'generic', 'generic',
+  'wood', 'brick', 'wool', 'grain', 'ore',
+];
+
+const HUGE_DEV_DECK_BAG: ProgressCard[] = [
+  ...Array<ProgressCard>(26).fill('knight'),
+  ...Array<ProgressCard>(8).fill('victoryPoint'),
+  ...Array<ProgressCard>(4).fill('roadBuilding'),
+  ...Array<ProgressCard>(4).fill('yearOfPlenty'),
+  ...Array<ProgressCard>(3).fill('monopoly'),
+];
+
 /** Bags e parametros por tamanho de tabuleiro. */
 const LAYOUT_SETUP: Record<BoardLayout, {
   terrain: Terrain[];
@@ -90,6 +120,7 @@ const LAYOUT_SETUP: Record<BoardLayout, {
 }> = {
   standard: { terrain: TERRAIN_BAG, numbers: NUMBER_BAG, ports: PORT_TYPE_BAG, devDeck: DEV_DECK_BAG, bankPerResource: 19 },
   large: { terrain: LARGE_TERRAIN_BAG, numbers: LARGE_NUMBER_BAG, ports: LARGE_PORT_TYPE_BAG, devDeck: LARGE_DEV_DECK_BAG, bankPerResource: 24 },
+  huge: { terrain: HUGE_TERRAIN_BAG, numbers: HUGE_NUMBER_BAG, ports: HUGE_PORT_TYPE_BAG, devDeck: HUGE_DEV_DECK_BAG, bankPerResource: 30 },
 };
 
 function emptyHand(): Record<Resource, number> {

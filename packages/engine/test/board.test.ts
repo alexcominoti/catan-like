@@ -73,3 +73,13 @@ describe('grafo do tabuleiro GRANDE (30 hexes)', () => {
     expect(b2.edgeOrder).toEqual(board.edgeOrder);
   });
 });
+
+describe('grafo do tabuleiro GIGANTE (37 hexes)', () => {
+  const board = buildBoardGeometry('huge');
+
+  it('tem 37 hexes e 13 portos, planar e conexo (E = V + H - 1)', () => {
+    expect(board.hexOrder).toHaveLength(37);
+    expect(board.ports).toHaveLength(13);
+    expect(board.edgeOrder.length).toBe(board.vertexOrder.length + board.hexOrder.length - 1);
+  });
+});

@@ -89,4 +89,15 @@ describe('estado inicial', () => {
     expect(s.players).toHaveLength(6);
     expect(s.board.hexes[s.blocker.hexId]!.terrain).toBe('desert');
   });
+
+  it('tabuleiro GIGANTE: 37 hexes, 2 desertos, 35 numeros, 13 portos, banco 30, 8 jogadores', () => {
+    const players = (['red', 'blue', 'white', 'orange', 'green', 'brown', 'purple', 'pink'] as const).map((c, i) => ({ color: c, name: `J${i + 1}` }));
+    const s = createInitialState({ seed: 5, boardLayout: 'huge', players: [...players] });
+    expect(s.board.hexOrder).toHaveLength(37);
+    expect(s.board.hexOrder.filter((h) => s.board.hexes[h]!.terrain === 'desert')).toHaveLength(2);
+    expect(s.board.hexOrder.filter((h) => s.board.hexes[h]!.number !== null)).toHaveLength(35);
+    expect(s.board.ports).toHaveLength(13);
+    for (const r of RESOURCES) expect(s.bank[r]).toBe(30);
+    expect(s.players).toHaveLength(8);
+  });
 });
