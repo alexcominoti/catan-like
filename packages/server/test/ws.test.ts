@@ -11,6 +11,7 @@ function config(): RoomConfig {
   return {
     seed: 42,
     boardLayout: 'standard',
+    pace: 'normal',
     players: all.map((c, i) => ({ color: c, name: `P${i + 1}` })),
     bots: ['blue', 'white', 'orange'], // red = humano (o criador)
     botDifficulty,

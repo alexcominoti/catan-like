@@ -11,6 +11,7 @@ import type { ClientMessage, ServerMessage } from './protocol.js';
 export function startServer(port = Number(process.env.PORT ?? 8080)): WebSocketServer {
   const manager = new RoomManager();
   const sockets = new Map<string, WebSocket>(); // clientId -> socket
+  const timers = new Map<string, ReturnType<typeof setTimeout>>(); // roomId -> timer de acao
 
   interface Conn {
     clientId: string;
@@ -36,7 +37,13 @@ export function startServer(port = Number(process.env.PORT ?? 8080)): WebSocketS
 
     ws.on('close', () => {
       sockets.delete(conn.clientId);
-      if (conn.roomId) manager.get(conn.roomId)?.unseat(conn.clientId);
+      if (conn.roomId) {
+        const room = manager.get(conn.roomId);
+        if (room) {
+          room.unseat(conn.clientId); // a vaga vira bot medio e assume
+          broadcastAndSchedule(room);
+        }
+      }
     });
   });
 
@@ -51,6 +58,30 @@ export function startServer(port = Number(process.env.PORT ?? 8080)): WebSocketS
       const ws = sockets.get(h.clientId);
       if (ws) send(ws, { t: 'state', state: room.projectedFor(h.color) });
     }
+  }
+
+  /** Reprograma o timer de acao da sala: ao estourar, auto-resolve e re-emite. */
+  function scheduleTimer(room: GameRoom): void {
+    const prev = timers.get(room.id);
+    if (prev) {
+      clearTimeout(prev);
+      timers.delete(room.id);
+    }
+    const secs = room.deadlineSeconds();
+    if (secs == null) return;
+    timers.set(
+      room.id,
+      setTimeout(() => {
+        timers.delete(room.id);
+        room.forceTimeout();
+        broadcastAndSchedule(room);
+      }, secs * 1000),
+    );
+  }
+
+  function broadcastAndSchedule(room: GameRoom): void {
+    broadcast(room);
+    scheduleTimer(room);
   }
 
   function handle(ws: WebSocket, conn: Conn, msg: ClientMessage): void {
@@ -80,7 +111,7 @@ export function startServer(port = Number(process.env.PORT ?? 8080)): WebSocketS
           send(ws, { t: 'error', error: res.error ?? 'Ação inválida.' });
           return;
         }
-        broadcast(room);
+        broadcastAndSchedule(room);
         break;
       }
     }
@@ -95,7 +126,7 @@ export function startServer(port = Number(process.env.PORT ?? 8080)): WebSocketS
     conn.roomId = room.id;
     conn.color = color;
     send(ws, { t: 'joined', roomId: room.id, color });
-    broadcast(room);
+    broadcastAndSchedule(room);
   }
 
   return wss;

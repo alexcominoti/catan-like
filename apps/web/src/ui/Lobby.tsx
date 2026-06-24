@@ -6,12 +6,16 @@ import { Users, Bot, Dices, Target, Play, ArrowLeft, Shuffle, UserPlus, X, Crown
 import { PLAYER_FILL, PLAYER_LABEL } from '../game/theme.js';
 import { pickBotName } from '../game/botNames.js';
 
+/** Ritmo da partida (limite de tempo das ações; aplicado no jogo online). */
+export type Pace = 'fast' | 'normal';
+
 export interface GameConfig {
   players: { color: PlayerColor; name: string }[];
   bots: PlayerColor[];
   botDifficulty: Record<PlayerColor, Difficulty>;
   seed: number;
   boardLayout: BoardLayout;
+  pace: Pace;
   numberLayout: NumberLayout;
   desert: DesertPlacement;
   pointsToWin: number;
@@ -48,6 +52,7 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
   const [pointsToWin, setPointsToWin] = useState(10);
   const [discardLimit, setDiscardLimit] = useState(7);
   const [friendlyRobber, setFriendlyRobber] = useState(false);
+  const [pace, setPace] = useState<Pace>('normal');
   const [seedText, setSeedText] = useState('');
 
   const limit = MAPS.find((m) => m.key === mapKey)!.limit;
@@ -117,7 +122,7 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
     });
     onStart({
       players, bots, botDifficulty: botDifficulty as Record<PlayerColor, Difficulty>,
-      seed, boardLayout: mapKey, numberLayout, desert, pointsToWin, discardLimit, friendlyRobber,
+      seed, boardLayout: mapKey, pace, numberLayout, desert, pointsToWin, discardLimit, friendlyRobber,
     });
   }
 
@@ -206,6 +211,13 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
           </div>
 
           <h3 className="su-sub">Configurações avançadas</h3>
+          <div className="su-pace">
+            <label>Ritmo (limite de tempo das ações, no online)</label>
+            <div className="su-seg sm">
+              <button className={pace === 'normal' ? 'on' : ''} onClick={() => setPace('normal')}>Normal</button>
+              <button className={pace === 'fast' ? 'on' : ''} onClick={() => setPace('fast')}>Rápido</button>
+            </div>
+          </div>
           <div className="su-slider">
             <label>Pontos para vencer <b>{pointsToWin}</b></label>
             <input type="range" min={3} max={15} value={pointsToWin} onChange={(e) => setPointsToWin(+e.target.value)} />

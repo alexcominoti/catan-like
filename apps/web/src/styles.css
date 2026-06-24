@@ -1468,6 +1468,10 @@ button.link {
 .su-tile-label { font-weight: 600; font-size: 14px; }
 .su-tile-hint { font-size: 11px; color: var(--muted); }
 
+.su-pace { margin-bottom: 14px; }
+.su-pace label { display: block; font-size: 13px; margin-bottom: 6px; color: var(--muted); }
+.su-pace .su-seg { width: 100%; }
+.su-pace .su-seg button { flex: 1; }
 .su-slider { margin-bottom: 14px; }
 .su-slider label { display: block; font-size: 13px; margin-bottom: 6px; }
 .su-slider label b { color: var(--accent); }

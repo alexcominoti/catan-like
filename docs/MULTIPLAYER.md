@@ -85,3 +85,16 @@ com Vercel (frontend) + Fly.io/Render (servidor) é o caminho mais barato.
 4. ⏳ Lobby real com `roomId` + link de convite (as vagas abertas viram jogadores que
    entram pela mensagem `join`). O lobby atual já modela host + vagas + bots.
 5. ⏳ Reconexão (reenviar o estado projetado ao reconectar); depois SQLite (Fase 3).
+
+### Robustez de servidor já implementada
+- ✅ **Ritmo Rápido/Normal** (`pace` na config): limites de tempo por ação
+  (`PACE_TIMERS`, inspirados no Colonist). `GameRoom.deadlineSeconds()` diz quanto
+  o humano da vez tem; ao estourar, `forceTimeout()` resolve sozinho (oferta de
+  troca → `resolveBotProposal`; senão o humano em atraso é pilotado por um bot). O
+  servidor agenda o `setTimeout` por sala.
+- ✅ **Desconexão → bot médio**: ao cair, a vaga vira bot e assume na hora; se o
+  jogador voltar (`seat`), ele reassume o controle.
+
+### Contas / login
+Plano e passos de setup do **Google OAuth** em [`AUTH.md`](AUTH.md) (precisa de
+credenciais criadas por você no Google Cloud).

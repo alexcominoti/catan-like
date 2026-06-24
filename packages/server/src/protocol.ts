@@ -8,10 +8,14 @@ import type {
 } from '@hexgame/engine';
 import type { Difficulty } from '@hexgame/bot';
 
+/** Ritmo da partida (limite de tempo das acoes). */
+export type Pace = 'fast' | 'normal';
+
 /** Configuracao de uma sala (espelha o GameConfig do lobby da web). */
 export interface RoomConfig {
   seed: number;
   boardLayout: BoardLayout;
+  pace: Pace;
   players: { color: PlayerColor; name: string }[];
   bots: PlayerColor[];
   botDifficulty: Record<PlayerColor, Difficulty>;
