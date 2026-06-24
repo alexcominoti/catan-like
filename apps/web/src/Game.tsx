@@ -250,7 +250,8 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
       if (moved && svg && prevBlocker !== moved.hexId) {
         const a = newState.board.hexes[prevBlocker];
         const b = newState.board.hexes[moved.hexId];
-        if (a && b) fly({ kind: 'robber', from: svgScreen(svg, a.cx, a.cy), to: svgScreen(svg, b.cx, b.cy), duration: 650 });
+        // O ladrao e desenhado em (cx, cy-26); a animacao mira essa posicao, nao o centro do hex.
+        if (a && b) fly({ kind: 'robber', from: svgScreen(svg, a.cx, a.cy - 26), to: svgScreen(svg, b.cx, b.cy - 26), duration: 650 });
       }
       // Roubo pelo ladrão: carta da vítima -> ladrão (após o ladrão pousar).
       if (moved && moved.stoleFrom && moved.resource) {
@@ -517,7 +518,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
                   </select>
                   <button disabled={!myMain || localPlayer.hand[give] < bestRate} onClick={() => dispatch({ t: 'tradeBank', give, want })}>{bestRate}:1</button>
                 </span>
-                <button className="hbtn" disabled={!myMain} onClick={() => setArming('trade')}><ArrowLeftRight size={14} /> Trocar</button>
+                <button className="hbtn" disabled={!myMain || !!state.activeTrade} onClick={() => setArming('trade')}><ArrowLeftRight size={14} /> Trocar</button>
                 <button className="hbtn primary-soft" disabled={!myMain} onClick={() => dispatch({ t: 'endTurn' })}><Hand size={14} /> Passar</button>
               </div>
             </div>
@@ -787,7 +788,10 @@ function ActiveTradePopup({
       <h3>{PLAYER_LABEL[t.from]} quer trocar</h3>
       <p className="trade-summary">Dá <b>{fmt(t.give)}</b> &nbsp;→&nbsp; quer <b>{fmt(t.want)}</b></p>
       {showTimer && (
-        <div className="trade-timer"><span className="trade-timer-bar" /></div>
+        // key muda a cada nova proposta -> a barra remonta e o tempo reinicia em sincronia.
+        <div className="trade-timer">
+          <span key={`${t.from}:${JSON.stringify(t.give)}:${JSON.stringify(t.want)}`} className="trade-timer-bar" />
+        </div>
       )}
       {iAmProposer ? (
         <>

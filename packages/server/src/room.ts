@@ -1,12 +1,14 @@
 import {
+  RESOURCES,
   createInitialState,
   projectFor,
   reduce,
   type Action,
   type GameState,
   type PlayerColor,
+  type Resource,
 } from '@hexgame/engine';
-import { planBotAction, resolveBotProposal, type Difficulty } from '@hexgame/bot';
+import { planBotAction, type Difficulty } from '@hexgame/bot';
 import type { Pace, RoomConfig } from './protocol.js';
 
 /** Limites de tempo (segundos) por ritmo, inspirados nos timers do Colonist. */
@@ -129,65 +131,90 @@ export class GameRoom {
   }
 
   /**
-   * Estourou o tempo. Comportamento alinhado:
-   *  - Oferta de troca ativa: fecha/cancela (resolveBotProposal).
-   *  - FASE PRINCIPAL (turno livre): so PASSA A VEZ (endTurn). Conta como turno
-   *    perdido; apos MAX_TURN_TIMEOUTS seguidos a vaga vira BOT MEDIO (AFK).
-   *  - Demais fases (rolar/descartar/ladrao/setup): nao da pra "pular", entao um
-   *    bot resolve a obrigacao por ele (uma vez).
+   * Estourou o LIMITE de tempo da acao atual. Default por situacao (alinhado):
+   *  - Oferta de troca pendente: CANCELA.
+   *  - Setup: um bot coloca a vila/estrada (uma acao).
+   *  - Rolar: rola os dados (NAO joga cavaleiro antes).
+   *  - Mover ladrao: move para o DESERTO, sem roubar.
+   *  - Descartar (7): descarte ALEATORIO.
+   *  - Fase principal: FIM DE TURNO. Apos MAX_TURN_TIMEOUTS seguidos a vaga vira
+   *    bot medio (AFK).
    * Retorna se houve acao.
    */
   forceTimeout(): boolean {
     const s = this.state;
-    if (s.activeTrade) {
-      const mv = resolveBotProposal(s);
-      if (mv) {
-        const r = reduce(s, mv.by, mv.action);
-        if (r.ok) {
-          this.state = r.state;
-          this.runBots();
-          return true;
-        }
-      }
-      return false;
+    if (s.phase === 'ended') return false;
+
+    // Oferta de troca pendente: cancela (pelo proponente).
+    if (s.activeTrade) return this.applyForced(s.activeTrade.from, { t: 'cancelTrade' });
+
+    const who = this.awaitedHuman();
+    if (!who) return false;
+
+    if (s.phase === 'discard') {
+      return this.applyForced(who, { t: 'discard', resources: this.randomDiscard(who) });
+    }
+    if (s.phase === 'moveBlocker') {
+      return this.applyForced(who, { t: 'moveBlocker', hexId: this.desertOrHarmlessHex() });
+    }
+    if (s.phase === 'roll') {
+      return this.applyForced(who, { t: 'rollDice' }); // sem cavaleiro
+    }
+    if (s.phase === 'setup1' || s.phase === 'setup2') {
+      // Um bot coloca a vila/estrada por ele (uma acao por janela de tempo).
+      const isBotOrWho = (c: PlayerColor): boolean => this.botSet.has(c) || c === who;
+      const mv = planBotAction(this.state, isBotOrWho, this.difficultyOf);
+      return mv ? this.applyForced(mv.by, mv.action) : false;
     }
 
-    const awaited = this.awaitedHuman();
-    if (!awaited) return false;
-
-    // Fase principal: passa a vez; acumula AFK e converte em bot apos N seguidos.
-    if (s.phase === 'main') {
-      const streak = (this.timeoutStreak.get(awaited) ?? 0) + 1;
-      this.timeoutStreak.set(awaited, streak);
-      if (streak >= MAX_TURN_TIMEOUTS) {
-        this.botSet.add(awaited); // AFK demais -> vira bot medio
-        this.runBots();
-        return true;
-      }
-      const r = reduce(s, awaited, { t: 'endTurn' });
-      if (r.ok) {
-        this.state = r.state;
-        this.runBots();
-        return true;
-      }
-      // endTurn ilegal (ex.: estradas gratis pendentes): cai para o bot resolver.
+    // Fase principal: fim de turno; acumula AFK e converte em bot apos N seguidos.
+    const streak = (this.timeoutStreak.get(who) ?? 0) + 1;
+    this.timeoutStreak.set(who, streak);
+    if (streak >= MAX_TURN_TIMEOUTS) {
+      this.botSet.add(who); // AFK demais -> vira bot medio
+      this.runBots();
+      return true;
     }
+    return this.applyForced(who, { t: 'endTurn' });
+  }
 
-    // Obrigacoes que nao dao para pular: um bot resolve por ele.
-    const isBotOrAwaited = (c: PlayerColor): boolean => this.botSet.has(c) || c === awaited;
-    let acted = false;
-    let guard = 0;
-    while (guard++ < 100000 && this.awaitedHuman() === awaited) {
-      const move = planBotAction(this.state, isBotOrAwaited, this.difficultyOf);
-      if (!move) break;
-      const r = reduce(this.state, move.by, move.action);
-      if (!r.ok) break;
-      this.state = r.state;
-      acted = true;
-      if (this.state.phase === 'ended') break;
-    }
+  /** Aplica uma acao "default" (timeout) e segue auto-jogando os bots. */
+  private applyForced(by: PlayerColor, action: Action): boolean {
+    const r = reduce(this.state, by, action);
+    if (!r.ok) return false;
+    this.state = r.state;
     this.runBots();
-    return acted;
+    return true;
+  }
+
+  /** n cartas ALEATORIAS da mao do jogador (para o descarte por tempo). */
+  private randomDiscard(color: PlayerColor): Partial<Record<Resource, number>> {
+    const p = this.state.players.find((pl) => pl.color === color)!;
+    const n = this.state.pendingDiscards[color] ?? 0;
+    const pool: Resource[] = [];
+    for (const r of RESOURCES) for (let i = 0; i < p.hand[r]; i++) pool.push(r);
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j]!, pool[i]!];
+    }
+    const out: Partial<Record<Resource, number>> = {};
+    for (let i = 0; i < n && i < pool.length; i++) {
+      const r = pool[i]!;
+      out[r] = (out[r] ?? 0) + 1;
+    }
+    return out;
+  }
+
+  /** Hex para mover o ladrao por tempo: um deserto (senao um hex sem construcoes). */
+  private desertOrHarmlessHex(): string {
+    const s = this.state;
+    const cur = s.blocker.hexId;
+    const desert = s.board.hexOrder.find((h) => h !== cur && s.board.hexes[h]!.terrain === 'desert');
+    if (desert) return desert;
+    const empty = s.board.hexOrder.find(
+      (h) => h !== cur && s.board.hexes[h]!.corners.every((v) => !s.buildings[v]),
+    );
+    return empty ?? s.board.hexOrder.find((h) => h !== cur)!;
   }
 
   /** Drena as jogadas dos bots ate ser a vez de um humano (ou o fim do jogo). */
