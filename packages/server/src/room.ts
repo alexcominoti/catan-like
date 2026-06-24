@@ -17,6 +17,9 @@ const PACE_TIMERS: Record<Pace, {
   normal: { settlement: 180, road: 45, dice: 20, robber: 40, discard: 40, turn: 120, trade: 20 },
 };
 
+/** Turnos consecutivos perdidos por tempo ate a vaga virar bot medio (AFK). */
+const MAX_TURN_TIMEOUTS = 3;
+
 /**
  * Sala autoritativa: guarda UM GameState e e a unica autoridade sobre as regras.
  * Valida cada acao pelo `reduce` puro, auto-joga os bots e projeta o estado por
@@ -29,6 +32,8 @@ export class GameRoom {
   /** Assentos humanos: cor + nome + cliente conectado (ou null = vaga aberta). */
   readonly humans: { color: PlayerColor; name: string; clientId: string | null }[];
   private readonly botSet: Set<PlayerColor>;
+  /** Turnos seguidos perdidos por tempo, por cor (zera ao agir manualmente). */
+  private readonly timeoutStreak = new Map<PlayerColor, number>();
 
   constructor(id: string, config: RoomConfig) {
     this.id = id;
@@ -59,6 +64,7 @@ export class GameRoom {
     if (!slot) return null;
     slot.clientId = clientId;
     this.botSet.delete(slot.color); // humano reassume o controle (deixa de ser bot)
+    this.timeoutStreak.set(slot.color, 0);
     return slot.color;
   }
 
@@ -83,6 +89,7 @@ export class GameRoom {
     const r = reduce(this.state, by, action);
     if (!r.ok) return { ok: false, error: r.error };
     this.state = r.state;
+    this.timeoutStreak.set(by, 0); // agiu manualmente: zera o contador de AFK
     this.runBots();
     return { ok: true };
   }
@@ -107,13 +114,13 @@ export class GameRoom {
     return this.isBot(s.currentPlayer) ? null : s.currentPlayer;
   }
 
-  /** Segundos permitidos para a acao humana atual (ou null se quem age e bot/fim). */
+  /** Segundos da janela atual (ou null se quem age e bot/fim de jogo). */
   deadlineSeconds(): number | null {
-    const who = this.awaitedHuman();
-    if (!who) return null;
-    const t = PACE_TIMERS[this.config.pace];
     const s = this.state;
-    if (s.activeTrade) return t.trade;
+    if (s.phase === 'ended') return null;
+    const t = PACE_TIMERS[this.config.pace];
+    if (s.activeTrade) return t.trade; // qualquer oferta ativa tem janela de resposta
+    if (!this.awaitedHuman()) return null; // quem age e bot -> sem timer
     if (s.phase === 'discard') return t.discard;
     if (s.phase === 'setup1' || s.phase === 'setup2') return s.setupLastVertex ? t.road : t.settlement;
     if (s.phase === 'roll') return t.dice;
@@ -122,15 +129,20 @@ export class GameRoom {
   }
 
   /**
-   * Estourou o tempo: resolve a pendencia atual automaticamente. Numa oferta de
-   * troca, fecha/cancela (resolveBotProposal); senao, o humano em atraso e
-   * "pilotado" por um bot ate a obrigacao dele passar. Retorna se houve acao.
+   * Estourou o tempo. Comportamento alinhado:
+   *  - Oferta de troca ativa: fecha/cancela (resolveBotProposal).
+   *  - FASE PRINCIPAL (turno livre): so PASSA A VEZ (endTurn). Conta como turno
+   *    perdido; apos MAX_TURN_TIMEOUTS seguidos a vaga vira BOT MEDIO (AFK).
+   *  - Demais fases (rolar/descartar/ladrao/setup): nao da pra "pular", entao um
+   *    bot resolve a obrigacao por ele (uma vez).
+   * Retorna se houve acao.
    */
   forceTimeout(): boolean {
-    if (this.state.activeTrade) {
-      const mv = resolveBotProposal(this.state);
+    const s = this.state;
+    if (s.activeTrade) {
+      const mv = resolveBotProposal(s);
       if (mv) {
-        const r = reduce(this.state, mv.by, mv.action);
+        const r = reduce(s, mv.by, mv.action);
         if (r.ok) {
           this.state = r.state;
           this.runBots();
@@ -139,8 +151,29 @@ export class GameRoom {
       }
       return false;
     }
+
     const awaited = this.awaitedHuman();
     if (!awaited) return false;
+
+    // Fase principal: passa a vez; acumula AFK e converte em bot apos N seguidos.
+    if (s.phase === 'main') {
+      const streak = (this.timeoutStreak.get(awaited) ?? 0) + 1;
+      this.timeoutStreak.set(awaited, streak);
+      if (streak >= MAX_TURN_TIMEOUTS) {
+        this.botSet.add(awaited); // AFK demais -> vira bot medio
+        this.runBots();
+        return true;
+      }
+      const r = reduce(s, awaited, { t: 'endTurn' });
+      if (r.ok) {
+        this.state = r.state;
+        this.runBots();
+        return true;
+      }
+      // endTurn ilegal (ex.: estradas gratis pendentes): cai para o bot resolver.
+    }
+
+    // Obrigacoes que nao dao para pular: um bot resolve por ele.
     const isBotOrAwaited = (c: PlayerColor): boolean => this.botSet.has(c) || c === awaited;
     let acted = false;
     let guard = 0;

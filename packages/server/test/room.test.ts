@@ -99,6 +99,18 @@ describe('GameRoom (servidor autoritativo)', () => {
     expect(room.state.phase).toBe('ended');
   });
 
+  it('humano AFK nao trava: passa a vez e, apos N timeouts, vira bot ate o fim', () => {
+    const room = new GameRoom('T6', makeConfig({ humans: ['red'] }));
+    room.seat('client-1');
+    let guard = 0;
+    while (room.state.phase !== 'ended' && guard++ < 100000) {
+      if (room.deadlineSeconds() == null) break; // so resolve quando ha janela ativa
+      room.forceTimeout();
+    }
+    expect(room.state.phase).toBe('ended');
+    expect(room.state.winner).not.toBeNull();
+  });
+
   it('RoomManager cria salas com ids unicos e as recupera', () => {
     const m = new RoomManager();
     const a = m.create(makeConfig());

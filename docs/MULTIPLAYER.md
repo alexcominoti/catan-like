@@ -89,9 +89,15 @@ com Vercel (frontend) + Fly.io/Render (servidor) é o caminho mais barato.
 ### Robustez de servidor já implementada
 - ✅ **Ritmo Rápido/Normal** (`pace` na config): limites de tempo por ação
   (`PACE_TIMERS`, inspirados no Colonist). `GameRoom.deadlineSeconds()` diz quanto
-  o humano da vez tem; ao estourar, `forceTimeout()` resolve sozinho (oferta de
-  troca → `resolveBotProposal`; senão o humano em atraso é pilotado por um bot). O
-  servidor agenda o `setTimeout` por sala.
+  tempo a janela atual tem; ao estourar, `forceTimeout()` resolve assim (alinhado):
+  - **Fase principal** (turno livre): **só passa a vez** (endTurn). Conta como turno
+    perdido; após **3 timeouts seguidos** a vaga **vira bot médio** (AFK). Agir
+    manualmente zera o contador.
+  - **Rolar / descartar / mover ladrão / setup**: não dá para pular → um **bot
+    resolve** a obrigação por ele (uma vez).
+  - **Oferta de troca ativa** (inclui bot→humano): fecha/cancela via
+    `resolveBotProposal`. (Fechou a lacuna anterior.)
+  O servidor agenda o `setTimeout` por sala e re-emite o estado ao disparar.
 - ✅ **Desconexão → bot médio**: ao cair, a vaga vira bot e assume na hora; se o
   jogador voltar (`seat`), ele reassume o controle.
 
