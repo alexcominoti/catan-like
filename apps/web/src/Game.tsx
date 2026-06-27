@@ -33,6 +33,45 @@ import { saveReplay } from './ui/replays.js';
 import type { GameConfig } from './ui/Lobby.js';
 import { PLAYER_FILL, PLAYER_LABEL, RESOURCE_ICON, RESOURCE_LABEL } from './game/theme.js';
 
+/** Limites de tempo (s) por acao, por ritmo — espelham o servidor (PACE_TIMERS). */
+const PACE_TIMERS = {
+  fast: { settlement: 120, road: 30, dice: 10, robber: 20, discard: 20, turn: 60 },
+  normal: { settlement: 180, road: 45, dice: 20, robber: 40, discard: 40, turn: 120 },
+} as const;
+
+function fmtSecs(s: number): string {
+  return s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s}s`;
+}
+
+/** Descarte aleatorio de n cartas da mao (default por tempo). */
+function randomDiscard(s: GameState, me: PlayerColor): Partial<Record<Resource, number>> {
+  const p = s.players.find((pl) => pl.color === me)!;
+  const n = s.pendingDiscards[me] ?? 0;
+  const pool: Resource[] = [];
+  for (const r of RESOURCES) for (let i = 0; i < p.hand[r]; i++) pool.push(r);
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j]!, pool[i]!];
+  }
+  const out: Partial<Record<Resource, number>> = {};
+  for (let i = 0; i < n && i < pool.length; i++) {
+    const r = pool[i]!;
+    out[r] = (out[r] ?? 0) + 1;
+  }
+  return out;
+}
+
+/** Hex para mover o ladrao por tempo: um deserto (senao um hex sem construcoes). */
+function desertHex(s: GameState): string {
+  const cur = s.blocker.hexId;
+  const desert = s.board.hexOrder.find((h) => h !== cur && s.board.hexes[h]!.terrain === 'desert');
+  if (desert) return desert;
+  const empty = s.board.hexOrder.find(
+    (h) => h !== cur && s.board.hexes[h]!.corners.every((v) => !s.buildings[v]),
+  );
+  return empty ?? s.board.hexOrder.find((h) => h !== cur)!;
+}
+
 interface PendingBuild {
   action: Action;
   label: string;
@@ -404,6 +443,66 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   const bestRate = maritimeRate(state, localColor, give);
   const playerColor = PLAYER_FILL[state.currentPlayer];
 
+  // ---- Limite de tempo por acao (ritmo Rapido/Normal) ----
+  const pace = config.pace ?? 'normal';
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const dispatchRef = useRef(dispatch);
+  dispatchRef.current = dispatch;
+
+  /** Acao default quando o tempo de `me` estoura (mesmas regras do servidor). */
+  function computeTimeoutAction(s: GameState, me: PlayerColor): { action: Action; by: PlayerColor } | null {
+    if (s.activeTrade) return { action: { t: 'cancelTrade' }, by: s.activeTrade.from };
+    if (s.phase === 'discard' && (s.pendingDiscards[me] ?? 0) > 0)
+      return { action: { t: 'discard', resources: randomDiscard(s, me) }, by: me };
+    if (s.currentPlayer !== me) return null;
+    if (s.phase === 'moveBlocker') return { action: { t: 'moveBlocker', hexId: desertHex(s) }, by: me };
+    if (s.phase === 'roll') return { action: { t: 'rollDice' }, by: me }; // sem cavaleiro
+    if (s.phase === 'setup1' || s.phase === 'setup2') {
+      const mv = planBotAction(s, (c) => c === me || isBot(c), difficultyOf); // um bot coloca
+      return mv ? { action: mv.action, by: mv.by } : null;
+    }
+    if (s.phase === 'main') return { action: { t: 'endTurn' }, by: me };
+    return null;
+  }
+
+  // Situacao atual que tem prazo para o JOGADOR LOCAL (ou null). A troca tem seu
+  // proprio relogio (popup), entao fica de fora daqui.
+  const turnTimer = useMemo((): { secs: number; key: string } | null => {
+    if (state.activeTrade || state.winner) return null;
+    const me = localColor;
+    const tt = PACE_TIMERS[pace];
+    if (state.phase === 'discard' && (state.pendingDiscards[me] ?? 0) > 0)
+      return { secs: tt.discard, key: `discard:${state.pendingDiscards[me]}` };
+    if (state.currentPlayer !== me) return null;
+    if (state.phase === 'setup1' || state.phase === 'setup2')
+      return { secs: state.setupLastVertex ? tt.road : tt.settlement, key: `setup:${state.setupStep}:${state.setupLastVertex ?? '-'}` };
+    if (state.phase === 'roll') return { secs: tt.dice, key: `roll:${turnCount}` };
+    if (state.phase === 'moveBlocker') return { secs: tt.robber, key: `robber:${state.blocker.hexId}` };
+    if (state.phase === 'main') return { secs: tt.turn, key: `main:${turnCount}` };
+    return null;
+  }, [state, localColor, pace, turnCount]);
+
+  const [secsLeft, setSecsLeft] = useState<number | null>(null);
+  useEffect(() => {
+    if (!turnTimer) {
+      setSecsLeft(null);
+      return;
+    }
+    setSecsLeft(turnTimer.secs);
+    const deadline = Date.now() + turnTimer.secs * 1000;
+    const iv = setInterval(() => setSecsLeft(Math.max(0, Math.ceil((deadline - Date.now()) / 1000))), 250);
+    const to = setTimeout(() => {
+      const mv = computeTimeoutAction(stateRef.current, localColor);
+      if (mv) dispatchRef.current(mv.action, mv.by);
+    }, turnTimer.secs * 1000);
+    return () => {
+      clearInterval(iv);
+      clearTimeout(to);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turnTimer?.key]);
+
   const resourceCount = RESOURCES.reduce((s, r) => s + localPlayer.hand[r], 0);
 
   return (
@@ -475,7 +574,11 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
               <p className="eyebrow-turn">{myTurn ? 'Sua vez, nobre' : botTurn ? `Vez de ${cur.name}` : 'Aguardando'}</p>
               <h2>{headline(state, myTurn, botTurn, cur.name)}</h2>
             </div>
-            <button className={`roll-btn${myRoll ? ' pulse' : ''}`} disabled={!myRoll} onClick={() => dispatch({ t: 'rollDice' })}><Dices size={16} /> Rolar dados</button>
+            {secsLeft != null && (
+              <div className={`turn-timer${secsLeft <= 5 ? ' danger' : ''}`} title="Tempo para a sua jogada">
+                <Clock size={15} /> {fmtSecs(secsLeft)}
+              </div>
+            )}
           </div>
 
           <div className="board-wrap" style={{ borderColor: playerColor }}>
@@ -485,6 +588,11 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
                 botOffer={isBot(state.activeTrade.from)} onCounter={() => openCounter(state.activeTrade!)} />
             )}
             <Dice dice={state.dice} />
+            {myRoll && (
+              <button className="roll-btn roll-on-board pulse" onClick={() => dispatch({ t: 'rollDice' })}>
+                <Dices size={16} /> Rolar dados
+              </button>
+            )}
           </div>
 
           <div className="center-hand">
@@ -522,7 +630,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
                 <button className="hbtn primary-soft" disabled={!myMain} onClick={() => dispatch({ t: 'endTurn' })}><Hand size={14} /> Passar</button>
               </div>
             </div>
-            {error && <div className="error">⚠ {error}</div>}
+            <div className="hand-error">{error && <>⚠ {error}</>}</div>
             <HandBar hand={localPlayer.hand} devCards={localPlayer.progressCards} canPlay={canPlay} onPlay={playCard} />
           </div>
         </main>
