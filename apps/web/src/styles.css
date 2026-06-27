@@ -160,6 +160,12 @@ h1, h2, h3, h4 {
   gap: 6px;
 }
 
+/* Banco: mesma altura aprox. do painel inferior da mao; chips centralizados */
+.bank-card { min-height: 220px; display: flex; flex-direction: column; }
+.bank-card .hand { flex: 1; align-content: center; }
+.bank-card .res-chip { font-size: 15px; padding: 7px 11px; }
+.dev-chip { font-weight: 600; }
+
 .res-chip {
   display: inline-flex;
   align-items: center;

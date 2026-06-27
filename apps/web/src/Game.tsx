@@ -443,6 +443,12 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   const bestRate = maritimeRate(state, localColor, give);
   const playerColor = PLAYER_FILL[state.currentPlayer];
 
+  // Mapa nome -> cor para pintar os nomes no Pergaminho.
+  const logNames = useMemo<NameColor[]>(
+    () => config.players.map((p) => ({ name: p.name, color: PLAYER_FILL[p.color] })),
+    [config.players],
+  );
+
   // ---- Limite de tempo por acao (ritmo Rapido/Normal) ----
   const pace = config.pace ?? 'normal';
   const stateRef = useRef(state);
@@ -639,7 +645,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
         <aside className="pergaminho">
           <div className="card scroll-card">
             <h2><MessageSquare size={16} className="ic-primary" /> Pergaminho</h2>
-            <div className="log">{log.map((entry, i) => <LogLine key={i} entry={entry} />)}</div>
+            <div className="log">{log.map((entry, i) => <LogLine key={i} entry={entry} names={logNames} />)}</div>
             <div className="chat-row">
               <input value={chatInput} placeholder="Mensagem ou /comando"
                 onChange={(e) => setChatInput(e.target.value)}
@@ -647,12 +653,15 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
               <button onClick={sendChat} aria-label="Enviar"><Send size={15} /></button>
             </div>
           </div>
-          <div className="card" data-anchor="bank">
+          <div className="card bank-card" data-anchor="bank">
             <h2><Landmark size={16} className="ic-primary" /> Banco</h2>
             <div className="hand">
               {RESOURCES.map((r) => (
                 <span key={r} className="res-chip">{RESOURCE_ICON[r]} {state.bank[r]}</span>
               ))}
+              <span className="res-chip dev-chip" title="Cartas de desenvolvimento no baralho">
+                <Sparkles size={12} /> {state.devDeck.length}
+              </span>
             </div>
           </div>
         </aside>
@@ -1121,23 +1130,34 @@ function TitleBadge({ icon, label }: { icon: ReactNode; label: string }) {
   return <span className="title-badge">{icon} {label} <Trophy size={10} /> +2</span>;
 }
 
-const LABEL_COLOR = (Object.entries(PLAYER_LABEL) as [PlayerColor, string][]).map(([c, label]) => ({ label, color: PLAYER_FILL[c] }));
-const NAME_RE = new RegExp(`(${LABEL_COLOR.map((x) => x.label).join('|')})`, 'g');
+export interface NameColor {
+  name: string;
+  color: string;
+}
 
-/** Pinta os nomes dos jogadores (cores) em negrito dentro de uma linha de log. */
-function colorizeNames(text: string): ReactNode[] {
-  return text.split(NAME_RE).map((part, i) => {
-    const m = LABEL_COLOR.find((x) => x.label === part);
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Pinta os NOMES dos jogadores (na cor de cada um) em negrito numa linha de log. */
+function colorizeNames(text: string, names: NameColor[]): ReactNode[] {
+  const valid = names.filter((n) => n.name.trim().length > 0);
+  if (valid.length === 0) return [<span key={0}>{text}</span>];
+  // Nomes maiores primeiro para evitar casar um prefixo de outro.
+  const ordered = [...valid].sort((a, b) => b.name.length - a.name.length);
+  const re = new RegExp(`(${ordered.map((n) => escapeRe(n.name)).join('|')})`, 'g');
+  return text.split(re).map((part, i) => {
+    const m = valid.find((n) => n.name === part);
     return m ? <b key={i} style={{ color: m.color }}>{part}</b> : <span key={i}>{part}</span>;
   });
 }
 
-function LogLine({ entry }: { entry: LogEntry }) {
+function LogLine({ entry, names }: { entry: LogEntry; names: NameColor[] }) {
   if (entry.kind === 'sep') return <div className="log-sep" />;
   if (entry.kind === 'chat') {
     return <div className="log-chat"><b style={{ color: PLAYER_FILL[entry.color] }}>{entry.name}:</b> {entry.text}</div>;
   }
-  return <div className="log-line">{colorizeNames(entry.text)}</div>;
+  return <div className="log-line">{colorizeNames(entry.text, names)}</div>;
 }
 
 function soundForEvent(e: GameEvent): SoundKind | null {
@@ -1195,6 +1215,11 @@ function toastForEvent(e: GameEvent, state: GameState): { text: string; tone: To
   }
 }
 
+/** Nome do jogador (cai no rotulo da cor se nao achar). */
+function nm(state: GameState, color: PlayerColor): string {
+  return state.players.find((p) => p.color === color)?.name ?? PLAYER_LABEL[color];
+}
+
 function describeEvent(e: GameEvent, state: GameState): string {
   switch (e.t) {
     case 'diceRolled':
@@ -1204,44 +1229,44 @@ function describeEvent(e: GameEvent, state: GameState): string {
       for (const p of state.players) {
         const g = e.gains[p.color];
         const items = (Object.entries(g) as [Resource, number][]).filter(([, n]) => n > 0).map(([r, n]) => `${n}${RESOURCE_ICON[r]}`);
-        if (items.length) parts.push(`${PLAYER_LABEL[p.color]}: ${items.join(' ')}`);
+        if (items.length) parts.push(`${p.name}: ${items.join(' ')}`);
       }
       return parts.length ? `Produção — ${parts.join(' · ')}` : 'Produção — nada';
     }
     case 'built':
-      return `${PLAYER_LABEL[e.owner]} construiu ${{ road: 'estrada', settlement: 'vila', city: 'cidade' }[e.kind]}`;
+      return `${nm(state, e.owner)} construiu ${{ road: 'estrada', settlement: 'vila', city: 'cidade' }[e.kind]}`;
     case 'progressCardBought':
-      return `${PLAYER_LABEL[e.owner]} comprou uma carta de progresso`;
+      return `${nm(state, e.owner)} comprou uma carta de progresso`;
     case 'cardPlayed':
-      return `${PLAYER_LABEL[e.owner]} jogou ${CARD_LABEL[e.card]}`;
+      return `${nm(state, e.owner)} jogou ${CARD_LABEL[e.card]}`;
     case 'monopoly':
-      return `📦 ${PLAYER_LABEL[e.owner]} monopolizou ${RESOURCE_LABEL[e.resource]} (+${e.taken})`;
+      return `📦 ${nm(state, e.owner)} monopolizou ${RESOURCE_LABEL[e.resource]} (+${e.taken})`;
     case 'blockerMoved':
-      return e.stoleFrom ? `Bloqueador movido — roubou de ${PLAYER_LABEL[e.stoleFrom]}` : 'Bloqueador movido';
+      return e.stoleFrom ? `Bloqueador movido — roubou de ${nm(state, e.stoleFrom)}` : 'Bloqueador movido';
     case 'mustDiscard':
-      return `Rolou 7 — descarte: ${e.players.map((p) => PLAYER_LABEL[p.color]).join(', ')}`;
+      return `Rolou 7 — descarte: ${e.players.map((p) => nm(state, p.color)).join(', ')}`;
     case 'discarded':
-      return `${PLAYER_LABEL[e.owner]} descartou`;
+      return `${nm(state, e.owner)} descartou`;
     case 'bankTrade':
-      return `${PLAYER_LABEL[e.owner]} trocou ${e.rate} ${RESOURCE_LABEL[e.give]} por 1 ${RESOURCE_LABEL[e.want]}`;
+      return `${nm(state, e.owner)} trocou ${e.rate} ${RESOURCE_LABEL[e.give]} por 1 ${RESOURCE_LABEL[e.want]}`;
     case 'tradeProposed':
-      return `🤝 ${PLAYER_LABEL[e.from]} propôs uma troca`;
+      return `🤝 ${nm(state, e.from)} propôs uma troca`;
     case 'tradeCountered':
-      return `↩ ${PLAYER_LABEL[e.from]} fez uma contraproposta`;
+      return `↩ ${nm(state, e.from)} fez uma contraproposta`;
     case 'tradeResponded':
-      return `${PLAYER_LABEL[e.player]} ${e.accept ? 'aceitou' : 'recusou'} a troca`;
+      return `${nm(state, e.player)} ${e.accept ? 'aceitou' : 'recusou'} a troca`;
     case 'tradeExecuted':
-      return `✅ Troca: ${PLAYER_LABEL[e.from]} ↔ ${PLAYER_LABEL[e.with]}`;
+      return `✅ Troca: ${nm(state, e.from)} ↔ ${nm(state, e.with)}`;
     case 'tradeCancelled':
       return 'Troca cancelada';
     case 'longestRoad':
-      return e.owner ? `📏 Estrada Mais Longa: ${PLAYER_LABEL[e.owner]}` : 'Estrada Mais Longa perdida';
+      return e.owner ? `📏 Estrada Mais Longa: ${nm(state, e.owner)}` : 'Estrada Mais Longa perdida';
     case 'largestArmy':
-      return e.owner ? `⚔️ Maior Exército: ${PLAYER_LABEL[e.owner]}` : 'Maior Exército perdido';
+      return e.owner ? `⚔️ Maior Exército: ${nm(state, e.owner)}` : 'Maior Exército perdido';
     case 'turnEnded':
-      return `▶ Vez de ${PLAYER_LABEL[e.next]}`;
+      return `▶ Vez de ${nm(state, e.next)}`;
     case 'gameWon':
-      return `🏆 ${PLAYER_LABEL[e.winner]} venceu!`;
+      return `🏆 ${nm(state, e.winner)} venceu!`;
     default:
       return '';
   }
