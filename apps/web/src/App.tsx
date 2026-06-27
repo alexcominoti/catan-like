@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Lobby, type GameConfig } from './ui/Lobby.js';
+import { Lobby, type GameConfig, type GameSetup } from './ui/Lobby.js';
+import { randomSeed } from './game/seed.js';
 import { Game } from './Game.js';
 import { SiteHeader, type Page } from './site/SiteHeader.js';
 import { Landing } from './site/Landing.js';
@@ -21,7 +22,14 @@ export function App() {
       {page === 'landing' && <Landing onPlay={() => setPage('lobby')} onWatch={() => setPage('lobby')} />}
       {page === 'lobby' && <RoomBrowser onPlay={() => setPage('setup')} />}
       {page === 'setup' && (
-        <Lobby onStart={(cfg) => { setConfig(cfg); setPage('game'); }} onBack={() => setPage('lobby')} />
+        <Lobby
+          onStart={(setup: GameSetup) => {
+            // Resolve a seed aleatoria (crypto) aqui, fora do lobby.
+            setConfig({ ...setup, seed: setup.seed ?? randomSeed() });
+            setPage('game');
+          }}
+          onBack={() => setPage('lobby')}
+        />
       )}
       {page === 'profile' && <Profile />}
     </div>

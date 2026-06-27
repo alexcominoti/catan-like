@@ -23,6 +23,12 @@ export interface GameConfig {
   friendlyRobber: boolean;
 }
 
+/**
+ * O que o lobby devolve: igual ao GameConfig, mas a seed pode vir NULL (= aleatoria).
+ * Quem inicia o jogo (App) resolve a seed aleatoria via crypto — fora do lobby.
+ */
+export type GameSetup = Omit<GameConfig, 'seed'> & { seed: number | null };
+
 /** Crests por cor (mesmos do jogo) para a UI ficar coerente. */
 const CREST: Record<PlayerColor, string> = { red: '👑', blue: '🌿', white: '⚒️', orange: '🪓', green: '🍀', brown: '🐗', purple: '🔮', pink: '🌸' };
 const DIFF_LABEL: Record<Difficulty, string> = { easy: 'Fácil', medium: 'Médio', hard: 'Difícil' };
@@ -42,7 +48,7 @@ const initialSeats = (): Seat[] => [
   ...Array.from({ length: MAX_SEATS - 1 }, () => ({ type: 'open' }) as Seat),
 ];
 
-export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void; onBack?: () => void }) {
+export function Lobby({ onStart, onBack }: { onStart: (cfg: GameSetup) => void; onBack?: () => void }) {
   const [mapKey, setMapKey] = useState<BoardLayout>('standard');
   const [hostName, setHostName] = useState('Você');
   // Sala recem-criada: so o anfitriao; as demais vagas comecam ABERTAS.
@@ -104,7 +110,8 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameConfig) => void;
 
   function start() {
     if (!canStart) return;
-    const seed = seedText.trim() === '' ? Math.floor(Math.random() * 0x7fffffff) : hashSeed(seedText.trim());
+    // Seed digitada -> hash; vazia -> null (App gera uma seed cripto ao iniciar).
+    const seed = seedText.trim() === '' ? null : hashSeed(seedText.trim());
     const players: { color: PlayerColor; name: string }[] = [];
     const bots: PlayerColor[] = [];
     const botDifficulty: Record<string, Difficulty> = {};
