@@ -100,6 +100,7 @@ export function Board({ state, mode, hintVertex, onVertex, onEdge, onHex }: Boar
   const ghostCity = mode === 'buildCity';
   const [hoverV, setHoverV] = useState<string | null>(null);
   const [hoverE, setHoverE] = useState<string | null>(null);
+  const [hoverH, setHoverH] = useState<string | null>(null);
 
   const cornersOf = useMemo(() => {
     const map: Record<string, Pt[]> = {};
@@ -228,17 +229,27 @@ export function Board({ state, mode, hintVertex, onVertex, onEdge, onHex }: Boar
             <TerrainMotif terrain={hex.terrain} cx={hex.cx} cy={hex.cy} />
             <path d={path} fill="url(#hexLight)" pointerEvents="none" />
             <path d={path} fill="url(#hexShade)" pointerEvents="none" />
+            {/* Modo mover ladrao: escurece os proibidos, destaca os disponiveis */}
             {hexMode && enforceFriendly && !canBlock(hid) && (
-              <path d={path} fill="rgba(0,0,0,0.28)" pointerEvents="none" />
+              <path d={path} fill="rgba(0,0,0,0.3)" pointerEvents="none" />
+            )}
+            {canBlock(hid) && (
+              <g pointerEvents="none">
+                <path d={path} fill={hoverH === hid ? 'rgba(255,224,138,0.42)' : 'rgba(255,224,138,0.2)'} />
+                <path d={path} className="robber-ring" fill="none" stroke="#f3c44b" strokeWidth={3} strokeLinejoin="round" />
+                {hoverH === hid && <Blocker cx={hex.cx} cy={hex.cy - 26} />}
+              </g>
             )}
             <path
               d={path}
               fill="transparent"
-              stroke={canBlock(hid) ? '#ffe08a' : 'rgba(0,0,0,0.38)'}
-              strokeWidth={canBlock(hid) ? 4 : 2}
+              stroke={canBlock(hid) ? 'transparent' : 'rgba(0,0,0,0.38)'}
+              strokeWidth={2}
               strokeLinejoin="round"
               style={{ cursor: canBlock(hid) ? 'pointer' : 'default' }}
               onClick={() => canBlock(hid) && onHex(hid)}
+              onMouseEnter={() => canBlock(hid) && setHoverH(hid)}
+              onMouseLeave={() => setHoverH((c) => (c === hid ? null : c))}
             />
           </g>
         );

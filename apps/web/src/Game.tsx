@@ -26,7 +26,7 @@ import { Board, type InteractionMode } from './board/Board.js';
 import { Dice } from './ui/Dice.js';
 import { HandBar } from './ui/HandBar.js';
 import { useFlyer, FlyLayer, type Pt } from './ui/FlyLayer.js';
-import { RES_IMG } from './game/cards.js';
+import { RES_IMG, DEV_IMG } from './game/cards.js';
 import { Toasts, useToasts, type ToastTone } from './ui/Toasts.js';
 import { play as playSound, setMuted, unlockAudio, type SoundKind } from './ui/sound.js';
 import { saveReplay } from './ui/replays.js';
@@ -79,8 +79,13 @@ interface PendingBuild {
 
 type LogEntry =
   | { kind: 'event'; text: string }
-  | { kind: 'chat'; color: PlayerColor; name: string; text: string }
   | { kind: 'sep' };
+
+interface ChatMsg {
+  color: PlayerColor;
+  name: string;
+  text: string;
+}
 
 function zeroRes(): Record<Resource, number> {
   return { wood: 0, brick: 0, wool: 0, grain: 0, ore: 0 };
@@ -134,6 +139,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   const [elapsed, setElapsed] = useState(0); // cronometro da partida (segundos)
   const [turnCount, setTurnCount] = useState(1); // contador de turno
   const [chatInput, setChatInput] = useState('');
+  const [chat, setChat] = useState<ChatMsg[]>([]);
   // Historico de acoes da partida (para replay + treino da IA).
   const historyRef = useRef<{ by: PlayerColor; action: Action }[]>([]);
   const { toasts, push } = useToasts();
@@ -149,7 +155,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   function sendChat() {
     const t = chatInput.trim();
     if (!t) return;
-    setLog((prev) => [{ kind: 'chat' as const, color: localColor, name: localPlayer.name, text: t }, ...prev].slice(0, 200));
+    setChat((prev) => [...prev, { color: localColor, name: localPlayer.name, text: t }].slice(-200));
     setChatInput('');
   }
 
@@ -641,11 +647,21 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
           </div>
         </main>
 
-        {/* DIREITA — Pergaminho + Banco */}
+        {/* DIREITA — Pergaminho (log) + Chat + Banco */}
         <aside className="pergaminho">
           <div className="card scroll-card">
             <h2><MessageSquare size={16} className="ic-primary" /> Pergaminho</h2>
             <div className="log">{log.map((entry, i) => <LogLine key={i} entry={entry} names={logNames} />)}</div>
+          </div>
+
+          <div className="card chat-card">
+            <h3 className="chat-head"><MessageSquare size={14} className="ic-primary" /> Chat</h3>
+            <div className="chat-log">
+              {chat.length === 0 && <p className="muted-note">Sem mensagens ainda</p>}
+              {[...chat].reverse().map((m, i) => (
+                <div key={i} className="log-chat"><b style={{ color: PLAYER_FILL[m.color] }}>{m.name}:</b> {m.text}</div>
+              ))}
+            </div>
             <div className="chat-row">
               <input value={chatInput} placeholder="Mensagem ou /comando"
                 onChange={(e) => setChatInput(e.target.value)}
@@ -653,15 +669,20 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
               <button onClick={sendChat} aria-label="Enviar"><Send size={15} /></button>
             </div>
           </div>
+
           <div className="card bank-card" data-anchor="bank">
             <h2><Landmark size={16} className="ic-primary" /> Banco</h2>
-            <div className="hand">
+            <div className="bank-grid">
               {RESOURCES.map((r) => (
-                <span key={r} className="res-chip">{RESOURCE_ICON[r]} {state.bank[r]}</span>
+                <div key={r} className="bank-pile" title={RESOURCE_LABEL[r]}>
+                  <img src={RES_IMG[r]} alt={RESOURCE_LABEL[r]} />
+                  <span className="card-count">{state.bank[r]}</span>
+                </div>
               ))}
-              <span className="res-chip dev-chip" title="Cartas de desenvolvimento no baralho">
-                <Sparkles size={12} /> {state.devDeck.length}
-              </span>
+              <div className="bank-pile" title="Cartas de desenvolvimento no baralho">
+                <img src={DEV_IMG.victoryPoint} alt="Desenvolvimento" />
+                <span className="card-count">{state.devDeck.length}</span>
+              </div>
             </div>
           </div>
         </aside>
@@ -1154,9 +1175,6 @@ function colorizeNames(text: string, names: NameColor[]): ReactNode[] {
 
 function LogLine({ entry, names }: { entry: LogEntry; names: NameColor[] }) {
   if (entry.kind === 'sep') return <div className="log-sep" />;
-  if (entry.kind === 'chat') {
-    return <div className="log-chat"><b style={{ color: PLAYER_FILL[entry.color] }}>{entry.name}:</b> {entry.text}</div>;
-  }
   return <div className="log-line">{colorizeNames(entry.text, names)}</div>;
 }
 
