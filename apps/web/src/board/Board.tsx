@@ -349,10 +349,8 @@ export function Board({ state, mode, hintVertex, onBuild, onHex }: BoardProps) {
           <g key={eid}
             onMouseEnter={() => { setHoverE(eid); setHoverV(null); }}
             onMouseLeave={() => setHoverE((c) => (c === eid ? null : c))}>
-            {active ? (
+            {active && (
               <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PLAYER_FILL[me]} strokeOpacity={0.8} strokeWidth={9} strokeLinecap="round" pointerEvents="none" />
-            ) : (
-              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#ffffff" strokeOpacity={0.55} strokeWidth={6} strokeDasharray="2 7" strokeLinecap="round" pointerEvents="none" />
             )}
             <line
               x1={a.x} y1={a.y} x2={b.x} y2={b.y}
@@ -380,7 +378,6 @@ export function Board({ state, mode, hintVertex, onBuild, onHex }: BoardProps) {
                 <BuildingGlyph x={v.x} y={v.y} kind={target.kind === 'city' ? 'city' : 'settlement'} fill={PLAYER_FILL[me]} />
               </g>
             )}
-            {target && !active && <circle cx={v.x} cy={v.y} r={7} fill="#ffffff" fillOpacity={0.7} stroke="#4da3ff" pointerEvents="none" />}
             {target && (
               <circle
                 cx={v.x} cy={v.y} r={13} fill="transparent" style={{ cursor: 'pointer' }}
