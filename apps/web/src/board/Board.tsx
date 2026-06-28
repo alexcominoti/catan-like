@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react';
 import {
+  COSTS,
   distanceRuleOk,
   robberAllowed,
   roadConnects,
   vertexTouchesPlayerRoad,
+  type Action,
   type GameState,
   type PlayerColor,
   type Resource,
@@ -15,6 +17,7 @@ export type InteractionMode =
   | 'idle'
   | 'placeSettlement'
   | 'placeRoad'
+  | 'mainBuild' // fase principal: todos os alvos (estrada/vila/cidade) ativos por hover
   | 'buildRoad'
   | 'buildSettlement'
   | 'buildCity'
@@ -25,8 +28,8 @@ interface BoardProps {
   mode: InteractionMode;
   /** Vertice sugerido (melhor spot) para destacar no setup. */
   hintVertex?: string | null;
-  onVertex: (vertexId: string) => void;
-  onEdge: (edgeId: string) => void;
+  /** Confirmar uma construcao (o Board ja sabe a acao do spot). */
+  onBuild: (action: Action) => void;
   onHex: (hexId: string) => void;
 }
 
@@ -35,28 +38,53 @@ interface Pt {
   y: number;
 }
 
-function vertexValid(state: GameState, mode: InteractionMode, vid: string, me: PlayerColor): boolean {
+type Cost = Partial<Record<Resource, number>>;
+interface BuildTarget {
+  action: Action;
+  cost: Cost;
+  kind: 'settlement' | 'city' | 'road';
+}
+
+const NO_COST: Cost = {};
+
+/** Alvo de construcao num vertice para o modo atual (ou null). */
+function vertexTarget(state: GameState, mode: InteractionMode, vid: string, me: PlayerColor): BuildTarget | null {
+  const b = state.buildings[vid];
+  const canSettle = distanceRuleOk(state, vid) && vertexTouchesPlayerRoad(state, me, vid);
+  const isOwnSettlement = !!b && b.owner === me && b.kind === 'settlement';
   switch (mode) {
     case 'placeSettlement':
-      return distanceRuleOk(state, vid);
+      return distanceRuleOk(state, vid) ? { action: { t: 'placeSettlement', vertexId: vid }, cost: NO_COST, kind: 'settlement' } : null;
     case 'buildSettlement':
-      return distanceRuleOk(state, vid) && vertexTouchesPlayerRoad(state, me, vid);
-    case 'buildCity': {
-      const b = state.buildings[vid];
-      return !!b && b.owner === me && b.kind === 'settlement';
-    }
+      return canSettle ? { action: { t: 'buildSettlement', vertexId: vid }, cost: COSTS.settlement, kind: 'settlement' } : null;
+    case 'buildCity':
+      return isOwnSettlement ? { action: { t: 'buildCity', vertexId: vid }, cost: COSTS.city, kind: 'city' } : null;
+    case 'mainBuild':
+      if (isOwnSettlement) return { action: { t: 'buildCity', vertexId: vid }, cost: COSTS.city, kind: 'city' };
+      if (!b && canSettle) return { action: { t: 'buildSettlement', vertexId: vid }, cost: COSTS.settlement, kind: 'settlement' };
+      return null;
     default:
-      return false;
+      return null;
   }
 }
 
-function edgeValid(state: GameState, mode: InteractionMode, eid: string, me: PlayerColor): boolean {
-  if (state.roads[eid]) return false;
+/** Alvo de construcao numa aresta para o modo atual (ou null). */
+function edgeTarget(state: GameState, mode: InteractionMode, eid: string, me: PlayerColor): BuildTarget | null {
+  if (state.roads[eid]) return null;
   if (mode === 'placeRoad') {
-    return !!state.setupLastVertex && state.board.edges[eid]!.v.includes(state.setupLastVertex);
+    const ok = !!state.setupLastVertex && state.board.edges[eid]!.v.includes(state.setupLastVertex);
+    return ok ? { action: { t: 'placeRoad', edgeId: eid }, cost: NO_COST, kind: 'road' } : null;
   }
-  if (mode === 'buildRoad') return roadConnects(state, me, eid);
-  return false;
+  if (mode === 'buildRoad' || mode === 'mainBuild') {
+    return roadConnects(state, me, eid) ? { action: { t: 'buildRoad', edgeId: eid }, cost: COSTS.road, kind: 'road' } : null;
+  }
+  return null;
+}
+
+/** O jogador da vez consegue pagar este custo? */
+function affords(hand: Record<Resource, number> | undefined, cost: Cost): boolean {
+  if (!hand) return false;
+  return (Object.entries(cost) as [Resource, number][]).every(([r, n]) => hand[r] >= n);
 }
 
 /** Escala os cantos de um hex em torno do seu centro. */
@@ -87,9 +115,10 @@ function norm(v: Pt): Pt {
   return { x: v.x / l, y: v.y / l };
 }
 
-export function Board({ state, mode, hintVertex, onVertex, onEdge, onHex }: BoardProps) {
+export function Board({ state, mode, hintVertex, onBuild, onHex }: BoardProps) {
   const { board, buildings, roads, blocker } = state;
   const me = state.currentPlayer;
+  const myHand = state.players.find((p) => p.color === me)?.hand;
   const hexMode = mode === 'moveBlocker';
   // Ladrao amigavel: so destaca/permite hexes validos (se houver alternativa).
   const enforceFriendly =
@@ -97,7 +126,6 @@ export function Board({ state, mode, hintVertex, onVertex, onEdge, onHex }: Boar
     board.hexOrder.some((h) => h !== blocker.hexId && robberAllowed(state, h, me));
   const canBlock = (hid: string) =>
     hexMode && hid !== blocker.hexId && (!enforceFriendly || robberAllowed(state, hid, me));
-  const ghostCity = mode === 'buildCity';
   const [hoverV, setHoverV] = useState<string | null>(null);
   const [hoverE, setHoverE] = useState<string | null>(null);
   const [hoverH, setHoverH] = useState<string | null>(null);
@@ -289,49 +317,56 @@ export function Board({ state, mode, hintVertex, onVertex, onEdge, onHex }: Boar
             </g>
           );
         }
-        if (!edgeValid(state, mode, eid, me)) return null;
+        const target = edgeTarget(state, mode, eid, me);
+        if (!target) return null;
         const hovered = hoverE === eid;
+        const afford = affords(myHand, target.cost);
+        const mx = (a.x + b.x) / 2;
+        const my = (a.y + b.y) / 2;
         return (
-          <g key={eid}>
+          <g key={eid}
+            onMouseEnter={() => { setHoverE(eid); setHoverV(null); }}
+            onMouseLeave={() => setHoverE((c) => (c === eid ? null : c))}>
             {hovered ? (
-              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PLAYER_FILL[me]} strokeOpacity={0.7} strokeWidth={9} strokeLinecap="round" pointerEvents="none" />
+              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PLAYER_FILL[me]} strokeOpacity={afford ? 0.85 : 0.4} strokeWidth={9} strokeLinecap="round" pointerEvents="none" />
             ) : (
               <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#ffffff" strokeOpacity={0.55} strokeWidth={6} strokeDasharray="2 7" strokeLinecap="round" pointerEvents="none" />
             )}
             <line
               x1={a.x} y1={a.y} x2={b.x} y2={b.y}
-              stroke="transparent" strokeWidth={18} style={{ cursor: 'pointer' }}
-              onClick={() => onEdge(eid)}
-              onMouseEnter={() => setHoverE(eid)}
-              onMouseLeave={() => setHoverE((c) => (c === eid ? null : c))}
+              stroke="transparent" strokeWidth={18} style={{ cursor: afford ? 'pointer' : 'not-allowed' }}
+              onClick={() => afford && onBuild(target.action)}
             />
+            {hovered && <BuildChip cx={mx} cy={my} cost={target.cost} hand={myHand} afford={afford} onConfirm={() => afford && onBuild(target.action)} />}
           </g>
         );
       })}
 
-      {/* Vertices (vilas/cidades + alvos validos + fantasma) */}
+      {/* Vertices (vilas/cidades + alvos validos + fantasma + confirmacao) */}
       {board.vertexOrder.map((vid) => {
         const v = board.vertices[vid]!;
         const b = buildings[vid];
-        const valid = vertexValid(state, mode, vid, me);
+        const target = vertexTarget(state, mode, vid, me);
         const hovered = hoverV === vid;
+        const afford = target ? affords(myHand, target.cost) : false;
         return (
-          <g key={vid}>
+          <g key={vid}
+            onMouseEnter={() => { if (target) { setHoverV(vid); setHoverE(null); } }}
+            onMouseLeave={() => setHoverV((c) => (c === vid ? null : c))}>
             {b && <BuildingGlyph x={v.x} y={v.y} kind={b.kind} fill={PLAYER_FILL[b.owner]} />}
-            {valid && hovered && (
-              <g opacity={0.55} pointerEvents="none">
-                <BuildingGlyph x={v.x} y={v.y} kind={ghostCity ? 'city' : 'settlement'} fill={PLAYER_FILL[me]} />
+            {target && hovered && (
+              <g opacity={afford ? 0.6 : 0.3} pointerEvents="none">
+                <BuildingGlyph x={v.x} y={v.y} kind={target.kind === 'city' ? 'city' : 'settlement'} fill={PLAYER_FILL[me]} />
               </g>
             )}
-            {valid && !hovered && <circle cx={v.x} cy={v.y} r={7} fill="#ffffff" fillOpacity={0.7} stroke="#4da3ff" pointerEvents="none" />}
-            {valid && (
+            {target && !hovered && <circle cx={v.x} cy={v.y} r={7} fill="#ffffff" fillOpacity={0.7} stroke="#4da3ff" pointerEvents="none" />}
+            {target && (
               <circle
-                cx={v.x} cy={v.y} r={13} fill="transparent" style={{ cursor: 'pointer' }}
-                onClick={() => onVertex(vid)}
-                onMouseEnter={() => setHoverV(vid)}
-                onMouseLeave={() => setHoverV((c) => (c === vid ? null : c))}
+                cx={v.x} cy={v.y} r={13} fill="transparent" style={{ cursor: afford ? 'pointer' : 'not-allowed' }}
+                onClick={() => afford && onBuild(target.action)}
               />
             )}
+            {target && hovered && <BuildChip cx={v.x} cy={v.y - 8} cost={target.cost} hand={myHand} afford={afford} onConfirm={() => afford && onBuild(target.action)} />}
           </g>
         );
       })}
@@ -341,6 +376,41 @@ export function Board({ state, mode, hintVertex, onVertex, onEdge, onHex }: Boar
         <SpotHint x={board.vertices[hintVertex]!.x} y={board.vertices[hintVertex]!.y} />
       )}
     </svg>
+  );
+}
+
+/**
+ * Chip de confirmacao de construcao: mostra o custo (cada recurso ESCURECE se o
+ * jogador nao tem) e um botao ✓ (verde se da pra pagar, cinza se nao). Uma "ponte"
+ * invisivel liga o chip ao spot para o hover nao cair no caminho.
+ */
+function BuildChip({
+  cx, cy, cost, hand, afford, onConfirm,
+}: {
+  cx: number; cy: number; cost: Cost; hand: Record<Resource, number> | undefined; afford: boolean; onConfirm: () => void;
+}) {
+  const items = (Object.entries(cost) as [Resource, number][]).filter(([, n]) => n > 0);
+  const iconW = 20;
+  const W = Math.max(items.length * iconW + 30, 36);
+  const top = cy - 50;
+  const left = cx - W / 2;
+  const checkCx = left + W - 15;
+  return (
+    <g filter="url(#softShadow)">
+      {/* ponte invisivel (mantem o hover continuo entre o spot e o chip) */}
+      <rect x={cx - 14} y={top} width={28} height={cy - top + 6} fill="transparent" />
+      <rect x={left} y={top} width={W} height={26} rx={9} fill="#fdfbf6" stroke="#caa24a" strokeWidth={1.5} />
+      {items.map(([r, n], i) => (
+        <g key={r} opacity={(hand?.[r] ?? 0) >= n ? 1 : 0.25}>
+          <text x={left + 12 + i * iconW} y={top + 18} fontSize={14} textAnchor="middle">{RESOURCE_ICON[r]}</text>
+          {n > 1 && <text x={left + 12 + i * iconW + 8} y={top + 20} fontSize={9} fontWeight={700} fill="#3a2f22">{n}</text>}
+        </g>
+      ))}
+      <g style={{ cursor: afford ? 'pointer' : 'not-allowed' }} onClick={onConfirm}>
+        <circle cx={checkCx} cy={top + 13} r={11} fill={afford ? '#2e9e57' : '#c2c2c2'} />
+        <path d={`M ${checkCx - 5} ${top + 13} l 3.2 4 l 6 -8`} fill="none" stroke="#fff" strokeWidth={2.3} strokeLinecap="round" strokeLinejoin="round" />
+      </g>
+    </g>
   );
 }
 

@@ -72,11 +72,6 @@ function desertHex(s: GameState): string {
   return empty ?? s.board.hexOrder.find((h) => h !== cur)!;
 }
 
-interface PendingBuild {
-  action: Action;
-  label: string;
-}
-
 type LogEntry =
   | { kind: 'event'; text: string }
   | { kind: 'sep' };
@@ -134,7 +129,6 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   // Quando o ladrao pode roubar de 2+ jogadores, o humano escolhe a vitima.
   const [robberChoice, setRobberChoice] = useState<{ hexId: string; victims: PlayerColor[] } | null>(null);
   // Confirmacao antes de construir.
-  const [pendingBuild, setPendingBuild] = useState<PendingBuild | null>(null);
   const [muted, setMutedState] = useState(false);
   const [elapsed, setElapsed] = useState(0); // cronometro da partida (segundos)
   const [turnCount, setTurnCount] = useState(1); // contador de turno
@@ -187,7 +181,9 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
       return state.setupLastVertex ? 'placeRoad' : 'placeSettlement';
     }
     if (state.phase === 'moveBlocker') return 'moveBlocker';
-    if (state.phase === 'main') return mode;
+    // Fase principal: sem precisar armar — hover direto constroi (estrada/vila/cidade).
+    // Os botoes (se clicados) filtram para um tipo so.
+    if (state.phase === 'main') return mode === 'idle' ? 'mainBuild' : mode;
     return 'idle';
   }, [state.phase, state.setupLastVertex, state.currentPlayer, mode, isBot]);
 
@@ -328,7 +324,6 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
         setArming(null);
         setYopPicks([]);
         setHelp(false);
-        setPendingBuild(null);
         setError(null);
       }
     }
@@ -378,16 +373,9 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
     wasMyRoll.current = isMyRoll;
   }, [myTurn, state.phase]);
 
-  function onVertex(vid: string) {
-    // Confirmacao apenas nas colocacoes iniciais (setup); construcoes seguintes
-    // sao imediatas.
-    if (effMode === 'placeSettlement') setPendingBuild({ action: { t: 'placeSettlement', vertexId: vid }, label: 'Colocar vila aqui?' });
-    else if (effMode === 'buildSettlement') dispatch({ t: 'buildSettlement', vertexId: vid });
-    else if (effMode === 'buildCity') dispatch({ t: 'buildCity', vertexId: vid });
-  }
-  function onEdge(eid: string) {
-    if (effMode === 'placeRoad') setPendingBuild({ action: { t: 'placeRoad', edgeId: eid }, label: 'Colocar estrada aqui?' });
-    else if (effMode === 'buildRoad') dispatch({ t: 'buildRoad', edgeId: eid });
+  // O Board confirma a construcao inline (chip ✓) e ja envia a acao pronta.
+  function onBuild(action: Action) {
+    dispatch(action);
   }
   function onHex(hid: string) {
     if (effMode !== 'moveBlocker') return;
@@ -594,7 +582,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
           </div>
 
           <div className="board-wrap" style={{ borderColor: playerColor }}>
-            <Board state={state} mode={effMode} hintVertex={setupHint} onVertex={onVertex} onEdge={onEdge} onHex={onHex} />
+            <Board state={state} mode={effMode} hintVertex={setupHint} onBuild={onBuild} onHex={onHex} />
             {state.activeTrade && (
               <ActiveTradePopup state={state} dispatch={dispatch} localColor={localColor}
                 botOffer={isBot(state.activeTrade.from)} onCounter={() => openCounter(state.activeTrade!)} />
@@ -715,17 +703,6 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
               : dispatch({ t: 'proposeTrade', give: tradeGive, want: tradeWant, to })
           }
           onClose={resetTransient} />
-      )}
-      {pendingBuild && (
-        <div className="overlay" onClick={() => setPendingBuild(null)}>
-          <div className="modal confirm" onClick={(e) => e.stopPropagation()}>
-            <h3>{pendingBuild.label}</h3>
-            <div className="modal-actions">
-              <button onClick={() => setPendingBuild(null)}>✗ Cancelar</button>
-              <button className="primary" onClick={() => { dispatch(pendingBuild.action); setPendingBuild(null); }}>✓ Confirmar</button>
-            </div>
-          </div>
-        </div>
       )}
       {robberChoice && (
         <RobberVictimModal
