@@ -407,7 +407,7 @@ export function Board({ state, mode, hintVertex, onBuild, onHex }: BoardProps) {
       )}
       {selected?.type === 'robber' && (
         <ConfirmChip
-          x={selected.x} y={selected.y} cost={NO_COST} hand={myHand} afford robber
+          x={selected.x} y={selected.y} cost={NO_COST} hand={myHand} afford
           onYes={() => { onHex(selected.hexId); setSelected(null); }}
           onNo={() => setSelected(null)}
         />
@@ -419,12 +419,13 @@ export function Board({ state, mode, hintVertex, onBuild, onHex }: BoardProps) {
 /**
  * Modal de confirmacao (clique -> confirma). Mostra o custo como MINIATURAS de
  * cartas (uma por unidade, nao empilhadas, estilo Colonist); as que faltam ficam
- * escurecidas. Botoes ✗ (cancelar) e ✓ (confirmar; cinza se nao da pra pagar).
+ * escurecidas. Sem custo (ladrao/setup) mostra so os botoes. ✗ cancela; ✓ confirma
+ * (cinza se nao da pra pagar). Layout sequencial centrado no spot.
  */
 function ConfirmChip({
-  x, y, cost, hand, afford, robber, onYes, onNo,
+  x, y, cost, hand, afford, onYes, onNo,
 }: {
-  x: number; y: number; cost: Cost; hand: Record<Resource, number> | undefined; afford: boolean; robber?: boolean; onYes: () => void; onNo: () => void;
+  x: number; y: number; cost: Cost; hand: Record<Resource, number> | undefined; afford: boolean; onYes: () => void; onNo: () => void;
 }) {
   // Uma carta por unidade de custo; marca quais faltam (consumindo a mao em ordem).
   const units: { r: Resource; have: boolean }[] = [];
@@ -439,40 +440,39 @@ function ConfirmChip({
   const cw = 17;
   const ch = 24;
   const gap = 3;
-  const cardsW = units.length ? units.length * (cw + gap) - gap + 8 : 0;
-  const btnsW = 56; // ✗ + ✓
-  const W = Math.max(cardsW + btnsW + 8, 70);
+  const pad = 9;
+  const btnR = 11;
+  // Layout sequencial: [cartas] [✗] [✓], tudo centrado no spot.
+  const cardsW = units.length * (cw + gap);
+  const W = pad + cardsW + (2 * btnR + 6) + (2 * btnR + 6) + pad - 6;
   const H = 36;
   const top = y - H - 16;
   const cx0 = x - W / 2;
   const yc = top + H / 2;
   const cardY = top + (H - ch) / 2;
-  const xNo = cx0 + W - 42;
-  const xYes = cx0 + W - 17;
+  const xNo = cx0 + pad + cardsW + btnR;
+  const xYes = xNo + 2 * btnR + 6;
   return (
     <g filter="url(#softShadow)" className="confirm-chip">
       <rect x={cx0} y={top} width={W} height={H} rx={10} fill="#fdfbf6" stroke="#caa24a" strokeWidth={1.5} />
-      {robber && <circle cx={cx0 + 16} cy={yc} r={9} fill="#2b2b2b" />}
-      {robber && <text x={cx0 + 30} y={yc + 4} fontSize={11} fill="#3a2f22">mover</text>}
       {units.map((u, i) => (
         <image
           key={i}
           href={RES_IMG[u.r]}
-          x={cx0 + 8 + i * (cw + gap)}
+          x={cx0 + pad + i * (cw + gap)}
           y={cardY}
           width={cw}
           height={ch}
           opacity={u.have ? 1 : 0.28}
           preserveAspectRatio="xMidYMid slice"
-          style={{ borderRadius: 3 }}
         />
       ))}
       <g style={{ cursor: 'pointer' }} onClick={onNo}>
-        <circle cx={xNo} cy={yc} r={11} fill="#ece5d8" stroke="#caa24a" />
+        <circle cx={xNo} cy={yc} r={btnR} fill="#ece5d8" stroke="#caa24a" />
         <path d={`M ${xNo - 4} ${yc - 4} l 8 8 M ${xNo + 4} ${yc - 4} l -8 8`} stroke="#8a5a32" strokeWidth={2} strokeLinecap="round" />
       </g>
       <g style={{ cursor: afford ? 'pointer' : 'not-allowed' }} onClick={() => afford && onYes()}>
-        <circle cx={xYes} cy={yc} r={11} fill={afford ? '#2e9e57' : '#c2c2c2'} />
+        <circle cx={xYes} cy={yc} r={btnR} fill={afford ? '#2e9e57' : '#c2c2c2'} />
         <path d={`M ${xYes - 5} ${yc} l 3.2 4 l 6 -8`} fill="none" stroke="#fff" strokeWidth={2.3} strokeLinecap="round" strokeLinejoin="round" />
       </g>
     </g>
