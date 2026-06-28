@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   COSTS,
   distanceRuleOk,
@@ -12,6 +12,7 @@ import {
   type Terrain,
 } from '@hexgame/engine';
 import { PLAYER_FILL, RESOURCE_ICON, TERRAIN_FILL } from '../game/theme.js';
+import { RES_IMG } from '../game/cards.js';
 
 export type InteractionMode =
   | 'idle'
@@ -44,6 +45,11 @@ interface BuildTarget {
   cost: Cost;
   kind: 'settlement' | 'city' | 'road';
 }
+
+/** Item clicado aguardando confirmacao (com a posicao do chip na tela). */
+type Selected =
+  | { type: 'build'; spotId: string; target: BuildTarget; x: number; y: number }
+  | { type: 'robber'; hexId: string; x: number; y: number };
 
 const NO_COST: Cost = {};
 
@@ -129,6 +135,18 @@ export function Board({ state, mode, hintVertex, onBuild, onHex }: BoardProps) {
   const [hoverV, setHoverV] = useState<string | null>(null);
   const [hoverE, setHoverE] = useState<string | null>(null);
   const [hoverH, setHoverH] = useState<string | null>(null);
+  // Item clicado aguardando CONFIRMACAO (construcao ou mover ladrao).
+  const [selected, setSelected] = useState<Selected | null>(null);
+  // Limpa a selecao quando muda a fase/turno/modo (ou apos confirmar).
+  useEffect(() => setSelected(null), [mode, state.currentPlayer, state.phase, state.setupLastVertex]);
+  // Esc cancela a confirmacao pendente.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setSelected(null);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const cornersOf = useMemo(() => {
     const map: Record<string, Pt[]> = {};
@@ -261,13 +279,17 @@ export function Board({ state, mode, hintVertex, onBuild, onHex }: BoardProps) {
             {hexMode && enforceFriendly && !canBlock(hid) && (
               <path d={path} fill="rgba(0,0,0,0.3)" pointerEvents="none" />
             )}
-            {canBlock(hid) && (
-              <g pointerEvents="none">
-                <path d={path} fill={hoverH === hid ? 'rgba(255,224,138,0.42)' : 'rgba(255,224,138,0.2)'} />
-                <path d={path} className="robber-ring" fill="none" stroke="#f3c44b" strokeWidth={3} strokeLinejoin="round" />
-                {hoverH === hid && <Blocker cx={hex.cx} cy={hex.cy - 26} />}
-              </g>
-            )}
+            {canBlock(hid) && (() => {
+              const sel = selected?.type === 'robber' && selected.hexId === hid;
+              const active = hoverH === hid || sel;
+              return (
+                <g pointerEvents="none">
+                  <path d={path} fill={active ? 'rgba(255,224,138,0.45)' : 'rgba(255,224,138,0.2)'} />
+                  <path d={path} className={sel ? undefined : 'robber-ring'} fill="none" stroke={sel ? '#2e9e57' : '#f3c44b'} strokeWidth={sel ? 4 : 3} strokeLinejoin="round" />
+                  {active && <Blocker cx={hex.cx} cy={hex.cy - 26} />}
+                </g>
+              );
+            })()}
             <path
               d={path}
               fill="transparent"
@@ -275,7 +297,7 @@ export function Board({ state, mode, hintVertex, onBuild, onHex }: BoardProps) {
               strokeWidth={2}
               strokeLinejoin="round"
               style={{ cursor: canBlock(hid) ? 'pointer' : 'default' }}
-              onClick={() => canBlock(hid) && onHex(hid)}
+              onClick={() => canBlock(hid) && setSelected({ type: 'robber', hexId: hid, x: hex.cx, y: hex.cy - 26 })}
               onMouseEnter={() => canBlock(hid) && setHoverH(hid)}
               onMouseLeave={() => setHoverH((c) => (c === hid ? null : c))}
             />
@@ -319,25 +341,24 @@ export function Board({ state, mode, hintVertex, onBuild, onHex }: BoardProps) {
         }
         const target = edgeTarget(state, mode, eid, me);
         if (!target) return null;
-        const hovered = hoverE === eid;
-        const afford = affords(myHand, target.cost);
+        const sel = selected?.type === 'build' && selected.spotId === eid;
+        const active = hoverE === eid || sel;
         const mx = (a.x + b.x) / 2;
         const my = (a.y + b.y) / 2;
         return (
           <g key={eid}
             onMouseEnter={() => { setHoverE(eid); setHoverV(null); }}
             onMouseLeave={() => setHoverE((c) => (c === eid ? null : c))}>
-            {hovered ? (
-              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PLAYER_FILL[me]} strokeOpacity={afford ? 0.85 : 0.4} strokeWidth={9} strokeLinecap="round" pointerEvents="none" />
+            {active ? (
+              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PLAYER_FILL[me]} strokeOpacity={0.8} strokeWidth={9} strokeLinecap="round" pointerEvents="none" />
             ) : (
               <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#ffffff" strokeOpacity={0.55} strokeWidth={6} strokeDasharray="2 7" strokeLinecap="round" pointerEvents="none" />
             )}
             <line
               x1={a.x} y1={a.y} x2={b.x} y2={b.y}
-              stroke="transparent" strokeWidth={18} style={{ cursor: afford ? 'pointer' : 'not-allowed' }}
-              onClick={() => afford && onBuild(target.action)}
+              stroke="transparent" strokeWidth={18} style={{ cursor: 'pointer' }}
+              onClick={() => setSelected({ type: 'build', spotId: eid, target, x: mx, y: my })}
             />
-            {hovered && <BuildChip cx={mx} cy={my} cost={target.cost} hand={myHand} afford={afford} onConfirm={() => afford && onBuild(target.action)} />}
           </g>
         );
       })}
@@ -347,68 +368,112 @@ export function Board({ state, mode, hintVertex, onBuild, onHex }: BoardProps) {
         const v = board.vertices[vid]!;
         const b = buildings[vid];
         const target = vertexTarget(state, mode, vid, me);
-        const hovered = hoverV === vid;
-        const afford = target ? affords(myHand, target.cost) : false;
+        const sel = selected?.type === 'build' && selected.spotId === vid;
+        const active = hoverV === vid || sel;
         return (
           <g key={vid}
             onMouseEnter={() => { if (target) { setHoverV(vid); setHoverE(null); } }}
             onMouseLeave={() => setHoverV((c) => (c === vid ? null : c))}>
             {b && <BuildingGlyph x={v.x} y={v.y} kind={b.kind} fill={PLAYER_FILL[b.owner]} />}
-            {target && hovered && (
-              <g opacity={afford ? 0.6 : 0.3} pointerEvents="none">
+            {target && active && (
+              <g opacity={0.6} pointerEvents="none">
                 <BuildingGlyph x={v.x} y={v.y} kind={target.kind === 'city' ? 'city' : 'settlement'} fill={PLAYER_FILL[me]} />
               </g>
             )}
-            {target && !hovered && <circle cx={v.x} cy={v.y} r={7} fill="#ffffff" fillOpacity={0.7} stroke="#4da3ff" pointerEvents="none" />}
+            {target && !active && <circle cx={v.x} cy={v.y} r={7} fill="#ffffff" fillOpacity={0.7} stroke="#4da3ff" pointerEvents="none" />}
             {target && (
               <circle
-                cx={v.x} cy={v.y} r={13} fill="transparent" style={{ cursor: afford ? 'pointer' : 'not-allowed' }}
-                onClick={() => afford && onBuild(target.action)}
+                cx={v.x} cy={v.y} r={13} fill="transparent" style={{ cursor: 'pointer' }}
+                onClick={() => setSelected({ type: 'build', spotId: vid, target, x: v.x, y: v.y })}
               />
             )}
-            {target && hovered && <BuildChip cx={v.x} cy={v.y - 8} cost={target.cost} hand={myHand} afford={afford} onConfirm={() => afford && onBuild(target.action)} />}
           </g>
         );
       })}
 
       {/* Dica do melhor spot (setup): anel pulsante + seta saltitante */}
-      {hintVertex && board.vertices[hintVertex] && !buildings[hintVertex] && (
+      {hintVertex && board.vertices[hintVertex] && !buildings[hintVertex] && !selected && (
         <SpotHint x={board.vertices[hintVertex]!.x} y={board.vertices[hintVertex]!.y} />
+      )}
+
+      {/* Confirmacao (clique -> ✓): construcao com custo ou mover ladrao */}
+      {selected?.type === 'build' && (
+        <ConfirmChip
+          x={selected.x} y={selected.y} cost={selected.target.cost} hand={myHand}
+          afford={affords(myHand, selected.target.cost)}
+          onYes={() => { onBuild(selected.target.action); setSelected(null); }}
+          onNo={() => setSelected(null)}
+        />
+      )}
+      {selected?.type === 'robber' && (
+        <ConfirmChip
+          x={selected.x} y={selected.y} cost={NO_COST} hand={myHand} afford robber
+          onYes={() => { onHex(selected.hexId); setSelected(null); }}
+          onNo={() => setSelected(null)}
+        />
       )}
     </svg>
   );
 }
 
 /**
- * Chip de confirmacao de construcao: mostra o custo (cada recurso ESCURECE se o
- * jogador nao tem) e um botao ✓ (verde se da pra pagar, cinza se nao). Uma "ponte"
- * invisivel liga o chip ao spot para o hover nao cair no caminho.
+ * Modal de confirmacao (clique -> confirma). Mostra o custo como MINIATURAS de
+ * cartas (uma por unidade, nao empilhadas, estilo Colonist); as que faltam ficam
+ * escurecidas. Botoes ✗ (cancelar) e ✓ (confirmar; cinza se nao da pra pagar).
  */
-function BuildChip({
-  cx, cy, cost, hand, afford, onConfirm,
+function ConfirmChip({
+  x, y, cost, hand, afford, robber, onYes, onNo,
 }: {
-  cx: number; cy: number; cost: Cost; hand: Record<Resource, number> | undefined; afford: boolean; onConfirm: () => void;
+  x: number; y: number; cost: Cost; hand: Record<Resource, number> | undefined; afford: boolean; robber?: boolean; onYes: () => void; onNo: () => void;
 }) {
-  const items = (Object.entries(cost) as [Resource, number][]).filter(([, n]) => n > 0);
-  const iconW = 20;
-  const W = Math.max(items.length * iconW + 30, 36);
-  const top = cy - 50;
-  const left = cx - W / 2;
-  const checkCx = left + W - 15;
+  // Uma carta por unidade de custo; marca quais faltam (consumindo a mao em ordem).
+  const units: { r: Resource; have: boolean }[] = [];
+  const left0 = { ...(hand ?? {}) } as Record<Resource, number>;
+  for (const [r, n] of Object.entries(cost) as [Resource, number][]) {
+    for (let i = 0; i < n; i++) {
+      const have = (left0[r] ?? 0) > 0;
+      if (have) left0[r] -= 1;
+      units.push({ r, have });
+    }
+  }
+  const cw = 17;
+  const ch = 24;
+  const gap = 3;
+  const cardsW = units.length ? units.length * (cw + gap) - gap + 8 : 0;
+  const btnsW = 56; // ✗ + ✓
+  const W = Math.max(cardsW + btnsW + 8, 70);
+  const H = 36;
+  const top = y - H - 16;
+  const cx0 = x - W / 2;
+  const yc = top + H / 2;
+  const cardY = top + (H - ch) / 2;
+  const xNo = cx0 + W - 42;
+  const xYes = cx0 + W - 17;
   return (
-    <g filter="url(#softShadow)">
-      {/* ponte invisivel (mantem o hover continuo entre o spot e o chip) */}
-      <rect x={cx - 14} y={top} width={28} height={cy - top + 6} fill="transparent" />
-      <rect x={left} y={top} width={W} height={26} rx={9} fill="#fdfbf6" stroke="#caa24a" strokeWidth={1.5} />
-      {items.map(([r, n], i) => (
-        <g key={r} opacity={(hand?.[r] ?? 0) >= n ? 1 : 0.25}>
-          <text x={left + 12 + i * iconW} y={top + 18} fontSize={14} textAnchor="middle">{RESOURCE_ICON[r]}</text>
-          {n > 1 && <text x={left + 12 + i * iconW + 8} y={top + 20} fontSize={9} fontWeight={700} fill="#3a2f22">{n}</text>}
-        </g>
+    <g filter="url(#softShadow)" className="confirm-chip">
+      <rect x={cx0} y={top} width={W} height={H} rx={10} fill="#fdfbf6" stroke="#caa24a" strokeWidth={1.5} />
+      {robber && <circle cx={cx0 + 16} cy={yc} r={9} fill="#2b2b2b" />}
+      {robber && <text x={cx0 + 30} y={yc + 4} fontSize={11} fill="#3a2f22">mover</text>}
+      {units.map((u, i) => (
+        <image
+          key={i}
+          href={RES_IMG[u.r]}
+          x={cx0 + 8 + i * (cw + gap)}
+          y={cardY}
+          width={cw}
+          height={ch}
+          opacity={u.have ? 1 : 0.28}
+          preserveAspectRatio="xMidYMid slice"
+          style={{ borderRadius: 3 }}
+        />
       ))}
-      <g style={{ cursor: afford ? 'pointer' : 'not-allowed' }} onClick={onConfirm}>
-        <circle cx={checkCx} cy={top + 13} r={11} fill={afford ? '#2e9e57' : '#c2c2c2'} />
-        <path d={`M ${checkCx - 5} ${top + 13} l 3.2 4 l 6 -8`} fill="none" stroke="#fff" strokeWidth={2.3} strokeLinecap="round" strokeLinejoin="round" />
+      <g style={{ cursor: 'pointer' }} onClick={onNo}>
+        <circle cx={xNo} cy={yc} r={11} fill="#ece5d8" stroke="#caa24a" />
+        <path d={`M ${xNo - 4} ${yc - 4} l 8 8 M ${xNo + 4} ${yc - 4} l -8 8`} stroke="#8a5a32" strokeWidth={2} strokeLinecap="round" />
+      </g>
+      <g style={{ cursor: afford ? 'pointer' : 'not-allowed' }} onClick={() => afford && onYes()}>
+        <circle cx={xYes} cy={yc} r={11} fill={afford ? '#2e9e57' : '#c2c2c2'} />
+        <path d={`M ${xYes - 5} ${yc} l 3.2 4 l 6 -8`} fill="none" stroke="#fff" strokeWidth={2.3} strokeLinecap="round" strokeLinejoin="round" />
       </g>
     </g>
   );
