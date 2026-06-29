@@ -1,0 +1,49 @@
+# Fly.io — Trevalis (https://trevalis.app)
+# Um unico app servindo SPA + auth/API + WebSocket na porta 8080.
+# Crie o app com: fly apps create trevalis  (ou ajuste o nome abaixo).
+
+app = "trevalis"
+primary_region = "gru"  # São Paulo (GRU). Troque se preferir outra regiao.
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  NODE_ENV = "production"
+  APP_URL = "https://trevalis.app"
+  # Origens confiaveis para CSRF/cookies (apex + www).
+  TRUSTED_ORIGINS = "https://trevalis.app,https://www.trevalis.app"
+  # Cookie de sessao compartilhado entre apex e www.
+  COOKIE_DOMAIN = ".trevalis.app"
+  # Confirmacao de e-mail no cadastro. Ligado: dominio trevalis.app ja verificado
+  # no Resend e envio testado. Falhas de e-mail nao quebram o cadastro.
+  REQUIRE_EMAIL_VERIFICATION = "true"
+
+# Roda as migrations ANTES de cada deploy ficar ativo (usa o secret DATABASE_URL).
+[deploy]
+  release_command = "npm run db:migrate"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1   # mantenha 1 sempre de pe (WebSocket/sessoes vivas)
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+  # Health check HTTP usado pelo balanceador do Fly.
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
