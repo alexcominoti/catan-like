@@ -10,7 +10,7 @@ import {
   type PlayerColor,
   type Resource,
   type Terrain,
-} from '@hexgame/engine';
+} from '@trevalis/engine';
 import { PLAYER_FILL, RESOURCE_ICON, TERRAIN_FILL } from '../game/theme.js';
 import { RES_IMG } from '../game/cards.js';
 

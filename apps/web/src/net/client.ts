@@ -1,8 +1,8 @@
-import type { Action, GameState, PlayerColor } from '@hexgame/engine';
+import type { Action, GameState, PlayerColor } from '@trevalis/engine';
 import type { GameConfig } from '../ui/Lobby.js';
 
 /**
- * Cliente WebSocket do jogo (Fase 2). Espelha o protocolo de `@hexgame/server`
+ * Cliente WebSocket do jogo (Fase 2). Espelha o protocolo de `@trevalis/server`
  * sem depender dele (o web nao importa o pacote do servidor). A UI usa isto para,
  * quando ONLINE, enviar acoes ao servidor e receber o estado JA projetado
  * (fog of war) em vez de rodar o `reduce`/bots localmente.

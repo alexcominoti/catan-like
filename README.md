@@ -1,11 +1,11 @@
-# HexGame (nome de trabalho)
+# Trevalis
 
 Jogo online de **colonização hexagonal** inspirado nas *mecânicas* de jogos de
 tabuleiro de troca e construção. Local-first, 100% vetorial (SVG), com um motor
 de regras puro e determinístico no centro.
 
-> **Nome provisório.** `HexGame` / `@hexgame/*` é um nome de trabalho neutro —
-> a identidade final (nome, arte, termos) ainda será definida.
+> **Produção:** [trevalis.app](https://trevalis.app) · pacotes internos sob o
+> escopo `@trevalis/*`.
 
 > **Originalidade.** Este projeto reimplementa **mecânicas** (não protegidas por
 > direitos autorais). Toda a **expressão** — nome, arte, paleta, ícones — é
@@ -18,10 +18,10 @@ Construído em fases, cada uma jogável de ponta a ponta antes da próxima:
 
 | Fase | Entrega | Status |
 |---|---|---|
-| **1** | Motor + UI hotseat (1 máquina, mesma tela) | 🟢 em andamento |
+| **1** | Motor + UI hotseat (1 máquina, mesma tela) | 🟢 pronto |
 | 2 | Servidor local + WebSocket (várias abas/PCs) | 🟡 base pronta (server + fog of war) |
-| 3 | Persistência (SQLite) + reconexão + relógio | ⚪ futuro |
-| 4 | Contas / matchmaking / deploy (escala real) | ⚪ futuro |
+| 3 | Persistência (Postgres) + reconexão + relógio | 🟡 em andamento |
+| 4 | Contas / matchmaking / deploy (escala real) | 🟡 em andamento (Better Auth + Neon + Fly.io) |
 
 A única peça feita "para durar" desde o início é o **motor de regras**
 (`packages/engine`): puro, sem rede, sem React, sem I/O. O mesmo código roda no
@@ -30,11 +30,12 @@ navegador (Fase 1) e rodará no servidor (Fase 2+) sem reescrita.
 ## Estrutura (monorepo, npm workspaces)
 
 ```
-catan-like/
+trevalis/
   packages/
     engine/    # regras puras e determinísticas (testável isolado)
     bot/       # bot heurístico puro: (estado, cor) -> ação
-    server/    # Fase 2: servidor WebSocket autoritativo (GameRoom + fog of war)
+    server/    # servidor HTTP + WebSocket autoritativo (auth, API, SPA, GameRoom)
+    db/        # Drizzle + Postgres (Neon): schema de contas e migrations
   apps/
     web/       # React + Vite, tabuleiro em SVG (UI hotseat + bots)
 ```
@@ -46,17 +47,27 @@ Requisitos: **Node 20+** (testado no Node 24).
 ```bash
 npm install            # instala todos os workspaces
 npm run dev            # sobe a UI web (Vite) em http://localhost:5173
-npm test               # roda os testes do motor (vitest)
+npm run dev:server     # servidor Node (auth/API/WS) em http://localhost:8080
+npm test               # roda os testes (vitest)
 npm run typecheck      # checagem de tipos de todos os pacotes
-npm run build          # build de produção da web
+npm run build:web      # build de produção da SPA
+npm start              # servidor único (SPA + auth/API + WS) em :8080
 ```
 
-## O motor (`@hexgame/engine`)
+## Produção e contas
+
+- **Deploy (Fly.io + Cloudflare + Neon):** [`docs/DEPLOY.md`](docs/DEPLOY.md).
+- **Autenticação (Better Auth + Postgres):** [`docs/AUTH.md`](docs/AUTH.md).
+- Variáveis de ambiente: copie [`.env.example`](.env.example) para `.env`.
+- A aplicação roda como **um único processo** (`@trevalis/server`) servindo a
+  SPA, as rotas de auth/API e o WebSocket do jogo na mesma origem.
+
+## O motor (`@trevalis/engine`)
 
 API pequena, pura e determinística:
 
 ```ts
-import { createInitialState, reduce } from '@hexgame/engine';
+import { createInitialState, reduce } from '@trevalis/engine';
 
 const s0 = createInitialState({ seed: 42 });   // mesmo seed => mesma partida
 const r = reduce(s0, 'red', { t: 'placeSettlement', vertexId: 'v12' });
@@ -77,7 +88,7 @@ marítimo com portos** (4:1 / 3:1 / 2:1) · **comércio entre jogadores** (propo
 aceitar / fechar) · Estrada Mais Longa (≥5) · Maior Exército (≥3) · vitória (10
 pontos). UI com destaque de alvos válidos, peça-fantasma no hover e ESC cancela.
 
-### Bots (`@hexgame/bot`)
+### Bots (`@trevalis/bot`)
 
 Bot heurístico com **3 níveis** (fácil / médio / difícil): setup em bons vértices
 (difícil pondera portos e escassez), constrói por prioridade (cidade > vila >

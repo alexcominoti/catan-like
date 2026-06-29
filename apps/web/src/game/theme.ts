@@ -1,4 +1,4 @@
-import type { PlayerColor, Resource, Terrain } from '@hexgame/engine';
+import type { PlayerColor, Resource, Terrain } from '@trevalis/engine';
 
 /** Cores de terreno (identidade visual propria, nao copia nada comercial). */
 export const TERRAIN_FILL: Record<Terrain, string> = {

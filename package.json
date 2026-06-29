@@ -1,5 +1,5 @@
 {
-  "name": "catan-like",
+  "name": "trevalis",
   "version": "0.1.0",
   "private": true,
   "description": "Jogo online de colonizacao hexagonal (inspirado em Catan) - local-first, vetorial, motor de regras puro.",
@@ -10,11 +10,18 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "build:web": "npm run build --workspace @trevalis/web",
     "test": "npm run test --workspaces --if-present",
-    "dev": "npm run dev --workspace @hexgame/web",
-    "server": "npm start --workspace @hexgame/server",
-    "dev:server": "npm run dev --workspace @hexgame/server",
+    "dev": "npm run dev --workspace @trevalis/web",
+    "start": "npm start --workspace @trevalis/server",
+    "server": "npm start --workspace @trevalis/server",
+    "dev:server": "npm run dev --workspace @trevalis/server",
+    "db:migrate": "npm run db:migrate --workspace @trevalis/db",
+    "db:generate": "npm run db:generate --workspace @trevalis/db",
     "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.2"
   },
   "engines": {
     "node": ">=20"

@@ -1,4 +1,4 @@
-import type { Resource } from '@hexgame/engine';
+import type { Resource } from '@trevalis/engine';
 import { TERRAIN_FILL } from './theme.js';
 
 /**

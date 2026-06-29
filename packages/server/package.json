@@ -1,8 +1,8 @@
 {
-  "name": "@hexgame/server",
+  "name": "@trevalis/server",
   "version": "0.1.0",
   "private": true,
-  "description": "Servidor multiplayer autoritativo (WebSocket) - Fase 2. Reusa o motor puro.",
+  "description": "Servidor autoritativo: HTTP (auth/API/SPA) + WebSocket do jogo. Reusa o motor puro.",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -11,8 +11,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@hexgame/bot": "*",
-    "@hexgame/engine": "*",
+    "@trevalis/bot": "*",
+    "@trevalis/db": "*",
+    "@trevalis/engine": "*",
+    "better-auth": "^1.2.0",
+    "dotenv": "^16.4.0",
+    "drizzle-orm": "^0.45.2",
+    "resend": "^4.0.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {

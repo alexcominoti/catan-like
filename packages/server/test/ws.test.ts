@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WebSocket, type WebSocketServer } from 'ws';
-import type { PlayerColor } from '@hexgame/engine';
-import type { Difficulty } from '@hexgame/bot';
+import type { PlayerColor } from '@trevalis/engine';
+import type { Difficulty } from '@trevalis/bot';
 import { startServer } from '../src/server.js';
 import type { RoomConfig, ServerMessage } from '../src/protocol.js';
 

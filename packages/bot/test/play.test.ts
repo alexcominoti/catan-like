@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createInitialState, reduce, type GameState } from '@hexgame/engine';
+import { createInitialState, reduce, type GameState } from '@trevalis/engine';
 import { planBotAction, type Difficulty } from '../src/index.js';
 
 /** Roda uma partida so de bots (nivel dado) ate o fim ou o limite de passos. */

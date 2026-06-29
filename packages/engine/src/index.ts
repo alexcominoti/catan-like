@@ -1,5 +1,5 @@
 /**
- * @hexgame/engine — motor de regras puro e deterministico.
+ * @trevalis/engine — motor de regras puro e deterministico.
  *
  * Sem React, sem rede, sem I/O, sem relogio. A mesma seed + a mesma sequencia
  * de acoes reproduzem exatamente a mesma partida (base de testes e replays).

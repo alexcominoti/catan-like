@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { RESOURCES, type PlayerColor } from '@hexgame/engine';
-import type { Difficulty } from '@hexgame/bot';
+import { RESOURCES, type PlayerColor } from '@trevalis/engine';
+import type { Difficulty } from '@trevalis/bot';
 import { GameRoom, RoomManager } from '../src/room.js';
 import type { RoomConfig } from '../src/protocol.js';
 

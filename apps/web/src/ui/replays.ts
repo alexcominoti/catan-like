@@ -1,4 +1,4 @@
-import type { Action, PlayerColor } from '@hexgame/engine';
+import type { Action, PlayerColor } from '@trevalis/engine';
 
 /**
  * Persistencia simples de partidas (localStorage). Como o engine e deterministico,
@@ -24,7 +24,7 @@ export interface SavedReplay {
   actions: { by: PlayerColor; action: Action }[];
 }
 
-const KEY = 'hexkeep_replays';
+const KEY = 'trevalis_replays';
 
 export function loadReplays(): SavedReplay[] {
   try {

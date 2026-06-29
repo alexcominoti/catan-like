@@ -9,7 +9,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@hexgame/engine': fileURLToPath(new URL('../engine/src/index.ts', import.meta.url)),
+      '@trevalis/engine': fileURLToPath(new URL('../engine/src/index.ts', import.meta.url)),
     },
   },
 });

@@ -4,7 +4,7 @@
     {
       "name": "web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--workspace", "@hexgame/web"],
+      "runtimeArgs": ["run", "dev", "--workspace", "@trevalis/web"],
       "port": 5173
     }
   ]

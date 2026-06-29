@@ -1,4 +1,4 @@
-import type { ProgressCard, Resource } from '@hexgame/engine';
+import type { ProgressCard, Resource } from '@trevalis/engine';
 import cardKnight from '../assets/card-knight.jpg';
 import cardRoad from '../assets/card-road.jpg';
 import cardVictory from '../assets/card-victory.jpg';

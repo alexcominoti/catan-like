@@ -23,7 +23,7 @@ const HEX = [
   { x: 150, y: 40, c: '#e0b53f' },
   { x: 204, y: 40, c: '#c0563a' },
   { x: 96, y: 86, c: '#5b3a22' },
-  { x: 150, y: 86, c: '#cf9a6a', label: 'Hexkeep' },
+  { x: 150, y: 86, c: '#cf9a6a', label: 'Trevalis' },
   { x: 204, y: 86, c: '#5d7385' },
   { x: 150, y: 132, c: '#e0b53f' },
 ];
@@ -36,7 +36,7 @@ export function Landing({ onPlay, onWatch }: { onPlay: () => void; onWatch: () =
           <span className="badge-pill"><Sparkles size={13} /> BETA ABERTA · GRÁTIS PARA JOGAR</span>
           <h1>Construa, troque e <span className="accent-text">conquiste</span> a ilha.</h1>
           <p>
-            Hexkeep é o jeito mais rápido de jogar colonização hexagonal com amigos. Sem download,
+            Trevalis é o jeito mais rápido de jogar colonização hexagonal com amigos. Sem download,
             sem cadastro obrigatório — abra um salão e comece em 30 segundos.
           </p>
           <div className="hero-buttons">
@@ -89,7 +89,7 @@ export function Landing({ onPlay, onWatch }: { onPlay: () => void; onWatch: () =
       </section>
 
       <footer className="site-footer">
-        <span className="foot-brand"><Hexagon size={15} /> Hexkeep © 2026</span>
+        <span className="foot-brand"><Hexagon size={15} /> Trevalis © 2026</span>
         <span className="foot-links"><a>Regras</a> <a>Discord</a> <a>Contato</a></span>
       </footer>
     </div>

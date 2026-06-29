@@ -5,8 +5,8 @@ import type {
   GameState,
   NumberLayout,
   PlayerColor,
-} from '@hexgame/engine';
-import type { Difficulty } from '@hexgame/bot';
+} from '@trevalis/engine';
+import type { Difficulty } from '@trevalis/bot';
 
 /** Ritmo da partida (limite de tempo das acoes). */
 export type Pace = 'fast' | 'normal';

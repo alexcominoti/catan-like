@@ -7,8 +7,8 @@ import {
   type GameState,
   type PlayerColor,
   type Resource,
-} from '@hexgame/engine';
-import { planBotAction, type Difficulty } from '@hexgame/bot';
+} from '@trevalis/engine';
+import { planBotAction, type Difficulty } from '@trevalis/bot';
 import type { Pace, RoomConfig } from './protocol.js';
 
 /** Limites de tempo (segundos) por ritmo, inspirados nos timers do Colonist. */

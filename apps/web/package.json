@@ -1,5 +1,5 @@
 {
-  "name": "@hexgame/web",
+  "name": "@trevalis/web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,8 +10,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@hexgame/engine": "*",
-    "@hexgame/bot": "*",
+    "@trevalis/engine": "*",
+    "@trevalis/bot": "*",
+    "better-auth": "^1.2.0",
     "lucide-react": "^0.456.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

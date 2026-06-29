@@ -57,7 +57,7 @@ Para deixar "no ar" sem depender do seu PC:
    conexões persistentes — **Render**, **Railway**, **Fly.io** ou uma VPS barata
    (Hetzner/DigitalOcean ~US$5/mês). Faz deploy do Node; ele escuta `wss://`.
 3. Aponte o frontend para a URL do servidor (variável `VITE_SERVER_URL`).
-4. Amigos acessam a URL do frontend (ex.: `https://hexkeep.vercel.app`), criam/
+4. Amigos acessam a URL do frontend (ex.: `https://trevalis.vercel.app`), criam/
    entram numa sala e jogam — você não precisa ficar com o PC ligado.
 
 ### Recomendação

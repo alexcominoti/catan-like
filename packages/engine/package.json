@@ -1,5 +1,5 @@
 {
-  "name": "@hexgame/engine",
+  "name": "@trevalis/engine",
   "version": "0.1.0",
   "private": true,
   "description": "Motor de regras puro e deterministico. Sem rede, sem React, sem I/O.",

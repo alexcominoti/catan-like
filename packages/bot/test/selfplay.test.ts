@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createInitialState, reduce, PLAYER_COLORS, type PlayerColor } from '@hexgame/engine';
+import { createInitialState, reduce, PLAYER_COLORS, type PlayerColor } from '@trevalis/engine';
 import { planBotAction, type Difficulty } from '../src/index.js';
 
 declare const console: { log: (...args: unknown[]) => void };

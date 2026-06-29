@@ -27,7 +27,7 @@ import {
   type ProgressCard,
   type Resource,
   type TradeOffer,
-} from '@hexgame/engine';
+} from '@trevalis/engine';
 
 export type Difficulty = 'easy' | 'medium' | 'hard';
 export type IsBot = (color: PlayerColor) => boolean;

@@ -1,4 +1,4 @@
-import { RESOURCES, type ProgressCard, type Resource } from '@hexgame/engine';
+import { RESOURCES, type ProgressCard, type Resource } from '@trevalis/engine';
 import { RESOURCE_LABEL } from '../game/theme.js';
 import { RES_IMG, DEV_IMG } from '../game/cards.js';
 

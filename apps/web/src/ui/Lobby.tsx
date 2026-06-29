@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { PLAYER_COLORS, type BoardLayout, type DesertPlacement, type NumberLayout, type PlayerColor } from '@hexgame/engine';
-import type { Difficulty } from '@hexgame/bot';
+import { PLAYER_COLORS, type BoardLayout, type DesertPlacement, type NumberLayout, type PlayerColor } from '@trevalis/engine';
+import type { Difficulty } from '@trevalis/bot';
 import type { ReactNode } from 'react';
 import { Users, Bot, Dices, Target, Play, ArrowLeft, Shuffle, UserPlus, X, Crown, Shield } from 'lucide-react';
 import { PLAYER_FILL, PLAYER_LABEL } from '../game/theme.js';

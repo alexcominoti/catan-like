@@ -15,13 +15,13 @@ import {
   type PlayerColor,
   type ProgressCard,
   type Resource,
-} from '@hexgame/engine';
+} from '@trevalis/engine';
 import {
   Hexagon, Crown, Clock, Layers, Sparkles, Scroll, Swords, Trophy,
   Dices, ArrowLeftRight, Hand, MessageSquare, Send, Landmark,
   Volume2, VolumeX, HelpCircle, LogOut,
 } from 'lucide-react';
-import { planBotAction, resolveBotProposal, suggestSetupSettlement } from '@hexgame/bot';
+import { planBotAction, resolveBotProposal, suggestSetupSettlement } from '@trevalis/bot';
 import { Board, type InteractionMode } from './board/Board.js';
 import { Dice } from './ui/Dice.js';
 import { HandBar } from './ui/HandBar.js';
@@ -508,7 +508,7 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   return (
     <div className="game site bg-paper" style={{ ['--turn-color' as string]: playerColor }}>
       <header className="game-header">
-        <span className="brand"><span className="brand-mark"><Hexagon size={18} strokeWidth={2.5} /></span> Hexkeep</span>
+        <span className="brand"><span className="brand-mark"><Hexagon size={18} strokeWidth={2.5} /></span> Trevalis</span>
         <span className="turn-chip"><Clock size={13} /> Turno {turnCount}</span>
         <div className="game-header-actions">
           <button className="hbtn icon-only" title={muted ? 'Som desligado' : 'Som ligado'} onClick={() => { const m = !muted; setMutedState(m); setMuted(m); }}>{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button>
