@@ -6,9 +6,18 @@ import { SiteHeader, type Page } from './site/SiteHeader.js';
 import { Landing } from './site/Landing.js';
 import { RoomBrowser } from './site/RoomBrowser.js';
 import { Profile } from './site/Profile.js';
+import { Auth } from './site/Auth.js';
+
+/** Deep-link inicial: link de redefinicao de senha abre direto na tela de auth. */
+function initialPage(): Page {
+  if (typeof window !== 'undefined' && window.location.pathname.startsWith('/reset-password')) {
+    return 'auth';
+  }
+  return 'landing';
+}
 
 export function App() {
-  const [page, setPage] = useState<Page>('landing');
+  const [page, setPage] = useState<Page>(initialPage);
   const [config, setConfig] = useState<GameConfig | null>(null);
 
   // O jogo ocupa a tela inteira (sem o header do site).
@@ -32,6 +41,7 @@ export function App() {
         />
       )}
       {page === 'profile' && <Profile />}
+      {page === 'auth' && <Auth onAuthed={() => setPage('lobby')} />}
     </div>
   );
 }

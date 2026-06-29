@@ -1,0 +1,81 @@
+/* Tela de autenticacao — herda a paleta creme/coral do site. */
+.auth-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 48px 16px;
+}
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--card, #fffaf2);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 16px;
+  padding: 28px 26px;
+  box-shadow: 0 12px 40px rgba(120, 70, 30, 0.12);
+}
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  color: var(--accent, #c2603f);
+}
+.auth-card h1 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+.auth-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #5a4636;
+}
+.auth-card input {
+  padding: 10px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 10px;
+  font-size: 1rem;
+  background: #fff;
+}
+.auth-card input:focus {
+  outline: 2px solid var(--accent, #c2603f);
+  border-color: transparent;
+}
+.auth-submit {
+  margin-top: 4px;
+}
+.auth-error {
+  background: #fdecec;
+  color: #a02020;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 0.88rem;
+}
+.auth-notice {
+  background: #eaf7ec;
+  color: #1f6b30;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 0.88rem;
+}
+.auth-links {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.auth-links .link {
+  background: none;
+  border: none;
+  color: var(--accent, #c2603f);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0;
+  text-decoration: underline;
+}
