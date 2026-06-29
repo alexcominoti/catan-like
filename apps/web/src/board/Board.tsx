@@ -126,6 +126,10 @@ export function Board({ state, mode, hintVertex, onBuild, onHex }: BoardProps) {
   const me = state.currentPlayer;
   const myHand = state.players.find((p) => p.color === me)?.hand;
   const hexMode = mode === 'moveBlocker';
+  // Marcadores de spot disponivel: aparecem no setup e quando um tipo esta armado;
+  // no modo livre da fase principal ('mainBuild') NAO aparecem (so no hover).
+  const showMarkers = mode === 'placeSettlement' || mode === 'placeRoad'
+    || mode === 'buildRoad' || mode === 'buildSettlement' || mode === 'buildCity';
   // Ladrao amigavel: so destaca/permite hexes validos (se houver alternativa).
   const enforceFriendly =
     hexMode && state.friendlyRobber &&
@@ -349,9 +353,11 @@ export function Board({ state, mode, hintVertex, onBuild, onHex }: BoardProps) {
           <g key={eid}
             onMouseEnter={() => { setHoverE(eid); setHoverV(null); }}
             onMouseLeave={() => setHoverE((c) => (c === eid ? null : c))}>
-            {active && (
+            {active ? (
               <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PLAYER_FILL[me]} strokeOpacity={0.8} strokeWidth={9} strokeLinecap="round" pointerEvents="none" />
-            )}
+            ) : showMarkers ? (
+              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} className="spot-pulse" stroke="#ffffff" strokeOpacity={0.6} strokeWidth={6} strokeDasharray="2 7" strokeLinecap="round" pointerEvents="none" />
+            ) : null}
             <line
               x1={a.x} y1={a.y} x2={b.x} y2={b.y}
               stroke="transparent" strokeWidth={18} style={{ cursor: 'pointer' }}
@@ -377,6 +383,9 @@ export function Board({ state, mode, hintVertex, onBuild, onHex }: BoardProps) {
               <g opacity={0.6} pointerEvents="none">
                 <BuildingGlyph x={v.x} y={v.y} kind={target.kind === 'city' ? 'city' : 'settlement'} fill={PLAYER_FILL[me]} />
               </g>
+            )}
+            {target && !active && showMarkers && (
+              <circle className="spot-pulse" cx={v.x} cy={v.y} r={7} fill="#ffffff" fillOpacity={0.75} stroke="#4da3ff" strokeWidth={2} pointerEvents="none" />
             )}
             {target && (
               <circle

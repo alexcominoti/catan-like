@@ -430,6 +430,13 @@ input:not([type]) {
   100% { opacity: 0; }
 }
 
+/* Marcadores de spot disponivel (setup / tipo armado): piscam suavemente */
+.spot-pulse { animation: spotBlink 1.1s ease-in-out infinite; }
+@keyframes spotBlink {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
 /* Hexes disponiveis para mover o ladrao: anel pulsante */
 .robber-ring { animation: robberPulse 1.1s ease-in-out infinite; }
 @keyframes robberPulse {
