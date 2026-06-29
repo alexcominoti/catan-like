@@ -1,14 +1,17 @@
+import type { Server as HttpServer } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
-import type { PlayerColor } from '@hexgame/engine';
+import type { PlayerColor } from '@trevalis/engine';
 import { RoomManager, type GameRoom } from './room.js';
 import type { ClientMessage, ServerMessage } from './protocol.js';
 
+/** Caminho do WebSocket quando anexado ao servidor HTTP unico (producao). */
+export const WS_PATH = '/ws';
+
 /**
- * Sobe o servidor WebSocket sobre as salas autoritativas. So roteia mensagens —
- * as regras vivem em GameRoom (motor puro). `port = 0` deixa o SO escolher (util
- * em testes). Retorna o WebSocketServer (chame `.close()` para parar).
+ * Liga toda a logica de salas a um WebSocketServer ja criado. So roteia
+ * mensagens — as regras vivem em GameRoom (motor puro).
  */
-export function startServer(port = Number(process.env.PORT ?? 8080)): WebSocketServer {
+function wireGameServer(wss: WebSocketServer): WebSocketServer {
   const manager = new RoomManager();
   const sockets = new Map<string, WebSocket>(); // clientId -> socket
   const timers = new Map<string, ReturnType<typeof setTimeout>>(); // roomId -> timer de acao
@@ -18,8 +21,6 @@ export function startServer(port = Number(process.env.PORT ?? 8080)): WebSocketS
     roomId?: string;
     color?: PlayerColor;
   }
-
-  const wss = new WebSocketServer({ port });
 
   wss.on('connection', (ws) => {
     const conn: Conn = { clientId: makeClientId() };
@@ -130,6 +131,22 @@ export function startServer(port = Number(process.env.PORT ?? 8080)): WebSocketS
   }
 
   return wss;
+}
+
+/**
+ * Sobe um servidor WebSocket autonomo na porta dada (`port = 0` deixa o SO
+ * escolher — util em testes). Use para rodar SO o jogo, sem HTTP.
+ */
+export function startServer(port = Number(process.env.PORT ?? 8080)): WebSocketServer {
+  return wireGameServer(new WebSocketServer({ port }));
+}
+
+/**
+ * Anexa o servidor de jogo a um servidor HTTP existente (mesma porta, em
+ * `WS_PATH`). E assim que rodamos em producao: HTTP (auth/API/SPA) + WS juntos.
+ */
+export function attachGameServer(httpServer: HttpServer): WebSocketServer {
+  return wireGameServer(new WebSocketServer({ server: httpServer, path: WS_PATH }));
 }
 
 function makeClientId(): string {
