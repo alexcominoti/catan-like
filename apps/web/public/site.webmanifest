@@ -1,0 +1,12 @@
+{
+  "name": "Trevalis",
+  "short_name": "Trevalis",
+  "description": "Jogo online de colonização hexagonal — jogue com amigos no navegador.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fff7ec",
+  "theme_color": "#c2603f",
+  "icons": [
+    { "src": "/favicon.svg", "type": "image/svg+xml", "sizes": "any" }
+  ]
+}
