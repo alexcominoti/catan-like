@@ -50,6 +50,11 @@
 .auth-submit {
   margin-top: 4px;
 }
+.auth-hint {
+  font-weight: 400;
+  font-size: 0.78rem;
+  color: #8a7766;
+}
 .auth-error {
   background: #fdecec;
   color: #a02020;

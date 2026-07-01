@@ -1285,6 +1285,54 @@ button.link {
 
 .lobby-back { background: none; border: none; color: rgba(255,255,255,.8); cursor: pointer; font-size: 13px; margin-bottom: 8px; }
 
+/* Etiqueta "Em breve" e cards desativados (recursos mockados removidos da produção). */
+.soon-tag { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--accent); background: #fbe6d8; border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; }
+.quick-card.disabled { position: relative; opacity: .55; filter: grayscale(.4); }
+.quick-card.disabled .soon-tag { position: absolute; top: 14px; right: 14px; }
+.quick-card.disabled button { cursor: not-allowed; }
+.soon-block { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 26px 6px; color: var(--muted); text-align: center; }
+.soon-block .muted-note { margin: 0; }
+
+/* Indicador "nome já alterado" no perfil + modal de edição de username. */
+.name-locked { display: inline-flex; align-items: center; gap: 4px; margin-left: 10px; font-family: var(--sans, inherit); font-size: 12px; font-weight: 600; color: var(--muted); vertical-align: middle; }
+.pf-modal-overlay { position: fixed; inset: 0; background: rgba(40,25,15,.45); display: flex; align-items: center; justify-content: center; z-index: 60; padding: 20px; }
+.pf-modal { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 24px; width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 30px 70px -20px rgba(80,40,20,.5); }
+.pf-modal h2 { margin: 0; font-size: 24px; }
+.pf-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: #5a4636; }
+.pf-field input { padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 15px; background: #fff; }
+.pf-field input:disabled { background: #f3ede5; color: var(--muted); }
+.pf-confirm p { margin: 0 0 12px; color: var(--accent); font-weight: 600; }
+.pf-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.pf-locked-note { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+.match-empty { padding: 18px 2px; }
+
+/* Lobby: listagem real de salas. */
+.room-bar { display: flex; align-items: center; justify-content: space-between; margin: 22px 0 10px; }
+.ghost.sm { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 6px 12px; }
+.room-table.live .room-row { grid-template-columns: 2.4fr 1.4fr 1.1fr .9fr; }
+.room-empty { padding: 26px 18px; color: var(--muted); text-align: center; border-top: 1px solid var(--border); }
+.room-empty .link { color: var(--accent); }
+
+/* Sala online no setup. */
+.su-room-online { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 12px; }
+.su-roomname { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+.su-private { width: 100%; text-align: left; margin-top: 6px; }
+.su-start-local { width: 100%; margin-top: 8px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.ic-muted { color: var(--muted); vertical-align: middle; }
+
+/* Sala de espera (waiting room). */
+.wr-gate { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; padding: 34px 20px; }
+.wr-link label { display: block; font-size: 13px; font-weight: 600; color: #5a4636; margin-bottom: 8px; }
+.wr-link-row { display: flex; gap: 10px; }
+.wr-link-row input { flex: 1; padding: 11px 14px; border: 1px solid var(--border); border-radius: 10px; background: #fff; font-size: 14px; }
+.wr-link-row .cta { white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+.wr-players { display: flex; flex-direction: column; gap: 8px; margin: 12px 0 18px; }
+.wr-player { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #fff; border: 1px solid var(--border); border-radius: 10px; }
+.wr-player.open { color: var(--muted); }
+.wr-dot { width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto; }
+.wr-dot.empty { background: var(--border); }
+.wr-wait { padding: 6px 2px; }
+
 @media (max-width: 820px) {
   .hero, .feature-grid, .quick-cards, .stat-row, .profile-cols { grid-template-columns: 1fr; }
 }

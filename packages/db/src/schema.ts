@@ -38,6 +38,10 @@ export const user = pgTable(
     image: text('image'), // avatar (opcional)
     // Campos extras do produto (declarados como additionalFields no auth):
     username: text('username'),
+    // O jogador pode trocar o username UMA vez (cota). true = cota já usada.
+    usernameChanged: boolean('username_changed')
+      .$defaultFn(() => false)
+      .notNull(),
     preferences: jsonb('preferences').$type<Record<string, unknown>>(),
     createdAt: timestamp('created_at')
       .$defaultFn(() => new Date())
@@ -175,6 +179,9 @@ export const playerStats = pgTable('player_stats', {
     .references(() => user.id, { onDelete: 'cascade' }),
   gamesPlayed: integer('games_played').notNull().default(0),
   gamesWon: integer('games_won').notNull().default(0),
+  // Sequencia de vitorias: atual (zera ao perder) e o recorde historico.
+  currentStreak: integer('current_streak').notNull().default(0),
+  longestStreak: integer('longest_streak').notNull().default(0),
   // Pontuacao de ranking (ex.: Elo); default neutro.
   rating: integer('rating').notNull().default(1000),
   updatedAt: timestamp('updated_at')
@@ -220,6 +227,68 @@ export const achievement = pgTable(
   }),
 );
 
+/* ------------------------------------------------------------------ */
+/* 3. Salas (lobby online): metadados duraveis p/ listagem e link       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Sala de jogo. Os METADADOS duram no banco (listagem publica + ciclo do link);
+ * o GameState vivo continua so na memoria do servidor (GameRoom). Uma sala nasce
+ * 'waiting' (juntando jogadores), vira 'in_progress' quando o host inicia e
+ * 'finished'/'abandoned' ao terminar. `code` e o id curto compartilhado no link.
+ */
+export const room = pgTable(
+  'room',
+  {
+    id: text('id').primaryKey(),
+    code: text('code').notNull(), // id curto do link (/sala/<code>)
+    name: text('name').notNull(),
+    hostUserId: text('host_user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    config: jsonb('config').$type<Record<string, unknown>>(),
+    // 'waiting' | 'in_progress' | 'finished' | 'abandoned'
+    status: text('status').notNull().default('waiting'),
+    isPrivate: boolean('is_private').notNull().default(false),
+    maxPlayers: integer('max_players').notNull().default(4),
+    boardLayout: text('board_layout').notNull().default('standard'),
+    matchId: text('match_id').references(() => match.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at')
+      .$defaultFn(() => new Date())
+      .notNull(),
+    startedAt: timestamp('started_at'),
+    finishedAt: timestamp('finished_at'),
+  },
+  (t) => ({
+    codeIdx: uniqueIndex('room_code_idx').on(t.code),
+    // Listagem publica: salas 'waiting' e nao privadas.
+    listIdx: index('room_status_private_idx').on(t.status, t.isPrivate),
+  }),
+);
+
+/** Assento humano numa sala (host + quem entrou). Bots nao entram aqui. */
+export const roomPlayer = pgTable(
+  'room_player',
+  {
+    roomId: text('room_id')
+      .notNull()
+      .references(() => room.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    color: text('color').notNull(),
+    seatIndex: integer('seat_index').notNull(),
+    isHost: boolean('is_host').notNull().default(false),
+    joinedAt: timestamp('joined_at')
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.roomId, t.userId] }),
+    roomIdx: index('room_player_room_idx').on(t.roomId),
+  }),
+);
+
 /** Conjunto completo do schema — passado ao drizzleAdapter do Better Auth. */
 export const schema = {
   user,
@@ -232,4 +301,6 @@ export const schema = {
   playerStats,
   inventoryItem,
   achievement,
+  room,
+  roomPlayer,
 };

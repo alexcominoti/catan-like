@@ -43,9 +43,12 @@ export function Landing({ onPlay, onWatch }: { onPlay: () => void; onWatch: () =
             <button className="cta big" onClick={onPlay}>Entrar no lobby</button>
             <button className="ghost big" onClick={onWatch}>Ver uma partida</button>
           </div>
+          {/*
+            Removidos daqui: "12,4k jogadores online" (mockado — precisa de serviço de
+            presença/contagem real) e "Anticheat ativo" (sem implementação). Ver
+            docs/backlog.md → Landing. Reexibir só com dados/feature reais.
+          */}
           <div className="hero-stats">
-            <span><Users size={15} /> 12,4k jogadores online</span>
-            <span><ShieldCheck size={15} /> Anticheat ativo</span>
             <span><Zap size={15} /> Servidor BR</span>
           </div>
         </div>
@@ -90,7 +93,10 @@ export function Landing({ onPlay, onWatch }: { onPlay: () => void; onWatch: () =
 
       <footer className="site-footer">
         <span className="foot-brand"><Hexagon size={15} /> Trevalis © 2026</span>
-        <span className="foot-links"><a>Regras</a> <a>Discord</a> <a>Contato</a></span>
+        {/*
+          Links removidos: Regras / Discord / Contato — nenhum tinha destino real.
+          Ver docs/backlog.md → Landing. Religar com href reais quando existirem.
+        */}
       </footer>
     </div>
   );

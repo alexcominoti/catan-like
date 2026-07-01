@@ -9,8 +9,11 @@
  */
 import { betterAuth, type BetterAuthOptions } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { getDb, hasDatabase, schema } from '@trevalis/db';
+import { APIError } from 'better-auth/api';
+import { sql } from 'drizzle-orm';
+import { getDb, hasDatabase, schema, user as userTable } from '@trevalis/db';
 import { sendEmail, actionEmail } from './mailer.js';
+import { validateUsername } from './username.js';
 
 export type Auth = ReturnType<typeof betterAuth>;
 
@@ -30,6 +33,30 @@ function trustedOrigins(): string[] {
     if (t) set.add(t);
   }
   return [...set];
+}
+
+/**
+ * Username já em uso (case-insensitive)? Opcionalmente ignora um userId (para a
+ * troca de username no perfil, onde o próprio usuário não conta como conflito).
+ */
+export async function isUsernameTaken(name: string, excludeUserId?: string): Promise<boolean> {
+  const db = getDb();
+  const where = excludeUserId
+    ? sql`lower(${userTable.username}) = lower(${name}) and ${userTable.id} <> ${excludeUserId}`
+    : sql`lower(${userTable.username}) = lower(${name})`;
+  const rows = await db.select({ id: userTable.id }).from(userTable).where(where).limit(1);
+  return rows.length > 0;
+}
+
+/** E-mail já cadastrado (case-insensitive)? Para mensagem clara no cadastro. */
+export async function isEmailTaken(email: string): Promise<boolean> {
+  const db = getDb();
+  const rows = await db
+    .select({ id: userTable.id })
+    .from(userTable)
+    .where(sql`lower(${userTable.email}) = lower(${email})`)
+    .limit(1);
+  return rows.length > 0;
 }
 
 function buildOptions(): BetterAuthOptions {
@@ -71,6 +98,34 @@ function buildOptions(): BetterAuthOptions {
       additionalFields: {
         // username unico escolhido pelo jogador (coluna ja existe no schema).
         username: { type: 'string', required: false, input: true },
+        // cota de troca de username já usada? (somente leitura para o cliente).
+        usernameChanged: { type: 'boolean', required: false, input: false },
+      },
+    },
+    databaseHooks: {
+      user: {
+        create: {
+          // No cadastro, o campo "Nome" É o username: validamos a regex e a
+          // unicidade ANTES de criar a conta (mensagens claras em vez de erro
+          // bruto do índice único). Ver apps/web/src/site/Auth.tsx.
+          before: async (u) => {
+            const name = (u.name ?? '').trim();
+            const err = validateUsername(name);
+            if (err) throw new APIError('BAD_REQUEST', { message: err });
+            if (await isUsernameTaken(name)) {
+              throw new APIError('BAD_REQUEST', {
+                message: 'Esse nome de usuário já está em uso.',
+              });
+            }
+            // E-mail único com mensagem clara (em vez do erro bruto do índice).
+            if (u.email && (await isEmailTaken(u.email))) {
+              throw new APIError('BAD_REQUEST', {
+                message: 'Esse e-mail já está cadastrado.',
+              });
+            }
+            return { data: { ...u, name, username: name } };
+          },
+        },
       },
     },
     session: {

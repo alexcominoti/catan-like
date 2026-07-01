@@ -1,90 +1,277 @@
-import type { ReactNode } from 'react';
-import { Trophy, CircleDot, TrendingUp, Flame, Award, Settings } from 'lucide-react';
+import { useEffect, useState, type FormEvent } from 'react';
+import { Trophy, CircleDot, TrendingUp, Flame, Award, Settings, Lock, Check } from 'lucide-react';
+import { authClient } from '../auth/client.js';
+import { validateUsername } from '../auth/username.js';
 
-const STATS: { icon: ReactNode; label: string; value: string; sub: string }[] = [
-  { icon: <Trophy size={14} />, label: 'ELO', value: '1.842', sub: '+24' },
-  { icon: <CircleDot size={14} />, label: 'PARTIDAS', value: '217', sub: '+3 hoje' },
-  { icon: <TrendingUp size={14} />, label: 'VITÓRIAS', value: '58%', sub: '125V / 92D' },
-  { icon: <Flame size={14} />, label: 'SEQUÊNCIA', value: '3', sub: 'vitórias' },
-];
+// PARTIDAS/VITÓRIAS/SEQUÊNCIA e "Últimas partidas" vêm de GET /api/profile/stats
+// (dados REAIS do banco). Como ainda não persistimos partidas, na prática vêm
+// zerados/vazios — a UI mostra o estado vazio em vez de números mockados.
+// ELO e Conquistas seguem "Em breve" (ver docs/backlog.md → Perfil).
+const MAP_LABEL: Record<string, string> = {
+  standard: 'Clássico (3–4)',
+  large: 'Grande (5–6)',
+  huge: 'Enorme (7–8)',
+};
 
-const MATCHES = [
-  { win: true, pts: 10, map: 'Base', vs: 'marina_dev, rafa, joana', delta: 24, when: 'há 1h' },
-  { win: false, pts: 7, map: 'Beira-mar', vs: 'tio_pedro, luca', delta: -12, when: 'há 4h' },
-  { win: true, pts: 10, map: 'Cavaleiros', vs: 'ana_p, marina_dev, joana', delta: 18, when: 'ontem' },
-  { win: false, pts: 6, map: 'Base', vs: 'rafa, luca', delta: -9, when: 'ontem' },
-  { win: true, pts: 10, map: 'Cidades & C.', vs: 'joana, tio_pedro, marina_dev', delta: 22, when: '2 dias' },
-];
+interface ProfileMatch {
+  won: boolean;
+  points: number;
+  map: string | null;
+  opponents: string[];
+  finishedAt: string | null;
+}
+interface ProfileStats {
+  gamesPlayed: number;
+  gamesWon: number;
+  currentStreak: number;
+  longestStreak: number;
+  matches: ProfileMatch[];
+}
 
-const ACHIEVEMENTS = [
-  { name: 'Primeira vila', on: true },
-  { name: 'Estrada longa', on: true },
-  { name: 'Maior exército', on: true },
-  { name: 'Monopólio', on: true },
-  { name: '10 vitórias', on: true },
-  { name: 'Sem trocas', on: true },
-  { name: 'Rush portos', on: true },
-  { name: 'Mestre da pedra', on: false },
-  { name: 'Grão-Mestre', on: false },
-];
+/** Tempo relativo curto (pt-BR) a partir de um ISO. */
+function relativeTime(iso: string | null): string {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const h = Math.floor(diff / 3_600_000);
+  if (h < 1) return 'agora há pouco';
+  if (h < 24) return `há ${h}h`;
+  const d = Math.floor(h / 24);
+  if (d === 1) return 'ontem';
+  if (d < 7) return `${d} dias`;
+  return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
+}
 
 export function Profile() {
+  const { data: session } = authClient.useSession();
+  const u = session?.user as
+    | (NonNullable<typeof session>['user'] & { username?: string | null; usernameChanged?: boolean | null })
+    | undefined;
+
+  // Username (e cota de troca) com override local, pois o cache de sessão pode
+  // demorar a refletir a troca recém-feita.
+  const [username, setUsername] = useState<string>('');
+  const [changed, setChanged] = useState(false);
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    if (u) {
+      setUsername(u.username ?? u.name ?? '');
+      setChanged(Boolean(u.usernameChanged));
+    }
+  }, [u?.username, u?.name, u?.usernameChanged]);
+
+  // Estatísticas reais (vazias enquanto não há partidas persistidas).
+  const [stats, setStats] = useState<ProfileStats | null>(null);
+  useEffect(() => {
+    if (!u) return;
+    let alive = true;
+    void fetch('/api/profile/stats')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: ProfileStats | null) => {
+        if (alive && data) setStats(data);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [u?.id]);
+
+  const winRate =
+    stats && stats.gamesPlayed > 0 ? Math.round((stats.gamesWon / stats.gamesPlayed) * 100) : 0;
+  const losses = stats ? stats.gamesPlayed - stats.gamesWon : 0;
+
+  const display = username || 'jogador';
+  const initial = display.charAt(0).toUpperCase();
+  const joined = u?.createdAt
+    ? new Date(u.createdAt).toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' })
+    : null;
+
   return (
     <div className="page profile">
       <div className="card profile-head">
-        <span className="avatar">V</span>
+        <span className="avatar">{initial}</span>
         <div className="profile-id">
-          <span className="eyebrow">COLONO · NÍVEL 14</span>
-          <h1>você_jogador</h1>
-          <span className="muted-note">Entrou em fev/2026 · Servidor BR-Sul</span>
+          <span className="eyebrow">JOGADOR</span>
+          <h1>
+            {display}
+            {changed && (
+              <span className="name-locked" title="Você já alterou seu nome de usuário.">
+                <Lock size={13} /> nome já alterado
+              </span>
+            )}
+          </h1>
+          <span className="muted-note">{joined ? `Entrou em ${joined}` : 'Trevalis'}</span>
         </div>
-        <button className="ghost"><Settings size={15} /> Editar perfil</button>
+        <button className="ghost" onClick={() => setEditing(true)} disabled={!u}>
+          <Settings size={15} /> Editar perfil
+        </button>
       </div>
 
       <div className="stat-row">
-        {STATS.map((s) => (
-          <div key={s.label} className="card stat-box">
-            <span className="eyebrow stat-eyebrow">{s.icon} {s.label}</span>
-            <span className="stat-value">{s.value}</span>
-            <span className="muted-note">{s.sub}</span>
-          </div>
-        ))}
+        {/* ELO: "Em breve" — sem sistema de rating ainda. Ver docs/backlog.md → Perfil. */}
+        <div className="card stat-box">
+          <span className="eyebrow stat-eyebrow"><Trophy size={14} /> ELO</span>
+          <span className="soon-tag">Em breve</span>
+        </div>
+        <div className="card stat-box">
+          <span className="eyebrow stat-eyebrow"><CircleDot size={14} /> PARTIDAS</span>
+          <span className="stat-value">{stats?.gamesPlayed ?? 0}</span>
+          <span className="muted-note">total jogadas</span>
+        </div>
+        <div className="card stat-box">
+          <span className="eyebrow stat-eyebrow"><TrendingUp size={14} /> VITÓRIAS</span>
+          <span className="stat-value">{winRate}%</span>
+          <span className="muted-note">{stats?.gamesWon ?? 0}V / {losses}D</span>
+        </div>
+        <div className="card stat-box">
+          <span className="eyebrow stat-eyebrow"><Flame size={14} /> SEQUÊNCIA</span>
+          <span className="stat-value">{stats?.currentStreak ?? 0}</span>
+          <span className="muted-note">recorde: {stats?.longestStreak ?? 0}</span>
+        </div>
       </div>
 
       <div className="profile-cols">
         <div className="card">
           <div className="card-head">
             <h2>Últimas partidas</h2>
-            <a className="muted-note">Ver tudo</a>
           </div>
-          {MATCHES.map((m, i) => (
-            <div key={i} className="match-row">
-              <span className={`dot ${m.win ? 'win' : 'loss'}`} />
-              <div className="match-info">
-                <b>{m.win ? 'Vitória' : 'Derrota'}</b> · {m.pts} pts · {m.map}
-                <small>vs {m.vs}</small>
+          {!stats || stats.matches.length === 0 ? (
+            <p className="muted-note match-empty">Sem partidas ainda. Jogue uma para começar seu histórico!</p>
+          ) : (
+            stats.matches.map((m, i) => (
+              <div key={i} className="match-row">
+                <span className={`dot ${m.won ? 'win' : 'loss'}`} />
+                <div className="match-info">
+                  <b>{m.won ? 'Vitória' : 'Derrota'}</b> · {m.points} pts · {m.map ? (MAP_LABEL[m.map] ?? m.map) : '—'}
+                  <small>{m.opponents.length ? `vs ${m.opponents.join(', ')}` : 'sem oponentes'}</small>
+                </div>
+                <div className="match-delta">
+                  <small>{relativeTime(m.finishedAt)}</small>
+                </div>
               </div>
-              <div className="match-delta">
-                <span className={m.delta > 0 ? 'up' : 'down'}>{m.delta > 0 ? `+${m.delta}` : m.delta}</span>
-                <small>{m.when}</small>
-              </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
 
+        {/* Conquistas: "Em breve" — sem catálogo/desbloqueio. Ver docs/backlog.md → Perfil. */}
         <div className="card">
           <h2>Conquistas</h2>
-          <p className="muted-note">7 de 32 desbloqueadas</p>
-          <div className="ach-grid">
-            {ACHIEVEMENTS.map((a) => (
-              <div key={a.name} className={`ach${a.on ? '' : ' off'}`}>
-                <Award size={22} className={a.on ? 'ic-primary' : ''} />
-                <span>{a.name}</span>
-              </div>
-            ))}
+          <div className="soon-block">
+            <Award size={26} className="ic-primary" />
+            <span className="soon-tag">Em breve</span>
+            <p className="muted-note">Catálogo de conquistas a caminho.</p>
           </div>
         </div>
       </div>
+
+      {editing && u && (
+        <EditUsernameModal
+          current={username}
+          alreadyChanged={changed}
+          onClose={() => setEditing(false)}
+          onSaved={(name) => {
+            setUsername(name);
+            setChanged(true);
+            setEditing(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Modal de edição do username — alteração ÚNICA (item 4). */
+function EditUsernameModal({
+  current,
+  alreadyChanged,
+  onClose,
+  onSaved,
+}: {
+  current: string;
+  alreadyChanged: boolean;
+  onClose: () => void;
+  onSaved: (name: string) => void;
+}) {
+  const [value, setValue] = useState(current);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    setError(null);
+    setBusy(true);
+    try {
+      const res = await fetch('/api/profile/username', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: value.trim() }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { username?: string; error?: string };
+      if (!res.ok) throw new Error(data.error ?? 'Falha ao alterar o nome.');
+      onSaved(data.username ?? value.trim());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro inesperado.');
+      setConfirming(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    if (alreadyChanged) return;
+    const vErr = validateUsername(value);
+    if (vErr) {
+      setError(vErr);
+      return;
+    }
+    setError(null);
+    setConfirming(true);
+  }
+
+  return (
+    <div className="pf-modal-overlay" onClick={onClose}>
+      <form className="pf-modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <h2>Editar perfil</h2>
+
+        {error && <div className="auth-error">{error}</div>}
+
+        <label className="pf-field">
+          Nome de usuário
+          <input
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            disabled={alreadyChanged || busy}
+            minLength={4}
+            maxLength={20}
+            autoFocus
+          />
+          <small className="auth-hint">4–20 caracteres; letras, números, ponto e hífen.</small>
+        </label>
+
+        {alreadyChanged ? (
+          <div className="pf-locked-note">
+            <Lock size={14} /> Você já usou sua alteração de nome — o campo está somente leitura.
+          </div>
+        ) : confirming ? (
+          <div className="pf-confirm">
+            <p>Você só pode alterar seu nome uma vez. Tem certeza?</p>
+            <div className="pf-actions">
+              <button type="button" className="ghost" onClick={() => setConfirming(false)} disabled={busy}>
+                Cancelar
+              </button>
+              <button type="button" className="cta" onClick={save} disabled={busy}>
+                <Check size={15} /> {busy ? 'Salvando…' : 'Sim, alterar'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="pf-actions">
+            <button type="button" className="ghost" onClick={onClose}>Fechar</button>
+            <button type="submit" className="cta">Alterar nome</button>
+          </div>
+        )}
+      </form>
     </div>
   );
 }

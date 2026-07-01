@@ -2,9 +2,11 @@ import { useMemo, useState } from 'react';
 import { PLAYER_COLORS, type BoardLayout, type DesertPlacement, type NumberLayout, type PlayerColor } from '@trevalis/engine';
 import type { Difficulty } from '@trevalis/bot';
 import type { ReactNode } from 'react';
-import { Users, Bot, Dices, Target, Play, ArrowLeft, Shuffle, UserPlus, X, Crown, Shield } from 'lucide-react';
+import { Users, Bot, Dices, Target, Play, ArrowLeft, Shuffle, UserPlus, X, Crown, Shield, Lock, Link as LinkIcon } from 'lucide-react';
 import { PLAYER_FILL, PLAYER_LABEL } from '../game/theme.js';
 import { pickBotName } from '../game/botNames.js';
+import { authClient } from '../auth/client.js';
+import { createRoomApi } from '../site/rooms.js';
 
 /** Ritmo da partida (limite de tempo das ações; aplicado no jogo online). */
 export type Pace = 'fast' | 'normal';
@@ -48,7 +50,20 @@ const initialSeats = (): Seat[] => [
   ...Array.from({ length: MAX_SEATS - 1 }, () => ({ type: 'open' }) as Seat),
 ];
 
-export function Lobby({ onStart, onBack }: { onStart: (cfg: GameSetup) => void; onBack?: () => void }) {
+export function Lobby({
+  onStartLocal,
+  onRoomCreated,
+  onBack,
+}: {
+  /** Inicia um jogo LOCAL (hotseat/bots) imediatamente — não exige login. */
+  onStartLocal: (cfg: GameSetup) => void;
+  /** Criou uma sala online (com link); vai para a sala de espera. */
+  onRoomCreated: (code: string, cfg: GameSetup) => void;
+  onBack?: () => void;
+}) {
+  const { data: session } = authClient.useSession();
+  const loggedIn = Boolean(session?.user);
+
   const [mapKey, setMapKey] = useState<BoardLayout>('standard');
   const [hostName, setHostName] = useState('Você');
   // Sala recem-criada: so o anfitriao; as demais vagas comecam ABERTAS.
@@ -60,6 +75,11 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameSetup) => void; 
   const [friendlyRobber, setFriendlyRobber] = useState(false);
   const [pace, setPace] = useState<Pace>('normal');
   const [seedText, setSeedText] = useState('');
+  // Sala online (item 2): nome para a listagem + toggle privada.
+  const [roomName, setRoomName] = useState('');
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const limit = MAPS.find((m) => m.key === mapKey)!.limit;
   const visible = seats.slice(0, limit);
@@ -108,8 +128,8 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameSetup) => void; 
     setMapKey(key);
   }
 
-  function start() {
-    if (!canStart) return;
+  /** Monta o GameSetup a partir dos assentos/configurações atuais. */
+  function buildSetup(): GameSetup {
     // Seed digitada -> hash; vazia -> null (App gera uma seed cripto ao iniciar).
     const seed = seedText.trim() === '' ? null : hashSeed(seedText.trim());
     const players: { color: PlayerColor; name: string }[] = [];
@@ -127,10 +147,37 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameSetup) => void; 
         botDifficulty[color] = s.diff;
       }
     });
-    onStart({
+    return {
       players, bots, botDifficulty: botDifficulty as Record<PlayerColor, Difficulty>,
       seed, boardLayout: mapKey, pace, numberLayout, desert, pointsToWin, discardLimit, friendlyRobber,
+    };
+  }
+
+  /** Jogo LOCAL imediato (hotseat/bots) — sem login, sem link. */
+  function startLocal() {
+    if (!canStart) return;
+    onStartLocal(buildSetup());
+  }
+
+  /** Cria a sala ONLINE (gera link único) e vai para a sala de espera. */
+  async function createOnline() {
+    if (!canStart || creating) return;
+    setCreating(true);
+    setCreateError(null);
+    const setup = buildSetup();
+    const res = await createRoomApi({
+      name: roomName.trim() || `Sala de ${hostName.trim() || 'anfitrião'}`,
+      isPrivate,
+      maxPlayers: limit,
+      boardLayout: mapKey,
+      config: setup as unknown as Record<string, unknown>,
     });
+    setCreating(false);
+    if (!res.ok) {
+      setCreateError(res.error);
+      return;
+    }
+    onRoomCreated(res.room.code, setup);
   }
 
   return (
@@ -241,9 +288,50 @@ export function Lobby({ onStart, onBack }: { onStart: (cfg: GameSetup) => void; 
             </div>
           </div>
 
-          <button className="cta big su-start" disabled={!canStart} onClick={start}>
-            <Play size={16} /> Começar partida
-          </button>
+          {loggedIn && (
+            <div className="su-room-online">
+              <h3 className="su-sub">Sala online (link compartilhável)</h3>
+              <div className="su-slider">
+                <label>Nome da sala</label>
+                <input
+                  className="su-roomname"
+                  value={roomName}
+                  maxLength={40}
+                  placeholder={`Sala de ${hostName.trim() || 'anfitrião'}`}
+                  onChange={(e) => setRoomName(e.target.value)}
+                />
+              </div>
+              <button
+                className={`su-tile su-private${isPrivate ? ' active' : ''}`}
+                onClick={() => setIsPrivate((v) => !v)}
+                type="button"
+              >
+                <span className="su-tile-icon"><Lock size={18} /></span>
+                <span className="su-tile-label">Sala privada</span>
+                <span className="su-tile-hint">{isPrivate ? 'só por link; fora da listagem' : 'aparece no lobby público'}</span>
+              </button>
+            </div>
+          )}
+
+          {createError && <div className="auth-error">{createError}</div>}
+
+          {loggedIn ? (
+            <>
+              <button className="cta big su-start" disabled={!canStart || creating} onClick={createOnline}>
+                <LinkIcon size={16} /> {creating ? 'Criando sala…' : 'Criar sala'}
+              </button>
+              <button className="ghost su-start-local" disabled={!canStart} onClick={startLocal}>
+                <Play size={15} /> Jogar local (hotseat/bots)
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="cta big su-start" disabled={!canStart} onClick={startLocal}>
+                <Play size={16} /> Começar partida
+              </button>
+              <p className="su-note">Entre na sua conta para criar uma sala com link compartilhável.</p>
+            </>
+          )}
         </div>
       </div>
     </div>

@@ -9,7 +9,12 @@ import { readFile, stat } from 'node:fs/promises';
 import { join, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { toNodeHandler, fromNodeHeaders } from 'better-auth/node';
-import { getAuth } from './auth.js';
+import { eq } from 'drizzle-orm';
+import { getDb, user as userTable } from '@trevalis/db';
+import { getAuth, isUsernameTaken } from './auth.js';
+import { validateUsername } from './username.js';
+import { createRoom, getRoom, joinRoom, listOpenRooms, startRoom } from './rooms.js';
+import { getProfileStats } from './stats.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -38,6 +43,40 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const data = JSON.stringify(body);
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
   res.end(data);
+}
+
+/** Lê e faz parse do corpo JSON de uma requisição (limite simples de tamanho). */
+async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > 64 * 1024) throw new Error('Corpo da requisição muito grande.');
+    chunks.push(chunk as Buffer);
+  }
+  if (chunks.length === 0) return {};
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
+
+/**
+ * Resolve o usuário autenticado da requisição, ou responde (503/401) e retorna
+ * null. Centraliza a checagem usada pelas rotas que exigem login (perfil, salas).
+ */
+async function authedUser(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<{ id: string } | null> {
+  const auth = getAuth();
+  if (!auth) {
+    sendJson(res, 503, { error: 'Autenticacao indisponivel (sem banco configurado).' });
+    return null;
+  }
+  const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
+  if (!session) {
+    sendJson(res, 401, { error: 'Você precisa entrar para acessar uma sala.' });
+    return null;
+  }
+  return session.user;
 }
 
 /** Serve um arquivo estatico; retorna false se nao existir. */
@@ -93,17 +132,168 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       sendJson(res, 401, { error: 'Nao autenticado.' });
       return;
     }
-    const u = session.user as typeof session.user & { username?: string | null };
+    const u = session.user as typeof session.user & {
+      username?: string | null;
+      usernameChanged?: boolean | null;
+    };
     sendJson(res, 200, {
       id: u.id,
       name: u.name,
       email: u.email,
       username: u.username ?? null,
+      usernameChanged: u.usernameChanged ?? false,
       avatar: u.image ?? null,
       emailVerified: u.emailVerified,
       createdAt: u.createdAt,
     });
     return;
+  }
+
+  // --- troca (única) de username pelo usuário logado ---
+  if (path === '/api/profile/username' && req.method === 'POST') {
+    const auth = getAuth();
+    if (!auth) {
+      sendJson(res, 503, { error: 'Autenticacao indisponivel.' });
+      return;
+    }
+    const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
+    if (!session) {
+      sendJson(res, 401, { error: 'Nao autenticado.' });
+      return;
+    }
+    let body: unknown;
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      sendJson(res, 400, { error: 'Corpo inválido.' });
+      return;
+    }
+    const raw = (body as { username?: unknown }).username;
+    const name = typeof raw === 'string' ? raw.trim() : '';
+    const err = validateUsername(name);
+    if (err) {
+      sendJson(res, 400, { error: err });
+      return;
+    }
+    const db = getDb();
+    const userId = session.user.id;
+    // Cota: o usuário só pode trocar o nome UMA vez.
+    const [current] = await db
+      .select({ usernameChanged: userTable.usernameChanged })
+      .from(userTable)
+      .where(eq(userTable.id, userId))
+      .limit(1);
+    if (current?.usernameChanged) {
+      sendJson(res, 409, { error: 'Você já alterou seu nome de usuário.' });
+      return;
+    }
+    if (await isUsernameTaken(name, userId)) {
+      sendJson(res, 409, { error: 'Esse nome de usuário já está em uso.' });
+      return;
+    }
+    await db
+      .update(userTable)
+      .set({ username: name, name, usernameChanged: true, updatedAt: new Date() })
+      .where(eq(userTable.id, userId));
+    sendJson(res, 200, { username: name, usernameChanged: true });
+    return;
+  }
+
+  // --- estatísticas do perfil (dados reais; vazio se não há partidas) ---
+  if (path === '/api/profile/stats' && req.method === 'GET') {
+    const u = await authedUser(req, res);
+    if (!u) return;
+    sendJson(res, 200, await getProfileStats(u.id));
+    return;
+  }
+
+  // --- salas: listagem pública (não exige login para apenas navegar) ---
+  if (path === '/api/rooms' && req.method === 'GET') {
+    if (!getAuth()) {
+      sendJson(res, 503, { error: 'Listagem indisponivel (sem banco configurado).' });
+      return;
+    }
+    sendJson(res, 200, { rooms: await listOpenRooms() });
+    return;
+  }
+
+  // --- salas: criação (exige login) ---
+  if (path === '/api/rooms' && req.method === 'POST') {
+    const u = await authedUser(req, res);
+    if (!u) return;
+    let body: unknown;
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      sendJson(res, 400, { error: 'Corpo inválido.' });
+      return;
+    }
+    const b = body as {
+      name?: unknown;
+      isPrivate?: unknown;
+      maxPlayers?: unknown;
+      boardLayout?: unknown;
+      config?: unknown;
+    };
+    const name = typeof b.name === 'string' && b.name.trim() ? b.name.trim().slice(0, 40) : 'Sala sem nome';
+    const room = await createRoom({
+      hostUserId: u.id,
+      name,
+      isPrivate: b.isPrivate === true,
+      maxPlayers: typeof b.maxPlayers === 'number' ? b.maxPlayers : 4,
+      boardLayout: typeof b.boardLayout === 'string' ? b.boardLayout : 'standard',
+      config: b.config && typeof b.config === 'object' ? (b.config as Record<string, unknown>) : undefined,
+    });
+    sendJson(res, 201, { room });
+    return;
+  }
+
+  // --- salas: detalhe / entrar / iniciar (por código) ---
+  const roomMatch = /^\/api\/rooms\/([A-Za-z0-9]{4,12})(\/join|\/start)?$/.exec(path);
+  if (roomMatch) {
+    const code = roomMatch[1]!.toUpperCase();
+    const sub = roomMatch[2];
+
+    if (!sub && req.method === 'GET') {
+      if (!getAuth()) {
+        sendJson(res, 503, { error: 'Salas indisponiveis (sem banco configurado).' });
+        return;
+      }
+      // viewer opcional: só para marcar isHost (não bloqueia ver o detalhe).
+      const auth = getAuth()!;
+      const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
+      const room = await getRoom(code, session?.user.id);
+      if (!room) {
+        sendJson(res, 404, { error: 'Sala não encontrada.' });
+        return;
+      }
+      sendJson(res, 200, { room });
+      return;
+    }
+
+    if (sub === '/join' && req.method === 'POST') {
+      const u = await authedUser(req, res);
+      if (!u) return;
+      const result = await joinRoom(code, u.id);
+      if (!result.ok) {
+        sendJson(res, result.httpStatus, { error: result.error });
+        return;
+      }
+      sendJson(res, 200, { room: result.room });
+      return;
+    }
+
+    if (sub === '/start' && req.method === 'POST') {
+      const u = await authedUser(req, res);
+      if (!u) return;
+      const result = await startRoom(code, u.id);
+      if (!result.ok) {
+        sendJson(res, result.httpStatus, { error: result.error });
+        return;
+      }
+      sendJson(res, 200, { room: result.room });
+      return;
+    }
   }
 
   // qualquer outra rota /api/* desconhecida = 404 JSON (nao cai no SPA)

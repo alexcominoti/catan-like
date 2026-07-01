@@ -1,7 +1,7 @@
 import { Hexagon } from 'lucide-react';
 import { authClient } from '../auth/client.js';
 
-export type Page = 'landing' | 'lobby' | 'setup' | 'game' | 'profile' | 'auth';
+export type Page = 'landing' | 'lobby' | 'setup' | 'game' | 'profile' | 'auth' | 'room';
 
 export function SiteHeader({ page, onNav }: { page: Page; onNav: (p: Page) => void }) {
   const { data: session } = authClient.useSession();

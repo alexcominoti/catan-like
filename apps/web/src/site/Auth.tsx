@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Hexagon } from 'lucide-react';
 import { authClient, resetRedirectUrl } from '../auth/client.js';
+import { validateUsername } from '../auth/username.js';
 import './auth.css';
 
 type Mode = 'login' | 'signup' | 'forgot' | 'reset';
@@ -32,7 +33,10 @@ export function Auth({ onAuthed }: { onAuthed: () => void }) {
         if (error) throw new Error(error.message ?? 'Falha no login.');
         onAuthed();
       } else if (mode === 'signup') {
-        const { error } = await authClient.signUp.email({ email, password, name });
+        // O "nome" no cadastro É o username: valida a regex antes de enviar.
+        const vErr = validateUsername(name);
+        if (vErr) throw new Error(vErr);
+        const { error } = await authClient.signUp.email({ email, password, name: name.trim() });
         if (error) throw new Error(error.message ?? 'Falha no cadastro.');
         setNotice('Conta criada! Verifique seu e-mail para confirmar (se exigido) e entre.');
         setMode('login');
@@ -74,8 +78,17 @@ export function Auth({ onAuthed }: { onAuthed: () => void }) {
 
         {mode === 'signup' && (
           <label>
-            Nome
-            <input value={name} onChange={(e) => setName(e.target.value)} required autoComplete="name" />
+            Nome de usuário
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              autoComplete="username"
+              placeholder="ex.: marina.dev"
+              minLength={4}
+              maxLength={20}
+            />
+            <small className="auth-hint">4–20 caracteres; letras, números, ponto e hífen.</small>
           </label>
         )}
 
