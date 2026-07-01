@@ -2,8 +2,10 @@ import {
   RESOURCES,
   createInitialState,
   projectFor,
+  projectForSpectator,
   reduce,
   type Action,
+  type GameEvent,
   type GameState,
   type PlayerColor,
   type Resource,
@@ -22,23 +24,36 @@ const PACE_TIMERS: Record<Pace, {
 /** Turnos consecutivos perdidos por tempo ate a vaga virar bot medio (AFK). */
 const MAX_TURN_TIMEOUTS = 3;
 
+/** Segundos de "graca" apos uma desconexao antes de a vaga virar bot medio. */
+export const RECONNECT_GRACE_MS = 15_000;
+
+/** Tempo (ms) de sala vazia (sem nenhum humano conectado) ate ser limpa. */
+export const EMPTY_ROOM_TTL_MS = 5 * 60 * 1000;
+
 /**
  * Sala autoritativa: guarda UM GameState e e a unica autoridade sobre as regras.
  * Valida cada acao pelo `reduce` puro, auto-joga os bots e projeta o estado por
- * jogador (fog of war). Sem rede aqui — a camada WebSocket (index.ts) so transporta.
+ * jogador (fog of war). Sem rede aqui — a camada WebSocket (server.ts) so
+ * transporta; a camada de presenca/reconexao (LiveRoom, abaixo) so agenda.
+ *
+ * Identidade dos assentos = `userId` (conta autenticada), nao mais um id de
+ * conexao efemero: como toda sala exige login, isso da reconexao por conta de
+ * graca (reabrir o link em outro aparelho com a mesma conta reocupa a vaga).
  */
 export class GameRoom {
-  readonly id: string;
+  readonly code: string;
   readonly config: RoomConfig;
   state: GameState;
-  /** Assentos humanos: cor + nome + cliente conectado (ou null = vaga aberta). */
-  readonly humans: { color: PlayerColor; name: string; clientId: string | null }[];
+  /** Assentos humanos: cor + nome + dono (userId) + conectado agora ou nao. */
+  readonly humans: { color: PlayerColor; name: string; userId: string; connected: boolean }[];
   private readonly botSet: Set<PlayerColor>;
   /** Turnos seguidos perdidos por tempo, por cor (zera ao agir manualmente). */
   private readonly timeoutStreak = new Map<PlayerColor, number>();
+  /** Eventos acumulados desde o ultimo `drainEvents()` (log/toast/som no cliente). */
+  private pendingEvents: GameEvent[] = [];
 
-  constructor(id: string, config: RoomConfig) {
-    this.id = id;
+  constructor(code: string, config: RoomConfig) {
+    this.code = code;
     this.config = config;
     this.botSet = new Set(config.bots);
     this.state = createInitialState({
@@ -53,37 +68,51 @@ export class GameRoom {
     });
     this.humans = config.players
       .filter((p) => !this.botSet.has(p.color))
-      .map((p) => ({ color: p.color, name: p.name, clientId: null }));
+      .map((p) => ({ color: p.color, name: p.name, userId: p.userId!, connected: false }));
     this.runBots();
   }
 
   private isBot = (c: PlayerColor): boolean => this.botSet.has(c);
   private difficultyOf = (c: PlayerColor): Difficulty => this.config.botDifficulty[c] ?? 'medium';
 
-  /** Conecta um cliente a uma cor humana livre. Reassume o controle se a vaga virou bot. */
-  seat(clientId: string): PlayerColor | null {
-    const slot = this.humans.find((h) => h.clientId === null);
+  /** Assentos originalmente humanos que hoje estao sendo pilotados por um bot (AFK/desconectado). */
+  awayColors(): PlayerColor[] {
+    return this.humans.filter((h) => this.botSet.has(h.color)).map((h) => h.color);
+  }
+
+  /** Conecta o dono da vaga (por userId). Reassume o controle se a vaga virou bot. Null = nao e jogador (espectador). */
+  seat(userId: string): PlayerColor | null {
+    const slot = this.humans.find((h) => h.userId === userId);
     if (!slot) return null;
-    slot.clientId = clientId;
+    slot.connected = true;
     this.botSet.delete(slot.color); // humano reassume o controle (deixa de ser bot)
     this.timeoutStreak.set(slot.color, 0);
     return slot.color;
   }
 
-  /**
-   * Desconexao: a vaga vira um BOT MEDIO que assume na hora (o jogo nao trava).
-   * Se o jogador voltar, `seat` o devolve ao controle.
-   */
-  unseat(clientId: string): void {
-    const slot = this.humans.find((h) => h.clientId === clientId);
-    if (!slot) return;
-    slot.clientId = null;
-    this.botSet.add(slot.color); // vira bot (dificuldade default = 'medium')
+  /** Desconexao: so marca a vaga como offline. Quem decide QUANDO vira bot e o chamador (grace period). */
+  markDisconnected(userId: string): void {
+    const slot = this.humans.find((h) => h.userId === userId);
+    if (slot) slot.connected = false;
+  }
+
+  /** Estourou a graca de reconexao: a vaga vira BOT MEDIO e assume na hora (o jogo nao trava). */
+  convertToBot(userId: string): void {
+    const slot = this.humans.find((h) => h.userId === userId);
+    if (!slot || slot.connected) return; // reconectou entretanto: nao converte
+    this.botSet.add(slot.color);
     this.runBots();
   }
 
-  colorOf(clientId: string): PlayerColor | null {
-    return this.humans.find((h) => h.clientId === clientId)?.color ?? null;
+  colorOf(userId: string): PlayerColor | null {
+    return this.humans.find((h) => h.userId === userId)?.color ?? null;
+  }
+
+  /** Esvazia e devolve os eventos acumulados desde a ultima chamada (uma vez por broadcast). */
+  drainEvents(): GameEvent[] {
+    const events = this.pendingEvents;
+    this.pendingEvents = [];
+    return events;
   }
 
   /** Aplica uma acao de `by` (so legal pelo reduce) e auto-joga os bots em seguida. */
@@ -91,14 +120,15 @@ export class GameRoom {
     const r = reduce(this.state, by, action);
     if (!r.ok) return { ok: false, error: r.error };
     this.state = r.state;
+    this.pendingEvents.push(...r.events);
     this.timeoutStreak.set(by, 0); // agiu manualmente: zera o contador de AFK
     this.runBots();
     return { ok: true };
   }
 
-  /** Estado projetado (fog of war) para a visao de uma cor. */
-  projectedFor(color: PlayerColor): GameState {
-    return projectFor(this.state, color);
+  /** Estado projetado (fog of war) para a visao de uma cor, ou de um espectador (sem cor). */
+  projectedFor(color: PlayerColor | null): GameState {
+    return color ? projectFor(this.state, color) : projectForSpectator(this.state);
   }
 
   /** Qual humano (conectado) o jogo esta esperando agora — ou null (bot/fim). */
@@ -183,6 +213,7 @@ export class GameRoom {
     const r = reduce(this.state, by, action);
     if (!r.ok) return false;
     this.state = r.state;
+    this.pendingEvents.push(...r.events);
     this.runBots();
     return true;
   }
@@ -226,32 +257,126 @@ export class GameRoom {
       const r = reduce(this.state, move.by, move.action);
       if (!r.ok) break; // nao deveria ocorrer; evita laco infinito
       this.state = r.state;
+      this.pendingEvents.push(...r.events);
       if (this.state.phase === 'ended') break;
     }
   }
 }
 
-/** Gerencia varias salas por id (em memoria; persistencia fica para a Fase 3). */
-export class RoomManager {
-  private readonly rooms = new Map<string, GameRoom>();
+/**
+ * Sala "viva": rastreia presenca por WebSocket (por userId), independente de o
+ * jogo ja ter comecado — cobre reconexao (grace period antes do bot-takeover),
+ * heartbeat (o chamador decide o que fazer com sockets mortos) e limpeza de
+ * sala vazia (item 6: 5 min sem NENHUM humano conectado).
+ */
+export class LiveRoom {
+  readonly code: string;
+  gameRoom: GameRoom | null = null;
+  /** userId -> id da conexao WS atual (so uma por usuario; a mais nova vence). */
+  private readonly connections = new Map<string, string>();
+  private readonly graceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Desde quando a sala esta sem NENHUM humano conectado (null = tem gente). */
+  emptySince: number | null = Date.now();
+  /** Evita notificar o fim de partida mais de uma vez (persistencia externa). */
+  finishNotified = false;
 
-  create(config: RoomConfig): GameRoom {
-    let id = makeRoomId();
-    while (this.rooms.has(id)) id = makeRoomId();
-    const room = new GameRoom(id, config);
-    this.rooms.set(id, room);
-    return room;
+  constructor(code: string) {
+    this.code = code;
   }
 
-  get(id: string): GameRoom | undefined {
-    return this.rooms.get(id);
+  hasHuman(): boolean {
+    return this.connections.size > 0;
   }
 
-  remove(id: string): void {
-    this.rooms.delete(id);
+  /** Todos os userIds conectados agora (jogadores E espectadores) — para broadcast. */
+  connectedUserIds(): string[] {
+    return [...this.connections.keys()];
+  }
+
+  /** Id da conexao WS atual do usuario (a mais recente), ou undefined se offline. */
+  connIdOf(userId: string): string | undefined {
+    return this.connections.get(userId);
+  }
+
+  /** Nova conexao (ou reconexao) do usuario. Cancela qualquer graca pendente. */
+  connect(userId: string, connId: string): PlayerColor | null {
+    this.connections.set(userId, connId);
+    this.emptySince = null;
+    const timer = this.graceTimers.get(userId);
+    if (timer) {
+      clearTimeout(timer);
+      this.graceTimers.delete(userId);
+    }
+    return this.gameRoom?.seat(userId) ?? null;
+  }
+
+  /**
+   * Conexao caiu. Se o usuario ocupava um assento, agenda a conversao em bot
+   * apos `graceMs` (cancelada se ele reconectar antes). `onGraceExpire` deixa o
+   * chamador (server.ts) rebroadcastar o estado apos a conversao.
+   */
+  disconnect(userId: string, connId: string, graceMs: number, onGraceExpire: () => void): void {
+    if (this.connections.get(userId) !== connId) return; // conexao antiga (ja substituida): ignora
+    this.connections.delete(userId);
+    if (this.connections.size === 0) this.emptySince = Date.now();
+
+    this.gameRoom?.markDisconnected(userId);
+    if (this.gameRoom?.colorOf(userId) == null) return; // espectador: sem graca/bot
+
+    const timer = setTimeout(() => {
+      this.graceTimers.delete(userId);
+      this.gameRoom?.convertToBot(userId);
+      onGraceExpire();
+    }, graceMs);
+    this.graceTimers.set(userId, timer);
+  }
+
+  /** Ha graca pendente para `nowMs - emptySince >= ttlMs`? (sala elegivel p/ limpeza). */
+  isEmptyFor(ttlMs: number, nowMs = Date.now()): boolean {
+    return this.emptySince != null && nowMs - this.emptySince >= ttlMs;
+  }
+
+  /** Cancela timers pendentes (ao remover a sala do gerenciador). */
+  dispose(): void {
+    for (const t of this.graceTimers.values()) clearTimeout(t);
+    this.graceTimers.clear();
   }
 }
 
-function makeRoomId(): string {
-  return Math.random().toString(36).slice(2, 8).toUpperCase();
+/** Gerencia as salas vivas por `code` (em memoria; persistencia de metadados fica em rooms.ts). */
+export class RoomManager {
+  private readonly rooms = new Map<string, LiveRoom>();
+
+  getOrCreate(code: string): LiveRoom {
+    let room = this.rooms.get(code);
+    if (!room) {
+      room = new LiveRoom(code);
+      this.rooms.set(code, room);
+    }
+    return room;
+  }
+
+  get(code: string): LiveRoom | undefined {
+    return this.rooms.get(code);
+  }
+
+  /** Cria o GameRoom (motor autoritativo) quando o anfitriao inicia a partida. */
+  startGame(code: string, config: RoomConfig): GameRoom {
+    const live = this.getOrCreate(code);
+    live.gameRoom = new GameRoom(code, config);
+    return live.gameRoom;
+  }
+
+  remove(code: string): void {
+    this.rooms.get(code)?.dispose();
+    this.rooms.delete(code);
+  }
+
+  /** Varre as salas vazias ha mais de `ttlMs`; `onExpire` decide o que persistir/remover. */
+  sweep(ttlMs: number, onExpire: (code: string, room: LiveRoom) => void): void {
+    const now = Date.now();
+    for (const [code, room] of this.rooms) {
+      if (room.isEmptyFor(ttlMs, now)) onExpire(code, room);
+    }
+  }
 }

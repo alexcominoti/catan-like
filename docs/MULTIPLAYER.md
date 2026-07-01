@@ -1,9 +1,13 @@
 # Jogar online com amigos — Fase 2 (plano + hospedagem)
 
-> **Estado atual:** o jogo é **local** (1 computador) — hotseat + bots. Para jogar
-> com amigos em máquinas diferentes falta a **Fase 2**: um servidor autoritativo
-> em tempo real. Este documento é o plano para construí-la e o passo-a-passo de
-> como hospedar.
+> **Estado atual:** a Fase 2 está **PRONTA e ligada de ponta a ponta** — servidor
+> autoritativo (`@trevalis/server` GameRoom/RoomManager) conectado ao cliente
+> (`net/client.ts` + `Game.tsx` modo `online`), com salas em `/room/<code>`,
+> reconexão por conta, bot-takeover com graça e limpeza de sala vazia. O modo
+> **local** (hotseat/bots, 1 computador, sem link) continua existindo à parte, sem
+> URL, para quem quer jogar rápido sem convidar ninguém. Este documento continua
+> valendo como referência de arquitetura + passo-a-passo de hospedagem; a seção
+> "Ordem de implementação" abaixo está com o progresso atualizado.
 
 ## Por que precisa de um servidor
 
@@ -75,16 +79,25 @@ com Vercel (frontend) + Fly.io/Render (servidor) é o caminho mais barato.
    por id; servidor WebSocket em `src/index.ts`. Testado (sala só de bots termina
    sozinha; espera a vez do humano; rejeita ação ilegal; projeção esconde info).
    Rodar: `npm run server` (porta 8080, configurável por `PORT`).
-3. 🟡 Cliente — transporte: `apps/web/src/net/client.ts` (`GameClient`: connect/
-   create/join/send + callbacks onState/onJoined/onError). Round-trip real provado
-   por teste de integração (`packages/server/test/ws.test.ts`: criar sala → joined →
-   estado com fog of war → ação → novo estado). FALTA ligar ao `Game.tsx` (quando
-   online, `dispatch` envia ao servidor e a UI renderiza o `state` projetado;
-   desliga o loop de bots e o `reduce` locais; contagens dos oponentes via
-   `hiddenHand`).
-4. ⏳ Lobby real com `roomId` + link de convite (as vagas abertas viram jogadores que
-   entram pela mensagem `join`). O lobby atual já modela host + vagas + bots.
-5. ⏳ Reconexão (reenviar o estado projetado ao reconectar); depois SQLite (Fase 3).
+3. ✅ Cliente — transporte: `apps/web/src/net/client.ts` (`GameClient`: connect/
+   enter/send + callbacks onState/onJoined/onError/onDisconnected/onReconnected,
+   com reconexão automática por backoff). **Ligado ao `Game.tsx`**: prop opcional
+   `online` — quando presente, `dispatch` envia a ação pelo `GameClient` e a UI
+   renderiza o `state` projetado que chega do servidor; o loop de bots e o
+   `reduce` locais ficam desligados (o servidor manda); contagens dos oponentes
+   via `hiddenHand`; indicador "🤖 assumiu" via `awayColors`.
+4. ✅ Lobby real com `code` (o mesmo id do link `/room/<code>`) + link de convite —
+   `RoomManager` (server) agora é indexado pelo `code`; `apps/web/src/site/
+   RoomScreen.tsx` unifica "Monte sua mesa" + a antiga "Sala de Espera" (o link
+   aparece na hora, sem trocar de tela); vagas abertas viram jogadores reais que
+   entram via `POST /api/rooms/:code/join`.
+5. ✅ Reconexão por CONTA (não só sessão local): assentos são identificados por
+   `userId` (login obrigatório), então reabrir o link em outro aparelho reocupa o
+   mesmo assento. Grace period de 15s antes do bot-takeover (`RECONNECT_GRACE_MS`
+   em `room.ts`). Espectadores (quem não é membro entra em modo leitura via
+   `projectForSpectator`). Limpeza de sala vazia (5 min sem humano conectado →
+   `abandoned`, sweep a cada 30s). Persistência do `GameState` em disco (sobreviver
+   a um restart do processo) continua pendente — ver `docs/backlog.md`.
 
 ### Robustez de servidor já implementada
 - ✅ **Ritmo Rápido/Normal** (`pace` na config): limites de tempo por ação
@@ -98,8 +111,10 @@ com Vercel (frontend) + Fly.io/Render (servidor) é o caminho mais barato.
   - **Oferta de troca ativa** (inclui bot→humano): fecha/cancela via
     `resolveBotProposal`. (Fechou a lacuna anterior.)
   O servidor agenda o `setTimeout` por sala e re-emite o estado ao disparar.
-- ✅ **Desconexão → bot médio**: ao cair, a vaga vira bot e assume na hora; se o
-  jogador voltar (`seat`), ele reassume o controle.
+- ✅ **Desconexão → bot médio (com graça)**: ao cair, espera `RECONNECT_GRACE_MS`
+  (15s) — reconectar antes cancela; se estourar, a vaga vira bot médio e assume.
+  Heartbeat ws ping/pong (10s) detecta quedas silenciosas (sem `close` limpo). Se o
+  jogador voltar (`seat`, pela conta/`userId`), ele reassume o controle.
 
 ### Contas / login
 Plano e passos de setup do **Google OAuth** em [`AUTH.md`](AUTH.md) (precisa de

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createInitialState } from '../src/setup.js';
-import { projectFor } from '../src/project.js';
+import { projectFor, projectForSpectator } from '../src/project.js';
 import { RESOURCES } from '../src/types.js';
 
 describe('projectFor (fog of war)', () => {
@@ -42,5 +42,25 @@ describe('projectFor (fog of war)', () => {
     const before = JSON.stringify(s);
     projectFor(s, 'red');
     expect(JSON.stringify(s)).toBe(before);
+  });
+});
+
+describe('projectForSpectator', () => {
+  it('esconde a mao/cartas de TODOS os jogadores (ninguem e o viewer)', () => {
+    const s = createInitialState({ seed: 1 });
+    s.players[0]!.hand.wood = 3;
+    s.players[1]!.hand.brick = 2;
+    s.players[1]!.progressCards = ['knight'];
+
+    const view = projectForSpectator(s);
+    for (const p of view.players) {
+      expect(RESOURCES.every((r) => p.hand[r] === 0)).toBe(true);
+      expect(p.progressCards).toEqual([]);
+    }
+    expect(view.players[0]!.hiddenHand).toBe(3);
+    expect(view.players[1]!.hiddenHand).toBe(2);
+    expect(view.players[1]!.hiddenDevCount).toBe(1);
+    expect(view.devDeck).toEqual([]);
+    expect(view.rng.seed).toBe(0);
   });
 });

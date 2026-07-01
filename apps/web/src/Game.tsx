@@ -30,8 +30,31 @@ import { RES_IMG, DEV_IMG } from './game/cards.js';
 import { Toasts, useToasts, type ToastTone } from './ui/Toasts.js';
 import { play as playSound, setMuted, unlockAudio, type SoundKind } from './ui/sound.js';
 import { saveReplay } from './ui/replays.js';
-import type { GameConfig } from './ui/Lobby.js';
+import type { GameConfig } from './game/config.js';
+import type { GameClient } from './net/client.js';
 import { PLAYER_FILL, PLAYER_LABEL, RESOURCE_ICON, RESOURCE_LABEL } from './game/theme.js';
+
+/**
+ * Modo ONLINE: o RoomScreen e o dono da conexao (GameClient) e da assinatura
+ * `onState`/`onError` — repassa aqui um "instantaneo" a cada mensagem nova do
+ * servidor (identificada por `seq`/`errorSeq`, para o Game processar cada uma
+ * exatamente uma vez). `viewerColor` null = espectador (sem `dispatch`).
+ */
+export interface OnlineGameProps {
+  client: GameClient;
+  viewerColor: PlayerColor | null;
+  /** Cores NUNCA humanas (fixas desde o inicio da partida). */
+  bots: PlayerColor[];
+  /** Assentos humanos hoje pilotados por um bot (desconexao/AFK). */
+  awayColors: PlayerColor[];
+  deadlineSeconds: number | null;
+  state: GameState;
+  /** Eventos da ULTIMA mensagem de estado (log/toast/som) — [] na primeira. */
+  events: GameEvent[];
+  seq: number;
+  error: string | null;
+  errorSeq: number;
+}
 
 /** Limites de tempo (s) por acao, por ritmo — espelham o servidor (PACE_TIMERS). */
 const PACE_TIMERS = {
@@ -103,19 +126,33 @@ function fmtTime(s: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-export function Game({ config, onExit }: { config: GameConfig; onExit: () => void }) {
-  const [state, setState] = useState<GameState>(() =>
-    createInitialState({
-      seed: config.seed,
-      boardLayout: config.boardLayout,
-      players: config.players,
-      numberLayout: config.numberLayout,
-      desert: config.desert,
-      pointsToWin: config.pointsToWin,
-      discardLimit: config.discardLimit,
-      friendlyRobber: config.friendlyRobber,
-    }),
+export function Game({
+  config,
+  onExit,
+  online,
+}: {
+  config: GameConfig;
+  onExit: () => void;
+  /** Presente = partida ONLINE (servidor autoritativo via WebSocket); ausente = hotseat local. */
+  online?: OnlineGameProps;
+}) {
+  const [localState, setLocalState] = useState<GameState>(() =>
+    online
+      ? online.state
+      : createInitialState({
+          seed: config.seed,
+          boardLayout: config.boardLayout,
+          players: config.players,
+          numberLayout: config.numberLayout,
+          desert: config.desert,
+          pointsToWin: config.pointsToWin,
+          discardLimit: config.discardLimit,
+          friendlyRobber: config.friendlyRobber,
+        }),
   );
+  // Online: o RoomScreen manda o estado (controlado); local: o proprio Game o possui.
+  const state = online ? online.state : localState;
+  const setState = setLocalState;
   const [log, setLog] = useState<LogEntry[]>([{ kind: 'event', text: 'Partida iniciada. Coloquem as vilas iniciais.' }]);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<InteractionMode>('idle');
@@ -154,26 +191,33 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   }
 
   const isBot = useMemo(() => {
+    if (online) {
+      const pureBots = new Set(online.bots);
+      const away = new Set(online.awayColors);
+      return (c: PlayerColor) => pureBots.has(c) || away.has(c);
+    }
     const set = new Set(config.bots);
     return (c: PlayerColor) => set.has(c);
-  }, [config.bots]);
+  }, [online, config.bots]);
   const difficultyOf = useMemo(() => {
     const map = config.botDifficulty ?? {};
     return (c: PlayerColor) => map[c] ?? 'medium';
   }, [config.botDifficulty]);
   const botTurn = isBot(state.currentPlayer);
 
-  // "Eu" (jogador local): com 1 humano, e sempre ele; em hotseat com varios
-  // humanos, e o humano da vez. As maos dos demais ficam ocultas (so contagem).
+  // "Eu" (jogador local): online, e sempre a MINHA cor (fixa; null = espectador).
+  // Local: com 1 humano e sempre ele; em hotseat com varios, e o humano da vez.
   const humanColors = state.players.filter((p) => !isBot(p.color)).map((p) => p.color);
-  const localColor: PlayerColor =
-    humanColors.length === 1
+  const localColor: PlayerColor = online
+    ? (online.viewerColor ?? state.currentPlayer)
+    : humanColors.length === 1
       ? humanColors[0]!
       : !isBot(state.currentPlayer)
         ? state.currentPlayer
         : (humanColors[0] ?? state.currentPlayer);
   const localPlayer = getPlayer(state, localColor);
-  const myTurn = state.currentPlayer === localColor;
+  const isSpectator = online != null && online.viewerColor == null;
+  const myTurn = !isSpectator && state.currentPlayer === localColor;
 
   const effMode: InteractionMode = useMemo(() => {
     if (isBot(state.currentPlayer)) return 'idle'; // humano nao age na vez do bot
@@ -200,7 +244,36 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
     setTradeWant(zeroRes());
   }
 
+  /**
+   * Log/toasts/sons a partir de eventos do motor — usado tanto pelo `dispatch`
+   * local (logo apos o `reduce`) quanto pelas mensagens de estado do servidor
+   * no modo online (que nao expoe `action`/`by`, so os eventos ja ocorridos).
+   */
+  function applyEvents(events: GameEvent[], newState: GameState) {
+    const lines: LogEntry[] = events
+      .map((e) => describeEvent(e, newState))
+      .filter(Boolean)
+      .map((text) => ({ kind: 'event' as const, text }));
+    const sep: LogEntry[] = events.some((e) => e.t === 'turnEnded') ? [{ kind: 'sep' as const }] : [];
+    setLog((prev) => [...lines, ...sep, ...prev].slice(0, 200));
+    for (const e of events) {
+      const t = toastForEvent(e, newState);
+      if (t) push(t.text, t.tone);
+      const s = soundForEvent(e);
+      if (s) playSound(s);
+    }
+    if (events.some((e) => e.t === 'turnEnded' || e.t === 'gameWon')) setMode('idle');
+    if (events.some((e) => e.t === 'turnEnded')) setTurnCount((n) => n + 1);
+  }
+
   function dispatch(action: Action, by: PlayerColor = state.currentPlayer) {
+    if (online) {
+      if (online.viewerColor == null) return false; // espectador: sem acao
+      online.client.send(action);
+      resetTransient();
+      return true; // otimista: o servidor confirma via novo `state` (ou `error`)
+    }
+
     const prevBlocker = state.blocker.hexId;
     const res = reduce(state, by, action);
     if (!res.ok) {
@@ -230,24 +303,35 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
         actions: historyRef.current,
       });
     }
-    const lines: LogEntry[] = res.events
-      .map((e) => describeEvent(e, res.state))
-      .filter(Boolean)
-      .map((text) => ({ kind: 'event' as const, text }));
-    const sep: LogEntry[] = res.events.some((e) => e.t === 'turnEnded') ? [{ kind: 'sep' as const }] : [];
-    setLog((prev) => [...lines, ...sep, ...prev].slice(0, 200));
-    for (const e of res.events) {
-      const t = toastForEvent(e, res.state);
-      if (t) push(t.text, t.tone);
-      const s = soundForEvent(e);
-      if (s) playSound(s);
-    }
-    if (res.events.some((e) => e.t === 'turnEnded' || e.t === 'gameWon')) setMode('idle');
-    if (res.events.some((e) => e.t === 'turnEnded')) setTurnCount((n) => n + 1);
+    applyEvents(res.events, res.state);
     scheduleAnimations(res.events, res.state, action, by, prevBlocker);
     resetTransient();
     return true;
   }
+
+  // Online: processa a mensagem de estado mais recente do servidor exatamente
+  // uma vez (identificada por `seq`) — log/toasts/sons via os eventos que ela
+  // carrega (sem animacao de voo: precisaria da `action` original, que o
+  // protocolo online nao expoe).
+  const lastSeqRef = useRef(-1);
+  useEffect(() => {
+    if (!online || online.seq === lastSeqRef.current) return;
+    lastSeqRef.current = online.seq;
+    if (online.events.length > 0) applyEvents(online.events, online.state);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online?.seq]);
+
+  // Online: erros do servidor (acao rejeitada) — mostrados exatamente uma vez.
+  const lastErrSeqRef = useRef(-1);
+  useEffect(() => {
+    if (!online || online.errorSeq === lastErrSeqRef.current) return;
+    lastErrSeqRef.current = online.errorSeq;
+    if (online.error) {
+      setError(online.error);
+      push(online.error, 'warn');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online?.errorSeq]);
 
   /** Anima cartas/peças voando após uma jogada (espera o DOM atualizar). */
   function scheduleAnimations(
@@ -339,18 +423,22 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   }, []);
 
   // Auto-jogo dos bots: ao menos 1s entre acoes para o humano acompanhar.
+  // Online, quem auto-joga os bots e o SERVIDOR (GameRoom.runBots) — nao aqui.
   useEffect(() => {
+    if (online) return;
     const move = planBotAction(state, isBot, difficultyOf);
     if (!move) return;
     const delay = state.phase === 'setup1' || state.phase === 'setup2' ? 1000 : 1100;
     const id = setTimeout(() => dispatch(move.action, move.by), delay);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state, isBot, difficultyOf]);
+  }, [online, state, isBot, difficultyOf]);
 
   // Resolucao automatica de trocas (janela de 20s). Vale quando o proponente e o
   // jogador local (humano propos/contrapropos) ou quando um bot propos na sua vez.
+  // Online, quem resolve e o SERVIDOR (deadline/forceTimeout) — nao aqui.
   useEffect(() => {
+    if (online) return;
     const t = state.activeTrade;
     if (!t) return;
     let wait: number;
@@ -437,10 +525,11 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   const bestRate = maritimeRate(state, localColor, give);
   const playerColor = PLAYER_FILL[state.currentPlayer];
 
-  // Mapa nome -> cor para pintar os nomes no Pergaminho.
+  // Mapa nome -> cor para pintar os nomes no Pergaminho (o proprio `state` ja
+  // carrega o nome de cada jogador — funciona igual online e local).
   const logNames = useMemo<NameColor[]>(
-    () => config.players.map((p) => ({ name: p.name, color: PLAYER_FILL[p.color] })),
-    [config.players],
+    () => state.players.map((p) => ({ name: p.name, color: PLAYER_FILL[p.color] })),
+    [state.players],
   );
 
   // ---- Limite de tempo por acao (ritmo Rapido/Normal) ----
@@ -467,9 +556,10 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   }
 
   // Situacao atual que tem prazo para o JOGADOR LOCAL (ou null). A troca tem seu
-  // proprio relogio (popup), entao fica de fora daqui.
+  // proprio relogio (popup), entao fica de fora daqui. Online, quem manda no prazo
+  // e o SERVIDOR (deadlineSeconds) — este calculo local so vale para o hotseat.
   const turnTimer = useMemo((): { secs: number; key: string } | null => {
-    if (state.activeTrade || state.winner) return null;
+    if (online || state.activeTrade || state.winner) return null;
     const me = localColor;
     const tt = PACE_TIMERS[pace];
     if (state.phase === 'discard' && (state.pendingDiscards[me] ?? 0) > 0)
@@ -484,9 +574,12 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
   }, [state, localColor, pace, turnCount]);
 
   const [secsLeft, setSecsLeft] = useState<number | null>(null);
+
+  // Hotseat local: alem de exibir, FORCA a acao default quando o tempo estoura
+  // (o "servidor" e o proprio navegador aqui — ninguem mais aplicaria o timeout).
   useEffect(() => {
-    if (!turnTimer) {
-      setSecsLeft(null);
+    if (online || !turnTimer) {
+      if (!online) setSecsLeft(null);
       return;
     }
     setSecsLeft(turnTimer.secs);
@@ -501,7 +594,24 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
       clearTimeout(to);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [turnTimer?.key]);
+  }, [online, turnTimer?.key]);
+
+  // Online: so EXIBE a contagem que o servidor manda (ele e quem decide o
+  // timeout de verdade, via GameRoom.forceTimeout) — reinicia a cada mensagem
+  // nova de estado, que ja reflete o tempo restante correto naquele instante.
+  useEffect(() => {
+    if (!online) return;
+    if (online.deadlineSeconds == null) {
+      setSecsLeft(null);
+      return;
+    }
+    const secs = online.deadlineSeconds;
+    setSecsLeft(secs);
+    const deadline = Date.now() + secs * 1000;
+    const iv = setInterval(() => setSecsLeft(Math.max(0, Math.ceil((deadline - Date.now()) / 1000))), 250);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online, online?.seq, online?.deadlineSeconds]);
 
   const resourceCount = RESOURCES.reduce((s, r) => s + localPlayer.hand[r], 0);
 
@@ -537,8 +647,12 @@ export function Game({ config, onExit }: { config: GameConfig; onExit: () => voi
                 <div className="noble-main">
                   <div className="noble-name">
                     <span className="noble-nick">{p.name}</span>
-                    {p.color === localColor && <span className="you-tag">você</span>}
-                    {isBot(p.color) && <span className="bot-tag">bot</span>}
+                    {!isSpectator && p.color === localColor && <span className="you-tag">você</span>}
+                    {online && online.awayColors.includes(p.color) ? (
+                      <span className="bot-tag" title="Desconectado: um bot médio assumiu temporariamente">🤖 assumiu</span>
+                    ) : (
+                      isBot(p.color) && <span className="bot-tag">bot</span>
+                    )}
                   </div>
                   <div className="noble-stats">
                     <Stat icon={<Layers size={12} />} label={`${handTotal(p)} recursos`} />

@@ -1,65 +1,57 @@
-import type { Action, GameState, PlayerColor } from '@trevalis/engine';
-import type { GameConfig } from '../ui/Lobby.js';
+import type { Action, GameEvent, GameState, PlayerColor } from '@trevalis/engine';
 
 /**
- * Cliente WebSocket do jogo (Fase 2). Espelha o protocolo de `@trevalis/server`
- * sem depender dele (o web nao importa o pacote do servidor). A UI usa isto para,
- * quando ONLINE, enviar acoes ao servidor e receber o estado JA projetado
- * (fog of war) em vez de rodar o `reduce`/bots localmente.
+ * Cliente WebSocket do jogo — liga a UI ao servidor autoritativo
+ * (`@trevalis/server`). Espelha o protocolo sem depender do pacote do servidor
+ * (o web nao importa nada dele). Quando ONLINE, a UI envia acoes por aqui e
+ * recebe o estado JA projetado (fog of war, ou tudo oculto p/ espectador) em
+ * vez de rodar `reduce`/bots localmente.
  *
- * NOTA: ainda nao ligado ao Game.tsx — e a base para o passo 3 da Fase 2.
+ * Reconexao: se a conexao cair sem ter sido fechada por nos, tenta de novo com
+ * backoff (ate 8s entre tentativas) e reenvia `enter` com o MESMO codigo —
+ * como a sala identifica o dono da vaga pela conta (userId, via cookie), o
+ * servidor reassenta automaticamente.
  */
 export type ServerMessage =
-  | { t: 'joined'; roomId: string; color: PlayerColor }
-  | { t: 'state'; state: GameState }
+  | { t: 'joined'; code: string; color: PlayerColor | null; bots: PlayerColor[] } // color null = espectador
+  | { t: 'state'; state: GameState; awayColors: PlayerColor[]; deadlineSeconds: number | null; events: GameEvent[] }
   | { t: 'error'; error: string };
+
+const MAX_RECONNECT_DELAY_MS = 8000;
 
 export class GameClient {
   private ws: WebSocket | null = null;
-  roomId: string | null = null;
+  private url: string | null = null;
+  private code: string | null = null;
+  private closedByUser = false;
+  private reconnectAttempt = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Cor do jogador nesta sala, ou null (ainda nao entrou / espectador). */
   color: PlayerColor | null = null;
+  connected = false;
 
-  onState?: (state: GameState) => void;
-  onJoined?: (roomId: string, color: PlayerColor) => void;
+  onState?: (state: GameState, awayColors: PlayerColor[], deadlineSeconds: number | null, events: GameEvent[]) => void;
+  onJoined?: (code: string, color: PlayerColor | null, bots: PlayerColor[]) => void;
   onError?: (error: string) => void;
-  onClose?: () => void;
+  /** A conexao caiu (a UI pode mostrar "reconectando…"; uma nova tentativa ja foi agendada). */
+  onDisconnected?: () => void;
+  /** Reconectou com sucesso (o socket abriu de novo; o `enter` foi reenviado). */
+  onReconnected?: () => void;
 
-  /** Conecta ao servidor (ex.: ws://localhost:8080 ou wss://...). */
+  /** Abre a conexao com o servidor (ex.: ws://localhost:8080 ou wss://...). Resolve no primeiro `open`. */
   connect(url: string): Promise<void> {
+    this.url = url;
+    this.closedByUser = false;
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(url);
-      this.ws = ws;
-      ws.onopen = () => resolve();
-      ws.onerror = () => reject(new Error('Falha ao conectar ao servidor.'));
-      ws.onclose = () => this.onClose?.();
-      ws.onmessage = (ev) => {
-        let msg: ServerMessage;
-        try {
-          msg = JSON.parse(String(ev.data)) as ServerMessage;
-        } catch {
-          return;
-        }
-        if (msg.t === 'joined') {
-          this.roomId = msg.roomId;
-          this.color = msg.color;
-          this.onJoined?.(msg.roomId, msg.color);
-        } else if (msg.t === 'state') {
-          this.onState?.(msg.state);
-        } else if (msg.t === 'error') {
-          this.onError?.(msg.error);
-        }
-      };
+      this.openSocket(resolve, reject);
     });
   }
 
-  /** Cria uma sala nova com a configuracao do lobby (vira o anfitriao). */
-  create(config: GameConfig, name: string): void {
-    this.sendRaw({ t: 'create', config, name });
-  }
-
-  /** Entra numa sala existente por id (ocupa uma vaga aberta). */
-  join(roomId: string, name: string): void {
-    this.sendRaw({ t: 'join', roomId, name });
+  /** Entra (ou reentra) na sala pelo codigo — o servidor resolve tudo (config, assento) pela sessao. */
+  enter(code: string): void {
+    this.code = code;
+    this.sendRaw({ t: 'enter', code });
   }
 
   /** Envia uma acao do jogador (o servidor valida pelo reduce). */
@@ -67,9 +59,57 @@ export class GameClient {
     this.sendRaw({ t: 'action', action });
   }
 
+  /** Fecha definitivamente (nao tenta reconectar). */
   close(): void {
+    this.closedByUser = true;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.ws?.close();
     this.ws = null;
+  }
+
+  private openSocket(onFirstOpen?: () => void, onFirstError?: (e: Error) => void): void {
+    const ws = new WebSocket(this.url!);
+    this.ws = ws;
+    ws.onopen = () => {
+      this.connected = true;
+      const reconnecting = this.reconnectAttempt > 0;
+      this.reconnectAttempt = 0;
+      if (this.code) this.sendRaw({ t: 'enter', code: this.code });
+      if (reconnecting) this.onReconnected?.();
+      onFirstOpen?.();
+    };
+    ws.onerror = () => {
+      onFirstError?.(new Error('Falha ao conectar ao servidor.'));
+    };
+    ws.onclose = () => {
+      this.connected = false;
+      this.ws = null;
+      if (this.closedByUser) return;
+      this.onDisconnected?.();
+      this.scheduleReconnect();
+    };
+    ws.onmessage = (ev) => {
+      let msg: ServerMessage;
+      try {
+        msg = JSON.parse(String(ev.data)) as ServerMessage;
+      } catch {
+        return;
+      }
+      if (msg.t === 'joined') {
+        this.color = msg.color;
+        this.onJoined?.(msg.code, msg.color, msg.bots);
+      } else if (msg.t === 'state') {
+        this.onState?.(msg.state, msg.awayColors, msg.deadlineSeconds, msg.events);
+      } else if (msg.t === 'error') {
+        this.onError?.(msg.error);
+      }
+    };
+  }
+
+  private scheduleReconnect(): void {
+    const delay = Math.min(1000 * 2 ** this.reconnectAttempt, MAX_RECONNECT_DELAY_MS);
+    this.reconnectAttempt++;
+    this.reconnectTimer = setTimeout(() => this.openSocket(), delay);
   }
 
   private sendRaw(msg: unknown): void {

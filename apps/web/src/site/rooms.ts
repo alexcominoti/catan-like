@@ -87,5 +87,5 @@ export function startRoomApi(code: string): Promise<RoomResult> {
 
 /** URL compartilhável do link único da sala. */
 export function roomLink(code: string): string {
-  return `${window.location.origin}/sala/${code}`;
+  return `${window.location.origin}/room/${code}`;
 }

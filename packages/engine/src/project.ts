@@ -1,18 +1,11 @@
 import { RESOURCES, type GameState, type PlayerColor } from './types.js';
 
 /**
- * Projeta o estado autoritativo para a VISAO de um jogador (fog of war). Usado
- * pelo servidor (Fase 2) antes de enviar o estado a cada cliente, para que ninguem
- * receba informacao secreta dos outros:
- *  - a COMPOSICAO da mao dos adversarios (mantem so o total em `hiddenHand`);
- *  - as cartas de progresso dos adversarios (mantem so a contagem em `hiddenDevCount`);
- *  - a ORDEM do baralho de progresso (mantem so a contagem em `devDeckCount`);
- *  - a SEMENTE do PRNG (para nao prever rolagens/roubos/compras futuras).
- *
- * Puro: nao muta o estado original (faz uma copia). O proprio jogador (`viewer`)
- * ve a sua mao e as suas cartas normalmente.
+ * Nucleo comum de `projectFor`/`projectForSpectator`: esconde a semente do PRNG,
+ * a ordem do baralho de progresso, e a mao/cartas de cada jogador para o qual
+ * `hide(color)` devolve true. Puro: nao muta o estado original.
  */
-export function projectFor(state: GameState, viewer: PlayerColor): GameState {
+function project(state: GameState, hide: (color: PlayerColor) => boolean): GameState {
   const s = JSON.parse(JSON.stringify(state)) as GameState;
 
   // Esconde a semente do PRNG (mantem o contador, que sozinho nao preve nada).
@@ -23,8 +16,8 @@ export function projectFor(state: GameState, viewer: PlayerColor): GameState {
   s.devDeck = [];
 
   for (const p of s.players) {
-    if (p.color === viewer) continue;
-    // Mao do adversario: oculta a composicao, mantem o total.
+    if (!hide(p.color)) continue;
+    // Mao oculta: esconde a composicao, mantem o total.
     p.hiddenHand = RESOURCES.reduce((n, r) => n + p.hand[r], 0);
     for (const r of RESOURCES) p.hand[r] = 0;
     // Cartas de progresso (inclui +1 PV secretos): ocultas; mantem so a contagem.
@@ -34,4 +27,22 @@ export function projectFor(state: GameState, viewer: PlayerColor): GameState {
   }
 
   return s;
+}
+
+/**
+ * Projeta o estado autoritativo para a VISAO de um jogador (fog of war). Usado
+ * pelo servidor antes de enviar o estado a cada cliente, para que ninguem
+ * receba informacao secreta dos outros. O proprio jogador (`viewer`) ve a sua
+ * mao e as suas cartas normalmente.
+ */
+export function projectFor(state: GameState, viewer: PlayerColor): GameState {
+  return project(state, (c) => c !== viewer);
+}
+
+/**
+ * Projeta o estado para um ESPECTADOR (nao e nenhum dos jogadores): esconde a
+ * mao/cartas de TODOS, igual `projectFor` faria para um adversario.
+ */
+export function projectForSpectator(state: GameState): GameState {
+  return project(state, () => true);
 }

@@ -13,6 +13,24 @@ import {
   user as userTable,
 } from '@trevalis/db';
 
+/**
+ * Perfil PUBLICO (compartilhavel via `/profile/:username`, sem exigir login).
+ * Resolve o username (case-insensitive) para um userId e reusa `getProfileStats`.
+ * `null` se o username nao existe.
+ */
+export async function getPublicProfileByUsername(
+  username: string,
+): Promise<{ username: string; stats: ProfileStats } | null> {
+  const db = getDb();
+  const [u] = await db
+    .select({ id: userTable.id, username: sql<string>`coalesce(${userTable.username}, ${userTable.name})` })
+    .from(userTable)
+    .where(sql`lower(coalesce(${userTable.username}, ${userTable.name})) = lower(${username})`)
+    .limit(1);
+  if (!u) return null;
+  return { username: u.username, stats: await getProfileStats(u.id) };
+}
+
 export interface ProfileMatch {
   won: boolean;
   points: number;

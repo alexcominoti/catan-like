@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { createHttpServer } from './http.js';
-import { attachGameServer, WS_PATH } from './server.js';
+import { attachGameServer, RoomManager, WS_PATH } from './server.js';
 
 /**
  * Entrada de PRODUCAO: um unico processo Node servindo HTTP (SPA + auth + API)
@@ -28,8 +28,11 @@ function requireEnv(): void {
 requireEnv();
 
 const port = Number(process.env.PORT ?? 8080);
-const server = createHttpServer();
-attachGameServer(server);
+// RoomManager compartilhado: a rota HTTP /start liga o GameRoom nele, o WS ja
+// encontra a partida rodando quando o jogador entra por `enter`.
+const manager = new RoomManager();
+const server = createHttpServer(manager);
+attachGameServer(server, { manager });
 
 server.listen(port, () => {
   // eslint-disable-next-line no-console

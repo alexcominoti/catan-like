@@ -13,8 +13,9 @@ import { eq } from 'drizzle-orm';
 import { getDb, user as userTable } from '@trevalis/db';
 import { getAuth, isUsernameTaken } from './auth.js';
 import { validateUsername } from './username.js';
-import { createRoom, getRoom, joinRoom, listOpenRooms, startRoom } from './rooms.js';
-import { getProfileStats } from './stats.js';
+import { buildRoomConfig, createRoom, getRoom, joinRoom, listOpenRooms, startRoom } from './rooms.js';
+import { getProfileStats, getPublicProfileByUsername } from './stats.js';
+import type { RoomManager } from './room.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -100,7 +101,11 @@ async function serveFile(res: ServerResponse, filePath: string): Promise<boolean
   }
 }
 
-async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function handleRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  manager: RoomManager,
+): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const path = decodeURIComponent(url.pathname);
 
@@ -207,6 +212,22 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     return;
   }
 
+  // --- perfil PÚBLICO por username (compartilhável via /profile/:username) ---
+  const profileMatch = /^\/api\/profile\/by-username\/([^/]+)$/.exec(path);
+  if (profileMatch && req.method === 'GET') {
+    if (!getAuth()) {
+      sendJson(res, 503, { error: 'Perfil indisponivel (sem banco configurado).' });
+      return;
+    }
+    const profile = await getPublicProfileByUsername(decodeURIComponent(profileMatch[1]!));
+    if (!profile) {
+      sendJson(res, 404, { error: 'Usuário não encontrado.' });
+      return;
+    }
+    sendJson(res, 200, profile);
+    return;
+  }
+
   // --- salas: listagem pública (não exige login para apenas navegar) ---
   if (path === '/api/rooms' && req.method === 'GET') {
     if (!getAuth()) {
@@ -291,6 +312,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         sendJson(res, result.httpStatus, { error: result.error });
         return;
       }
+      // Monta o RoomConfig final (host + bots + humanos ja sentados) e liga o
+      // motor autoritativo (GameRoom) na sala viva compartilhada com o WS.
+      const gameConfig = await buildRoomConfig(code);
+      if (gameConfig) manager.startGame(code, gameConfig);
       sendJson(res, 200, { room: result.room });
       return;
     }
@@ -317,10 +342,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   res.end('404 — recurso nao encontrado.');
 }
 
-/** Cria o servidor HTTP (sem ainda escutar). O caller chama `.listen()`. */
-export function createHttpServer(): Server {
+/**
+ * Cria o servidor HTTP (sem ainda escutar). O caller chama `.listen()`.
+ * `manager` e o MESMO RoomManager anexado ao WebSocket (index.ts) — a rota
+ * `/start` liga o motor autoritativo nele para quem entrar pelo WS ja encontrar
+ * a partida rodando.
+ */
+export function createHttpServer(manager: RoomManager): Server {
   return createServer((req, res) => {
-    handleRequest(req, res).catch((err) => {
+    handleRequest(req, res, manager).catch((err) => {
       // eslint-disable-next-line no-console
       console.error('[trevalis][http] erro nao tratado:', err);
       if (!res.headersSent) sendJson(res, 500, { error: 'Erro interno do servidor.' });

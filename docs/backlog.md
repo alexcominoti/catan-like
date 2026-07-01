@@ -77,28 +77,40 @@ real. Para cada item: **o que era**, **por que saiu** e **o que falta para volta
 
 ## Multiplayer / salas (refinos futuros)
 
-### Co-jogo ao vivo a partir da sala de espera
-- **O que existe:** a sala de espera (`/sala/<code>`) é a **camada de metadados** —
-  link único, "Copiar link", entrada via link com login obrigatório, "Sala cheia",
-  toggle de sala privada (salvo em `room.is_private`) e listagem real no lobby
-  (`GET /api/rooms`). A presença dos jogadores é atualizada por polling leve (4s).
-- **O que falta:** o início da partida ainda roda **local** (no cliente do anfitrião,
-  com bots preenchendo as vagas). Vários jogadores na **mesma** partida ao vivo ainda
-  não estão ligados.
-- **Para voltar/evoluir:** ligar o WebSocket já existente (`@trevalis/server` GameRoom /
-  `net/client.ts`) à sala de espera: ao "Começar partida", o servidor instancia a
-  `GameRoom` a partir de `room.config`, e cada jogador conectado recebe o estado
-  projetado (fog of war) em vez de simular localmente. Trocar o polling por broadcast
-  de presença pela conexão WS.
+### Co-jogo ao vivo, reconexão e bot-takeover — FEITO
+- **Rotas em inglês:** `/room/<code>` (sala em qualquer estado: espera/em partida/
+  finalizada — única URL do início ao fim) e `/profile/<username>` (compartilhável,
+  somente leitura para terceiros). `apps/web/src/site/RoomScreen.tsx` unifica "Monte
+  sua mesa" e a antiga "Sala de Espera" num único componente (sem navegação separada;
+  o link aparece na hora, no card do topo).
+- **Co-jogo ao vivo:** ao "Começar partida" (`POST /api/rooms/:code/start`), o servidor
+  monta o `RoomConfig` final (host + bots + humanos já sentados) e liga o `GameRoom`
+  autoritativo num `RoomManager` compartilhado entre HTTP e WS (`packages/server/src/
+  room.ts` + `server.ts`). `Game.tsx` ganhou um modo `online` (prop opcional): quando
+  presente, `dispatch` envia a ação pelo `GameClient` e o estado vem do servidor (fog
+  of war/espectador via `projectFor`/`projectForSpectator`) em vez de rodar `reduce`
+  localmente; loop de bots e timeout do cliente ficam desligados (o servidor manda).
+- **Reconexão por conta:** assentos são identificados por `userId` (login já é
+  obrigatório), não por um id de conexão efêmero — reabrir o link em outro
+  navegador/dispositivo reocupa o mesmo assento automaticamente.
+- **Bot-takeover com graça:** ao cair a conexão, `LiveRoom.disconnect()` agenda a
+  conversão em bot médio após `RECONNECT_GRACE_MS` (15s) — reconectar antes cancela.
+  Heartbeat ws ping/pong (10s) detecta quedas silenciosas. Indicador "🤖 assumiu" na UI
+  para assentos originalmente humanos hoje pilotados por bot (`awayColors`).
+- **Espectadores:** quem acessa `/room/<code>` de uma partida em andamento sem ser
+  membro entra como espectador (estado com TODAS as mãos ocultas, sem `dispatch`).
+- **Limpeza de sala vazia:** `RoomManager.sweep()` (a cada 30s) marca `abandoned`
+  salas sem nenhum humano conectado por 5 min (`EMPTY_ROOM_TTL_MS`) — o link passa a
+  404. Salas `finished` não são marcadas `abandoned` (o resultado continua acessível).
 
-### Persistência de partidas em andamento
+### Persistência de partidas em andamento — ainda pendente
 - **O que era / é:** o `GameState` vivo de uma sala fica só em memória no servidor.
-- **Por que importa:** um restart do servidor derruba partidas em andamento.
+- **Por que importa:** um restart do servidor derruba partidas em andamento (quem
+  tentar reconectar recebe "sala não encontrada" mesmo com o registro no banco).
 - **Para voltar/evoluir:** persistir o estado (ou o log de ações para replay
   determinístico) das salas `in_progress`, permitindo retomar após restart.
 
-### Reconexão à sala online e presença ao vivo
-- **O que falta:** reconexão suave à sala de espera/partida após queda, e indicador de
-  presença ao vivo (quem está conectado) sem polling.
-- **Para voltar/evoluir:** broadcast de presença pela conexão WS e fluxo de reconexão
-  por sessão/sala.
+### Gravação de partidas/estatísticas — ainda pendente
+- **O que falta:** `match`/`match_player`/`player_stats` continuam sem escrita — o
+  perfil mostra stats zeradas mesmo após partidas online reais. Ao detectar
+  `state.phase === 'ended'`, gravar o resultado nessas tabelas.

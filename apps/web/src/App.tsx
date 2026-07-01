@@ -1,33 +1,43 @@
 import { useEffect, useState } from 'react';
-import { Lobby, type GameConfig, type GameSetup } from './ui/Lobby.js';
-import { randomSeed } from './game/seed.js';
 import { Game } from './Game.js';
+import type { GameConfig, GameSetup } from './game/config.js';
+import { randomSeed } from './game/seed.js';
 import { SiteHeader, type Page } from './site/SiteHeader.js';
 import { Landing } from './site/Landing.js';
 import { RoomBrowser } from './site/RoomBrowser.js';
 import { Profile } from './site/Profile.js';
 import { Auth } from './site/Auth.js';
-import { WaitingRoom } from './site/WaitingRoom.js';
+import { RoomScreen } from './site/RoomScreen.js';
 
-/** Código da sala em `/sala/<code>` (ou null se não é um link de sala). */
+/** Código da sala em `/room/<code>` (ou null se não é um link de sala). */
 function roomCodeFromPath(): string | null {
   if (typeof window === 'undefined') return null;
-  const m = /^\/sala\/([A-Za-z0-9]{4,12})\/?$/.exec(window.location.pathname);
+  const m = /^\/room\/([A-Za-z0-9]{4,12})\/?$/.exec(window.location.pathname);
   return m ? m[1]!.toUpperCase() : null;
 }
 
-/** Deep-link inicial: link de redefinicao de senha, link de sala, ou landing. */
+/** Username em `/profile/<username>` (ou null se não é um link de perfil). */
+function profileUsernameFromPath(): string | null {
+  if (typeof window === 'undefined') return null;
+  const m = /^\/profile\/([^/]+)\/?$/.exec(window.location.pathname);
+  return m ? decodeURIComponent(m[1]!) : null;
+}
+
+/** Deep-link inicial: link de redefinicao de senha, link de sala, link de perfil, ou landing. */
 function initialPage(): Page {
   if (typeof window === 'undefined') return 'landing';
   if (window.location.pathname.startsWith('/reset-password')) return 'auth';
   if (roomCodeFromPath()) return 'room';
+  if (profileUsernameFromPath()) return 'profile';
   return 'landing';
 }
 
 /** Sincroniza a barra de endereços com a página atual (link compartilhável). */
-function syncUrl(page: Page, roomCode: string | null) {
+function syncUrl(page: Page, roomCode: string | null, profileUsername: string | null) {
   if (typeof window === 'undefined') return;
-  const target = page === 'room' && roomCode ? `/sala/${roomCode}` : '/';
+  let target = '/';
+  if (page === 'room' && roomCode) target = `/room/${roomCode}`;
+  else if (page === 'profile' && profileUsername) target = `/profile/${encodeURIComponent(profileUsername)}`;
   if (window.location.pathname !== target) {
     window.history.pushState({}, '', target);
   }
@@ -37,16 +47,23 @@ export function App() {
   const [page, setPage] = useState<Page>(initialPage);
   const [config, setConfig] = useState<GameConfig | null>(null);
   const [roomCode, setRoomCode] = useState<string | null>(roomCodeFromPath);
+  const [profileUsername, setProfileUsername] = useState<string | null>(profileUsernameFromPath);
   // Sala pendente: se o usuário precisar logar para entrar, voltamos a ela depois.
   const [pendingRoom, setPendingRoom] = useState<string | null>(roomCodeFromPath);
+  // A partida ao vivo (online) ocupa a tela inteira, sem o header — como o hotseat local.
+  const [roomFullscreen, setRoomFullscreen] = useState(false);
 
   // Botões voltar/avançar do navegador: relê a URL.
   useEffect(() => {
     function onPop() {
       const code = roomCodeFromPath();
+      const username = profileUsernameFromPath();
       if (code) {
         setRoomCode(code);
         setPage('room');
+      } else if (username) {
+        setProfileUsername(username);
+        setPage('profile');
       } else if (window.location.pathname.startsWith('/reset-password')) {
         setPage('auth');
       } else {
@@ -58,56 +75,54 @@ export function App() {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
-  /** Navegação central: troca de página e mantém a URL coerente. */
-  function nav(p: Page, code: string | null = null) {
-    setRoomCode(code);
+  /** Navegação central: troca de página e mantém a URL coerente. `param` = código da sala ou username, conforme a página. */
+  function nav(p: Page, param: string | null = null) {
+    const nextRoomCode = p === 'room' ? param : null;
+    const nextProfileUsername = p === 'profile' ? param : null;
+    setRoomCode(nextRoomCode);
+    setProfileUsername(nextProfileUsername);
     setPage(p);
-    syncUrl(p, code);
+    syncUrl(p, nextRoomCode, nextProfileUsername);
   }
 
   function enterRoom(code: string) {
     nav('room', code);
   }
 
-  // O jogo ocupa a tela inteira (sem o header do site).
+  // O jogo local (hotseat/bots) ocupa a tela inteira (sem o header do site).
   if (page === 'game' && config) {
     return <Game key={config.seed} config={config} onExit={() => { setConfig(null); nav('lobby'); }} />;
   }
 
+  // A sala ao vivo (online) tambem some com o header quando esta em tela cheia —
+  // mas o RoomScreen fica montado continuamente (sem isso, a troca perderia a conexao WS).
+  const roomIsFullscreen = page === 'room' && roomFullscreen;
+
   return (
-    <div className="site">
-      <SiteHeader page={page} onNav={(p) => nav(p)} />
+    <div className={`site${roomIsFullscreen ? ' site-fullscreen' : ''}`}>
+      {!roomIsFullscreen && <SiteHeader page={page} onNav={(p, param) => nav(p, param ?? null)} />}
       {page === 'landing' && <Landing onPlay={() => nav('lobby')} onWatch={() => nav('lobby')} />}
       {page === 'lobby' && (
         <RoomBrowser
-          onCreate={() => nav('setup')}
+          onCreate={() => nav('room')}
           onEnterRoom={enterRoom}
           onNeedAuth={() => nav('auth')}
         />
       )}
-      {page === 'setup' && (
-        <Lobby
+      {page === 'room' && (
+        <RoomScreen
+          code={roomCode}
+          onRoomCreated={enterRoom}
           onStartLocal={(setup: GameSetup) => {
             setConfig({ ...setup, seed: setup.seed ?? randomSeed() });
             nav('game');
           }}
-          onRoomCreated={(code, setup) => {
-            setConfig({ ...setup, seed: setup.seed ?? randomSeed() });
-            enterRoom(code);
-          }}
-          onBack={() => nav('lobby')}
-        />
-      )}
-      {page === 'room' && roomCode && (
-        <WaitingRoom
-          code={roomCode}
-          localConfig={config}
-          onStartGame={(cfg) => { setConfig(cfg); nav('game'); }}
           onLeave={() => nav('lobby')}
           onNeedAuth={() => { setPendingRoom(roomCode); nav('auth'); }}
+          onFullscreenChange={setRoomFullscreen}
         />
       )}
-      {page === 'profile' && <Profile />}
+      {page === 'profile' && <Profile username={profileUsername ?? undefined} onOwnUsername={(u) => setProfileUsername(u)} />}
       {page === 'auth' && (
         <Auth onAuthed={() => (pendingRoom ? enterRoom(pendingRoom) : nav('lobby'))} />
       )}

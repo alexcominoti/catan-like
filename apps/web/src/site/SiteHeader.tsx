@@ -1,11 +1,12 @@
 import { Hexagon } from 'lucide-react';
 import { authClient } from '../auth/client.js';
 
-export type Page = 'landing' | 'lobby' | 'setup' | 'game' | 'profile' | 'auth' | 'room';
+export type Page = 'landing' | 'lobby' | 'room' | 'game' | 'profile' | 'auth';
 
-export function SiteHeader({ page, onNav }: { page: Page; onNav: (p: Page) => void }) {
+export function SiteHeader({ page, onNav }: { page: Page; onNav: (p: Page, param?: string) => void }) {
   const { data: session } = authClient.useSession();
-  const user = session?.user;
+  const user = session?.user as (NonNullable<typeof session>['user'] & { username?: string | null }) | undefined;
+  const ownUsername = user?.username ?? user?.name;
 
   return (
     <header className="site-header">
@@ -14,13 +15,13 @@ export function SiteHeader({ page, onNav }: { page: Page; onNav: (p: Page) => vo
       </button>
       <nav className="site-nav">
         <button className={page === 'lobby' ? 'on' : ''} onClick={() => onNav('lobby')}>Lobby</button>
-        <button className={page === 'setup' ? 'on' : ''} onClick={() => onNav('setup')}>Jogar</button>
-        <button className={page === 'profile' ? 'on' : ''} onClick={() => onNav('profile')}>Perfil</button>
+        <button className={page === 'room' ? 'on' : ''} onClick={() => onNav('room')}>Jogar</button>
+        <button className={page === 'profile' ? 'on' : ''} onClick={() => onNav('profile', ownUsername)}>Perfil</button>
       </nav>
       <div className="site-actions">
         {user ? (
           <>
-            <button className="ghost" onClick={() => onNav('profile')}>{user.name ?? user.email}</button>
+            <button className="ghost" onClick={() => onNav('profile', ownUsername)}>{user.name ?? user.email}</button>
             <button className="cta" onClick={() => void authClient.signOut()}>Sair</button>
           </>
         ) : (

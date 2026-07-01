@@ -3,7 +3,7 @@
  *
  * O `GameState` vivo continua só na memória do servidor (GameRoom/WS). Aqui só
  * gravamos os metadados que precisam sobreviver entre requisições HTTP: listagem
- * pública do lobby e o ciclo do link único `/sala/<code>`.
+ * pública do lobby e o ciclo do link único `/room/<code>`.
  *
  * O arquivo é dividido em:
  *  1. NÚCLEO PURO (sem I/O) — regras testáveis: geração de código, escolha de
@@ -20,6 +20,7 @@ import {
   type Db,
 } from '@trevalis/db';
 import { PLAYER_COLORS, type PlayerColor } from '@trevalis/engine';
+import type { Pace, RoomConfig } from './protocol.js';
 
 /* ------------------------------------------------------------------ */
 /* 1. Núcleo puro (testável, sem banco)                                */
@@ -31,7 +32,7 @@ export type RoomStatus = 'waiting' | 'in_progress' | 'finished' | 'abandoned';
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sem I/O/0/1 (ambíguos)
 const CODE_LEN = 6;
 
-/** Gera um código curto p/ o link (`/sala/<code>`). `rand` injetável p/ testes. */
+/** Gera um código curto p/ o link (`/room/<code>`). `rand` injetável p/ testes. */
 export function makeRoomCode(rand: () => number = Math.random): string {
   let out = '';
   for (let i = 0; i < CODE_LEN; i++) {
@@ -213,11 +214,17 @@ export async function listOpenRooms(): Promise<RoomListItem[]> {
   }));
 }
 
-/** Detalhes de uma sala pelo código (ou null). `viewerId` define `isHost`. */
+/** Cores ja reservadas para bots na config congelada na criacao (nao entram em room_player). */
+function botColorsOf(config: unknown): PlayerColor[] {
+  const bots = (config as { bots?: unknown } | null)?.bots;
+  return Array.isArray(bots) ? (bots as PlayerColor[]) : [];
+}
+
+/** Detalhes de uma sala pelo código (ou null — inclui salas 'abandoned': o link fica invalidado). */
 export async function getRoom(code: string, viewerId?: string): Promise<RoomView | null> {
   const db = getDb();
   const [r] = await db.select().from(roomTable).where(eq(roomTable.code, code)).limit(1);
-  if (!r) return null;
+  if (!r || r.status === 'abandoned') return null;
   return {
     code: r.code,
     name: r.name,
@@ -242,16 +249,18 @@ export type JoinResult =
 export async function joinRoom(code: string, userId: string): Promise<JoinResult> {
   const db = getDb();
   const [r] = await db.select().from(roomTable).where(eq(roomTable.code, code)).limit(1);
-  if (!r) return { ok: false, error: 'Sala não encontrada.', httpStatus: 404 };
+  if (!r || r.status === 'abandoned') return { ok: false, error: 'Sala não encontrada.', httpStatus: 404 };
 
   const seats = await db
     .select({ userId: roomPlayerTable.userId, color: roomPlayerTable.color })
     .from(roomPlayerTable)
     .where(eq(roomPlayerTable.roomId, r.id));
   const alreadyMember = seats.some((s) => s.userId === userId);
+  // Cores ja reservadas para bots (config congelada na criacao) contam como assento ocupado.
+  const botColors = botColorsOf(r.config);
 
   const decision = decideJoin(
-    { status: r.status as RoomStatus, current: seats.length, max: r.maxPlayers },
+    { status: r.status as RoomStatus, current: seats.length + botColors.length, max: r.maxPlayers },
     alreadyMember,
   );
   if (!decision.ok) {
@@ -259,7 +268,8 @@ export async function joinRoom(code: string, userId: string): Promise<JoinResult
   }
 
   if (!alreadyMember) {
-    const seat = nextSeat(seats.map((s) => s.color as PlayerColor));
+    const usedColors = [...seats.map((s) => s.color as PlayerColor), ...botColors];
+    const seat = nextSeat(usedColors);
     if (!seat) return { ok: false, error: 'Sala cheia.', httpStatus: 409 };
     await db.insert(roomPlayerTable).values({
       roomId: r.id,
@@ -278,9 +288,12 @@ export async function joinRoom(code: string, userId: string): Promise<JoinResult
 export async function startRoom(code: string, hostUserId: string): Promise<JoinResult> {
   const db = getDb();
   const [r] = await db.select().from(roomTable).where(eq(roomTable.code, code)).limit(1);
-  if (!r) return { ok: false, error: 'Sala não encontrada.', httpStatus: 404 };
+  if (!r || r.status === 'abandoned') return { ok: false, error: 'Sala não encontrada.', httpStatus: 404 };
   if (r.hostUserId !== hostUserId) {
     return { ok: false, error: 'Apenas o anfitrião pode iniciar.', httpStatus: 403 };
+  }
+  if (r.status !== 'waiting') {
+    return { ok: false, error: 'A partida já começou.', httpStatus: 409 };
   }
   await db
     .update(roomTable)
@@ -288,4 +301,100 @@ export async function startRoom(code: string, hostUserId: string): Promise<JoinR
     .where(eq(roomTable.id, r.id));
   const room = await getRoom(code, hostUserId);
   return { ok: true, room: room! };
+}
+
+/** Assentos humanos de uma sala (userId + cor), em ordem de assento — usado ao montar o RoomConfig final. */
+export async function getSeatedPlayers(
+  code: string,
+): Promise<{ userId: string; color: PlayerColor; username: string }[]> {
+  const db = getDb();
+  const [r] = await db.select().from(roomTable).where(eq(roomTable.code, code)).limit(1);
+  if (!r) return [];
+  const rows = await db
+    .select({
+      userId: roomPlayerTable.userId,
+      color: roomPlayerTable.color,
+      username: sql<string>`coalesce(${userTable.username}, ${userTable.name})`,
+      seatIndex: roomPlayerTable.seatIndex,
+    })
+    .from(roomPlayerTable)
+    .innerJoin(userTable, eq(userTable.id, roomPlayerTable.userId))
+    .where(eq(roomPlayerTable.roomId, r.id))
+    .orderBy(asc(roomPlayerTable.seatIndex));
+  return rows.map((row) => ({ userId: row.userId, color: row.color as PlayerColor, username: row.username }));
+}
+
+/** Configuracao bruta (jsonb) gravada na criacao da sala — usada para montar o RoomConfig final ao iniciar. */
+export async function getRoomConfig(code: string): Promise<Record<string, unknown> | null> {
+  const db = getDb();
+  const [r] = await db.select({ config: roomTable.config }).from(roomTable).where(eq(roomTable.code, code)).limit(1);
+  return (r?.config as Record<string, unknown> | undefined) ?? null;
+}
+
+/**
+ * Marca a sala como encerrada (fim de partida real, nao abandono): status
+ * 'finished' + `finishedAt`. A sala continua acessivel pelo link (revisao do
+ * resultado) ate a limpeza de sala vazia remove-la da memoria (o registro no
+ * banco permanece).
+ */
+export async function finishRoom(code: string): Promise<void> {
+  const db = getDb();
+  await db
+    .update(roomTable)
+    .set({ status: 'finished', finishedAt: new Date() })
+    .where(and(eq(roomTable.code, code), eq(roomTable.status, 'in_progress')));
+}
+
+/**
+ * Sala esvaziada por 5 min sem nenhum humano conectado (item 6): se ainda nao
+ * tinha terminado, marca 'abandoned' (invalida o link). Uma sala ja 'finished'
+ * NAO e regravada — o resultado continua acessivel via metadados no banco.
+ */
+export async function abandonIfNotFinished(code: string): Promise<void> {
+  const db = getDb();
+  await db
+    .update(roomTable)
+    .set({ status: 'abandoned' })
+    .where(and(eq(roomTable.code, code), sql`${roomTable.status} in ('waiting', 'in_progress')`));
+}
+
+/**
+ * Monta o `RoomConfig` FINAL (para o motor autoritativo) a partir da config
+ * congelada na criacao + de quem realmente entrou pelo link ate agora: humanos
+ * vem de `room_player` (userId + username atual); bots vem da config original
+ * (cor + nome + dificuldade escolhidos pelo anfitriao). Vagas nunca ocupadas
+ * simplesmente nao entram na partida (mesmo comportamento do modo local).
+ * `null` se a sala nao existe ou nao tem config gravada.
+ */
+export async function buildRoomConfig(code: string): Promise<RoomConfig | null> {
+  const raw = await getRoomConfig(code);
+  if (!raw) return null;
+
+  const botColors = botColorsOf(raw);
+  const rawPlayers = Array.isArray(raw.players)
+    ? (raw.players as { color: PlayerColor; name: string }[])
+    : [];
+  const seated = await getSeatedPlayers(code);
+
+  const humanEntries = seated.map((s) => ({ color: s.color, name: s.username, userId: s.userId }));
+  const botEntries = rawPlayers
+    .filter((p) => botColors.includes(p.color))
+    .map((p) => ({ color: p.color, name: p.name }));
+
+  const seed = typeof raw.seed === 'number' ? raw.seed : Math.floor(Math.random() * 2 ** 31);
+  const botDifficulty = (raw.botDifficulty ?? {}) as RoomConfig['botDifficulty'];
+
+  return {
+    seed,
+    boardLayout: (raw.boardLayout as RoomConfig['boardLayout']) ?? 'standard',
+    pace: (raw.pace as Pace) ?? 'normal',
+    players: [...humanEntries, ...botEntries],
+    bots: botColors,
+    botDifficulty,
+    numberLayout: (raw.numberLayout as RoomConfig['numberLayout']) ?? 'balanced',
+    desert: (raw.desert as RoomConfig['desert']) ?? 'random',
+    pointsToWin: typeof raw.pointsToWin === 'number' ? raw.pointsToWin : 10,
+    discardLimit: typeof raw.discardLimit === 'number' ? raw.discardLimit : 7,
+    friendlyRobber: raw.friendlyRobber === true,
+  };
 }

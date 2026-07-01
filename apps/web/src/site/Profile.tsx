@@ -41,50 +41,96 @@ function relativeTime(iso: string | null): string {
   return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
 }
 
-export function Profile() {
+/**
+ * Perfil: SEM `username` = o próprio (sessão + edição); COM `username` = visita
+ * pública de terceiro (compartilhável via `/profile/:username`, somente leitura).
+ * `onOwnUsername` sincroniza a URL do App assim que o próprio username resolve
+ * (útil quando "Perfil" é clicado antes da sessão carregar).
+ */
+export function Profile({ username, onOwnUsername }: { username?: string; onOwnUsername?: (u: string) => void }) {
+  const isOwn = username == null;
   const { data: session } = authClient.useSession();
   const u = session?.user as
     | (NonNullable<typeof session>['user'] & { username?: string | null; usernameChanged?: boolean | null })
     | undefined;
 
-  // Username (e cota de troca) com override local, pois o cache de sessão pode
-  // demorar a refletir a troca recém-feita.
-  const [username, setUsername] = useState<string>('');
+  // Username PRÓPRIO (e cota de troca) com override local, pois o cache de
+  // sessão pode demorar a refletir a troca recém-feita.
+  const [ownUsername, setOwnUsername] = useState<string>('');
   const [changed, setChanged] = useState(false);
   const [editing, setEditing] = useState(false);
 
   useEffect(() => {
-    if (u) {
-      setUsername(u.username ?? u.name ?? '');
-      setChanged(Boolean(u.usernameChanged));
-    }
-  }, [u?.username, u?.name, u?.usernameChanged]);
+    if (!isOwn || !u) return;
+    const resolved = u.username ?? u.name ?? '';
+    setOwnUsername(resolved);
+    setChanged(Boolean(u.usernameChanged));
+    if (resolved) onOwnUsername?.(resolved);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOwn, u?.username, u?.name, u?.usernameChanged]);
 
-  // Estatísticas reais (vazias enquanto não há partidas persistidas).
-  const [stats, setStats] = useState<ProfileStats | null>(null);
+  // Estatísticas do PRÓPRIO perfil (vazias enquanto não há partidas persistidas).
+  const [ownStats, setOwnStats] = useState<ProfileStats | null>(null);
   useEffect(() => {
-    if (!u) return;
+    if (!isOwn || !u) return;
     let alive = true;
     void fetch('/api/profile/stats')
       .then((r) => (r.ok ? r.json() : null))
       .then((data: ProfileStats | null) => {
-        if (alive && data) setStats(data);
+        if (alive && data) setOwnStats(data);
       })
       .catch(() => {});
     return () => {
       alive = false;
     };
-  }, [u?.id]);
+  }, [isOwn, u?.id]);
+
+  // Perfil PÚBLICO de terceiro — busca sem exigir login.
+  const [publicProfile, setPublicProfile] = useState<{ username: string; stats: ProfileStats } | null>(null);
+  const [publicError, setPublicError] = useState<string | null>(null);
+  useEffect(() => {
+    if (isOwn || !username) return;
+    let alive = true;
+    setPublicProfile(null);
+    setPublicError(null);
+    void fetch(`/api/profile/by-username/${encodeURIComponent(username)}`)
+      .then(async (r) => {
+        const data = (await r.json().catch(() => ({}))) as { username?: string; stats?: ProfileStats; error?: string };
+        if (!r.ok) throw new Error(data.error ?? 'Usuário não encontrado.');
+        return data as { username: string; stats: ProfileStats };
+      })
+      .then((data) => {
+        if (alive) setPublicProfile(data);
+      })
+      .catch((err) => {
+        if (alive) setPublicError(err instanceof Error ? err.message : 'Erro inesperado.');
+      });
+    return () => {
+      alive = false;
+    };
+  }, [isOwn, username]);
+
+  const stats = isOwn ? ownStats : (publicProfile?.stats ?? null);
 
   const winRate =
     stats && stats.gamesPlayed > 0 ? Math.round((stats.gamesWon / stats.gamesPlayed) * 100) : 0;
   const losses = stats ? stats.gamesPlayed - stats.gamesWon : 0;
 
-  const display = username || 'jogador';
+  const display = isOwn ? (ownUsername || 'jogador') : (publicProfile?.username ?? username ?? 'jogador');
   const initial = display.charAt(0).toUpperCase();
-  const joined = u?.createdAt
+  const joined = isOwn && u?.createdAt
     ? new Date(u.createdAt).toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' })
     : null;
+
+  if (!isOwn && publicError) {
+    return (
+      <div className="page">
+        <div className="card wr-gate">
+          <h2>{publicError}</h2>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="page profile">
@@ -102,9 +148,11 @@ export function Profile() {
           </h1>
           <span className="muted-note">{joined ? `Entrou em ${joined}` : 'Trevalis'}</span>
         </div>
-        <button className="ghost" onClick={() => setEditing(true)} disabled={!u}>
-          <Settings size={15} /> Editar perfil
-        </button>
+        {isOwn && (
+          <button className="ghost" onClick={() => setEditing(true)} disabled={!u}>
+            <Settings size={15} /> Editar perfil
+          </button>
+        )}
       </div>
 
       <div className="stat-row">
@@ -164,13 +212,13 @@ export function Profile() {
         </div>
       </div>
 
-      {editing && u && (
+      {isOwn && editing && u && (
         <EditUsernameModal
-          current={username}
+          current={ownUsername}
           alreadyChanged={changed}
           onClose={() => setEditing(false)}
           onSaved={(name) => {
-            setUsername(name);
+            setOwnUsername(name);
             setChanged(true);
             setEditing(false);
           }}

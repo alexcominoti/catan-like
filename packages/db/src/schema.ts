@@ -241,7 +241,7 @@ export const room = pgTable(
   'room',
   {
     id: text('id').primaryKey(),
-    code: text('code').notNull(), // id curto do link (/sala/<code>)
+    code: text('code').notNull(), // id curto do link (/room/<code>)
     name: text('name').notNull(),
     hostUserId: text('host_user_id')
       .notNull()

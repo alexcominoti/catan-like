@@ -1,35 +1,23 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  Copy, Check, Crown, Lock, Play, ArrowLeft, Users, Bot, Dices, Target, Shield,
+  Shuffle, UserPlus, X, Link as LinkIcon,
+} from 'lucide-react';
 import { PLAYER_COLORS, type BoardLayout, type DesertPlacement, type NumberLayout, type PlayerColor } from '@trevalis/engine';
 import type { Difficulty } from '@trevalis/bot';
-import type { ReactNode } from 'react';
-import { Users, Bot, Dices, Target, Play, ArrowLeft, Shuffle, UserPlus, X, Crown, Shield, Lock, Link as LinkIcon } from 'lucide-react';
+import { authClient } from '../auth/client.js';
 import { PLAYER_FILL, PLAYER_LABEL } from '../game/theme.js';
 import { pickBotName } from '../game/botNames.js';
-import { authClient } from '../auth/client.js';
-import { createRoomApi } from '../site/rooms.js';
+import type { GameConfig, GameSetup, Pace } from '../game/config.js';
+import { Game, type OnlineGameProps } from '../Game.js';
+import { GameClient } from '../net/client.js';
+import { createRoomApi, getRoomApi, joinRoomApi, roomLink, startRoomApi, type RoomView } from './rooms.js';
 
-/** Ritmo da partida (limite de tempo das ações; aplicado no jogo online). */
-export type Pace = 'fast' | 'normal';
-
-export interface GameConfig {
-  players: { color: PlayerColor; name: string }[];
-  bots: PlayerColor[];
-  botDifficulty: Record<PlayerColor, Difficulty>;
-  seed: number;
-  boardLayout: BoardLayout;
-  pace: Pace;
-  numberLayout: NumberLayout;
-  desert: DesertPlacement;
-  pointsToWin: number;
-  discardLimit: number;
-  friendlyRobber: boolean;
-}
-
-/**
- * O que o lobby devolve: igual ao GameConfig, mas a seed pode vir NULL (= aleatoria).
- * Quem inicia o jogo (App) resolve a seed aleatoria via crypto — fora do lobby.
- */
-export type GameSetup = Omit<GameConfig, 'seed'> & { seed: number | null };
+const MAP_LABEL: Record<string, string> = {
+  standard: 'Clássico (3–4)',
+  large: 'Grande (5–6)',
+  huge: 'Enorme (7–8)',
+};
 
 /** Crests por cor (mesmos do jogo) para a UI ficar coerente. */
 const CREST: Record<PlayerColor, string> = { red: '👑', blue: '🌿', white: '⚒️', orange: '🪓', green: '🍀', brown: '🐗', purple: '🔮', pink: '🌸' };
@@ -50,15 +38,58 @@ const initialSeats = (): Seat[] => [
   ...Array.from({ length: MAX_SEATS - 1 }, () => ({ type: 'open' }) as Seat),
 ];
 
-export function Lobby({
+/** URL do WebSocket na MESMA origem (dev: Vite faz proxy de /ws -> :8080). */
+function wsUrl(): string {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${proto}//${window.location.host}/ws`;
+}
+
+/**
+ * Tela única de sala (itens 1-2 do backlog de rotas): "Monte sua mesa" (sem
+ * código ainda) e a sala em si (link + jogadores + partida) são o MESMO
+ * componente — criar a sala nunca troca de tela, só passa a mostrar o link.
+ * `code` vem da URL (`/room/:code`, sincronizada pelo App); `null` = ainda
+ * configurando.
+ */
+export function RoomScreen({
+  code,
+  onRoomCreated,
+  onStartLocal,
+  onLeave,
+  onNeedAuth,
+  onFullscreenChange,
+}: {
+  code: string | null;
+  /** Sala online criada (sem sair da tela) — o App sincroniza a URL para /room/CODE. */
+  onRoomCreated: (code: string) => void;
+  /** Jogo LOCAL imediato (hotseat/bots) — sem link, sem URL. */
+  onStartLocal: (cfg: GameSetup) => void;
+  onLeave: () => void;
+  onNeedAuth: () => void;
+  /** A partida em si ocupa a tela inteira (sem o header do site) — igual ao hotseat. */
+  onFullscreenChange: (fullscreen: boolean) => void;
+}) {
+  useEffect(() => {
+    if (!code) onFullscreenChange(false);
+  }, [code, onFullscreenChange]);
+
+  if (!code) {
+    return <RoomSetupForm onStartLocal={onStartLocal} onRoomCreated={onRoomCreated} onBack={onLeave} />;
+  }
+  return <RoomLive code={code} onLeave={onLeave} onNeedAuth={onNeedAuth} onFullscreenChange={onFullscreenChange} />;
+}
+
+/* ------------------------------------------------------------------ */
+/* 1. "Monte sua mesa" — sem código ainda                              */
+/* ------------------------------------------------------------------ */
+
+function RoomSetupForm({
   onStartLocal,
   onRoomCreated,
   onBack,
 }: {
-  /** Inicia um jogo LOCAL (hotseat/bots) imediatamente — não exige login. */
   onStartLocal: (cfg: GameSetup) => void;
-  /** Criou uma sala online (com link); vai para a sala de espera. */
-  onRoomCreated: (code: string, cfg: GameSetup) => void;
+  onRoomCreated: (code: string) => void;
   onBack?: () => void;
 }) {
   const { data: session } = authClient.useSession();
@@ -75,7 +106,6 @@ export function Lobby({
   const [friendlyRobber, setFriendlyRobber] = useState(false);
   const [pace, setPace] = useState<Pace>('normal');
   const [seedText, setSeedText] = useState('');
-  // Sala online (item 2): nome para a listagem + toggle privada.
   const [roomName, setRoomName] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -83,10 +113,8 @@ export function Lobby({
 
   const limit = MAPS.find((m) => m.key === mapKey)!.limit;
   const visible = seats.slice(0, limit);
-  // Jogadores ocupando assentos (anfitriao + bots), em qualquer assento.
   const occupants = seats.filter((s) => s.type !== 'open').length;
 
-  // Cada assento ocupado recebe uma cor na ORDEM de preenchimento (host, depois bots).
   const colorByIndex = useMemo(() => {
     const out: (PlayerColor | null)[] = [];
     let ci = 0;
@@ -95,7 +123,7 @@ export function Lobby({
   }, [visible]);
 
   const filledCount = colorByIndex.filter(Boolean).length;
-  const canStart = filledCount >= 1; // anfitriao sozinho ja vale (ate o limite do mapa)
+  const canStart = filledCount >= 1;
 
   function setSeat(i: number, s: Seat) {
     setSeats((prev) => {
@@ -114,11 +142,10 @@ export function Lobby({
     });
   }
 
-  /** Troca o mapa, compactando os jogadores para os primeiros assentos (cabem no novo limite). */
   function chooseMap(key: BoardLayout) {
     const newLimit = MAPS.find((m) => m.key === key)!.limit;
-    if (occupants > newLimit) return; // mapa menor que a lotacao atual: bloqueado
-    if (key !== 'standard') setDesert('random'); // "deserto no centro" so no 3-4
+    if (occupants > newLimit) return;
+    if (key !== 'standard') setDesert('random');
     setSeats((prev) => {
       const taken = prev.filter((s) => s.type !== 'open');
       const compact: Seat[] = [...taken];
@@ -128,9 +155,7 @@ export function Lobby({
     setMapKey(key);
   }
 
-  /** Monta o GameSetup a partir dos assentos/configurações atuais. */
   function buildSetup(): GameSetup {
-    // Seed digitada -> hash; vazia -> null (App gera uma seed cripto ao iniciar).
     const seed = seedText.trim() === '' ? null : hashSeed(seedText.trim());
     const players: { color: PlayerColor; name: string }[] = [];
     const bots: PlayerColor[] = [];
@@ -153,13 +178,12 @@ export function Lobby({
     };
   }
 
-  /** Jogo LOCAL imediato (hotseat/bots) — sem login, sem link. */
   function startLocal() {
     if (!canStart) return;
     onStartLocal(buildSetup());
   }
 
-  /** Cria a sala ONLINE (gera link único) e vai para a sala de espera. */
+  /** Cria a sala ONLINE (gera link único) sem sair desta tela. */
   async function createOnline() {
     if (!canStart || creating) return;
     setCreating(true);
@@ -177,7 +201,7 @@ export function Lobby({
       setCreateError(res.error);
       return;
     }
-    onRoomCreated(res.room.code, setup);
+    onRoomCreated(res.room.code);
   }
 
   return (
@@ -355,4 +379,273 @@ function hashSeed(s: string): number {
     h = Math.imul(h, 16777619);
   }
   return h >>> 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* 2. Sala com código: link + jogadores (espera) + partida ao vivo      */
+/* ------------------------------------------------------------------ */
+
+/** Instantâneo online mantido pelo RoomLive a partir das mensagens do GameClient. */
+interface LiveSnapshot {
+  viewerColor: PlayerColor | null;
+  bots: PlayerColor[];
+  awayColors: PlayerColor[];
+  deadlineSeconds: number | null;
+  state: import('@trevalis/engine').GameState | null;
+  events: import('@trevalis/engine').GameEvent[];
+  seq: number;
+  error: string | null;
+  errorSeq: number;
+}
+
+function RoomLive({
+  code,
+  onLeave,
+  onNeedAuth,
+  onFullscreenChange,
+}: {
+  code: string;
+  onLeave: () => void;
+  onNeedAuth: () => void;
+  onFullscreenChange: (fullscreen: boolean) => void;
+}) {
+  const { data: session, isPending } = authClient.useSession();
+  const user = session?.user;
+
+  const [room, setRoom] = useState<RoomView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const joinedRef = useRef(false);
+
+  // Entrada (idempotente) ao montar, quando autenticado.
+  useEffect(() => {
+    if (!user || joinedRef.current) return;
+    joinedRef.current = true;
+    void joinRoomApi(code).then((r) => {
+      if (r.ok) setRoom(r.room);
+      else setError(r.error);
+    });
+  }, [user, code]);
+
+  // Atualiza a lista de jogadores periodicamente (presença "quase ao vivo")
+  // enquanto a sala ainda aguarda — reflete em tempo real quem entrou pelo link.
+  useEffect(() => {
+    if (!user || error || room?.status !== 'waiting') return;
+    const id = setInterval(() => {
+      void getRoomApi(code).then((r) => {
+        if (r.ok) setRoom(r.room);
+        else setError(r.error);
+      });
+    }, 4000);
+    return () => clearInterval(id);
+  }, [user, code, error, room?.status]);
+
+  function copy() {
+    void navigator.clipboard?.writeText(roomLink(code)).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    });
+  }
+
+  async function start() {
+    setStarting(true);
+    const res = await startRoomApi(code);
+    setStarting(false);
+    if (res.ok) setRoom(res.room); // status agora 'in_progress' -> conecta o WS abaixo
+    else setError(res.error);
+  }
+
+  /* ---- WebSocket: liga quando a sala esta em andamento/finalizada ---- */
+  const live = room?.status === 'in_progress' || room?.status === 'finished';
+  const [online, setOnline] = useState<LiveSnapshot | null>(null);
+  const [wsDisconnected, setWsDisconnected] = useState(false);
+  const clientRef = useRef<GameClient | null>(null);
+
+  useEffect(() => {
+    if (!live) return;
+    const client = new GameClient();
+    clientRef.current = client;
+    let seq = 0;
+    let errorSeq = 0;
+
+    client.onJoined = (_code, color, bots) => {
+      setOnline((prev) => ({
+        viewerColor: color,
+        bots,
+        awayColors: prev?.awayColors ?? [],
+        deadlineSeconds: prev?.deadlineSeconds ?? null,
+        state: prev?.state ?? null,
+        events: [],
+        seq: prev?.seq ?? 0,
+        error: prev?.error ?? null,
+        errorSeq: prev?.errorSeq ?? 0,
+      }));
+    };
+    client.onState = (state, awayColors, deadlineSeconds, events) => {
+      seq += 1;
+      setOnline((prev) => ({
+        viewerColor: prev?.viewerColor ?? null,
+        bots: prev?.bots ?? [],
+        awayColors,
+        deadlineSeconds,
+        state,
+        events,
+        seq,
+        error: prev?.error ?? null,
+        errorSeq: prev?.errorSeq ?? 0,
+      }));
+    };
+    client.onError = (err) => {
+      errorSeq += 1;
+      setOnline((prev) =>
+        prev && { ...prev, error: err, errorSeq },
+      );
+    };
+    client.onDisconnected = () => setWsDisconnected(true);
+    client.onReconnected = () => setWsDisconnected(false);
+
+    void client.connect(wsUrl()).then(() => client.enter(code));
+
+    return () => {
+      client.close();
+      clientRef.current = null;
+      setOnline(null);
+    };
+  }, [live, code]);
+
+  useEffect(() => {
+    onFullscreenChange(live === true && online?.state != null);
+    return () => onFullscreenChange(false);
+  }, [live, online?.state, onFullscreenChange]);
+
+  function exitGame() {
+    clientRef.current?.close();
+    onLeave();
+  }
+
+  // --- estados de borda ---
+  if (isPending) {
+    return <div className="page"><p className="muted-note">Carregando…</p></div>;
+  }
+  if (!user) {
+    return (
+      <div className="page">
+        <div className="card wr-gate">
+          <Lock size={26} className="ic-primary" />
+          <h2>Entre para acessar a sala</h2>
+          <p className="muted-note">Você precisa de uma conta para entrar em uma sala.</p>
+          <button className="cta" onClick={onNeedAuth}>Entrar / criar conta</button>
+        </div>
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="page">
+        <div className="card wr-gate">
+          <h2>{error}</h2>
+          <button className="ghost" onClick={onLeave}><ArrowLeft size={15} /> Voltar ao lobby</button>
+        </div>
+      </div>
+    );
+  }
+  if (!room) {
+    return <div className="page"><p className="muted-note">Entrando na sala…</p></div>;
+  }
+
+  // Partida em andamento/finalizada: joga (ou assiste, se nao sou jogador) em tela cheia.
+  if (live) {
+    if (!online?.state) {
+      return <div className="page"><p className="muted-note">Conectando à partida…</p></div>;
+    }
+    const gameConfig: GameConfig = {
+      players: online.state.players.map((p) => ({ color: p.color, name: p.name })),
+      bots: online.bots,
+      botDifficulty: {} as GameConfig['botDifficulty'],
+      seed: 0,
+      boardLayout: (room.boardLayout as BoardLayout) ?? 'standard',
+      pace: 'normal',
+      numberLayout: 'balanced',
+      desert: 'random',
+      pointsToWin: online.state.victoryTarget,
+      discardLimit: online.state.discardLimit,
+      friendlyRobber: online.state.friendlyRobber,
+    };
+    return (
+      <>
+        {wsDisconnected && <div className="wr-reconnect-banner">Conexão perdida — reconectando…</div>}
+        <Game
+          config={gameConfig}
+          onExit={exitGame}
+          online={{
+            client: clientRef.current!,
+            viewerColor: online.viewerColor,
+            bots: online.bots,
+            awayColors: online.awayColors,
+            deadlineSeconds: online.deadlineSeconds,
+            state: online.state,
+            events: online.events,
+            seq: online.seq,
+            error: online.error,
+            errorSeq: online.errorSeq,
+          }}
+        />
+      </>
+    );
+  }
+
+  const canStart = room.isHost;
+
+  return (
+    <div className="page">
+      <div className="page-head">
+        <div>
+          <button className="back-link" onClick={onLeave}><ArrowLeft size={15} /> Voltar ao lobby</button>
+          <span className="eyebrow">SALA DE ESPERA</span>
+          <h1>{room.name} {room.isPrivate && <Lock size={18} className="ic-muted" />}</h1>
+        </div>
+      </div>
+
+      <div className="card wr-link">
+        <label>Link da sala — compartilhe para convidar</label>
+        <div className="wr-link-row">
+          <input readOnly value={roomLink(code)} onFocus={(e) => e.target.select()} />
+          <button className="cta" onClick={copy}>
+            {copied ? <><Check size={15} /> Copiado!</> : <><Copy size={15} /> Copiar link</>}
+          </button>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2 className="su-h">
+          <Users size={18} className="ic-primary" /> Jogadores
+          <span className="su-count">{room.players.length}/{room.maxPlayers}</span>
+        </h2>
+        <p className="muted-note">Mapa: {MAP_LABEL[room.boardLayout] ?? room.boardLayout}</p>
+        <div className="wr-players">
+          {room.players.map((p) => (
+            <div key={p.username} className="wr-player">
+              <span className="wr-dot" style={{ background: PLAYER_FILL[p.color as PlayerColor] }} title={PLAYER_LABEL[p.color as PlayerColor]} />
+              <b>{p.username}</b>
+              {p.isHost && <span className="su-tag host"><Crown size={12} /> Anfitrião</span>}
+            </div>
+          ))}
+          {Array.from({ length: Math.max(0, room.maxPlayers - room.players.length) }, (_, i) => (
+            <div key={`open-${i}`} className="wr-player open">
+              <span className="wr-dot empty" /> <em>Vaga aberta</em>
+            </div>
+          ))}
+        </div>
+
+        {canStart ? (
+          <button className="cta big" disabled={starting} onClick={start}>
+            <Play size={16} /> {starting ? 'Iniciando…' : 'Começar partida'}
+          </button>
+        ) : (
+          <p className="muted-note wr-wait">Aguardando o anfitrião iniciar a partida…</p>
+        )}
+      </div>
+    </div>
+  );
 }
