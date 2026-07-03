@@ -305,12 +305,12 @@ function moveBlocker(
       const stolen = pool[r.value]!;
       victim.hand[stolen] -= 1;
       getPlayer(next, by).hand[stolen] += 1;
-      events.push({ t: 'blockerMoved', hexId, stoleFrom: stealFrom, resource: stolen });
+      events.push({ t: 'blockerMoved', hexId, by, stoleFrom: stealFrom, resource: stolen });
     } else {
-      events.push({ t: 'blockerMoved', hexId });
+      events.push({ t: 'blockerMoved', hexId, by });
     }
   } else {
-    events.push({ t: 'blockerMoved', hexId });
+    events.push({ t: 'blockerMoved', hexId, by });
   }
 
   next.phase = next.returnPhaseAfterBlocker ?? 'main';

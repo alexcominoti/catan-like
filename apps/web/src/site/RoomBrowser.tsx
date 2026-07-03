@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Zap, Users, Lock, Plus, Globe, RefreshCw } from 'lucide-react';
 import { authClient } from '../auth/client.js';
 import { joinRoomApi, listRooms, type RoomListItem } from './rooms.js';
+import { LoginGate } from './LoginGate.js';
 
 const MAP_LABEL: Record<string, string> = {
   standard: 'Clássico (3–4)',
@@ -18,7 +19,7 @@ export function RoomBrowser({
   onEnterRoom: (code: string) => void;
   onNeedAuth: () => void;
 }) {
-  const { data: session } = authClient.useSession();
+  const { data: session, isPending } = authClient.useSession();
   const loggedIn = Boolean(session?.user);
 
   const [rooms, setRooms] = useState<RoomListItem[]>([]);
@@ -34,7 +35,24 @@ export function RoomBrowser({
     });
   }
 
-  useEffect(refresh, []);
+  // Só busca a listagem quando autenticado (a API do lobby exige sessão).
+  useEffect(() => {
+    if (loggedIn) refresh();
+  }, [loggedIn]);
+
+  // Lobby é rota protegida: sem sessão, redireciona ao login (a Home é a única pública).
+  if (isPending) {
+    return <div className="page"><p className="muted-note">Carregando…</p></div>;
+  }
+  if (!loggedIn) {
+    return (
+      <LoginGate
+        title="Entre para ver o lobby"
+        hint="Você precisa de uma conta para navegar e entrar em salas."
+        onNeedAuth={onNeedAuth}
+      />
+    );
+  }
 
   async function enter(code: string) {
     if (!loggedIn) {

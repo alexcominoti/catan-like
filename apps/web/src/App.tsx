@@ -1,7 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Game } from './Game.js';
-import type { GameConfig, GameSetup } from './game/config.js';
-import { randomSeed } from './game/seed.js';
 import { SiteHeader, type Page } from './site/SiteHeader.js';
 import { Landing } from './site/Landing.js';
 import { RoomBrowser } from './site/RoomBrowser.js';
@@ -45,12 +42,11 @@ function syncUrl(page: Page, roomCode: string | null, profileUsername: string | 
 
 export function App() {
   const [page, setPage] = useState<Page>(initialPage);
-  const [config, setConfig] = useState<GameConfig | null>(null);
   const [roomCode, setRoomCode] = useState<string | null>(roomCodeFromPath);
   const [profileUsername, setProfileUsername] = useState<string | null>(profileUsernameFromPath);
   // Sala pendente: se o usuário precisar logar para entrar, voltamos a ela depois.
   const [pendingRoom, setPendingRoom] = useState<string | null>(roomCodeFromPath);
-  // A partida ao vivo (online) ocupa a tela inteira, sem o header — como o hotseat local.
+  // A partida ao vivo (online) ocupa a tela inteira, sem o header do site.
   const [roomFullscreen, setRoomFullscreen] = useState(false);
 
   // Botões voltar/avançar do navegador: relê a URL.
@@ -89,11 +85,6 @@ export function App() {
     nav('room', code);
   }
 
-  // O jogo local (hotseat/bots) ocupa a tela inteira (sem o header do site).
-  if (page === 'game' && config) {
-    return <Game key={config.seed} config={config} onExit={() => { setConfig(null); nav('lobby'); }} />;
-  }
-
   // A sala ao vivo (online) tambem some com o header quando esta em tela cheia —
   // mas o RoomScreen fica montado continuamente (sem isso, a troca perderia a conexao WS).
   const roomIsFullscreen = page === 'room' && roomFullscreen;
@@ -113,16 +104,18 @@ export function App() {
         <RoomScreen
           code={roomCode}
           onRoomCreated={enterRoom}
-          onStartLocal={(setup: GameSetup) => {
-            setConfig({ ...setup, seed: setup.seed ?? randomSeed() });
-            nav('game');
-          }}
           onLeave={() => nav('lobby')}
           onNeedAuth={() => { setPendingRoom(roomCode); nav('auth'); }}
           onFullscreenChange={setRoomFullscreen}
         />
       )}
-      {page === 'profile' && <Profile username={profileUsername ?? undefined} onOwnUsername={(u) => setProfileUsername(u)} />}
+      {page === 'profile' && (
+        <Profile
+          username={profileUsername ?? undefined}
+          onOwnUsername={(u) => setProfileUsername(u)}
+          onNeedAuth={() => nav('auth')}
+        />
+      )}
       {page === 'auth' && (
         <Auth onAuthed={() => (pendingRoom ? enterRoom(pendingRoom) : nav('lobby'))} />
       )}

@@ -15,6 +15,13 @@
       "when": 1751300000000,
       "tag": "0001_rooms_username",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1751400000000,
+      "tag": "0002_room_activity",
+      "breakpoints": true
     }
   ]
 }

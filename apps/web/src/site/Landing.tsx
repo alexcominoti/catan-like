@@ -33,11 +33,12 @@ export function Landing({ onPlay, onWatch }: { onPlay: () => void; onWatch: () =
     <div className="landing">
       <section className="hero">
         <div className="hero-copy">
-          <span className="badge-pill"><Sparkles size={13} /> BETA ABERTA · GRÁTIS PARA JOGAR</span>
+          <span className="badge-pill"><Sparkles size={13} /> BETA ABERTA · CRIE SUA CONTA GRÁTIS</span>
           <h1>Construa, troque e <span className="accent-text">conquiste</span> a ilha.</h1>
           <p>
-            Trevalis é o jeito mais rápido de jogar colonização hexagonal com amigos. Sem download,
-            sem cadastro obrigatório — abra um salão e comece em 30 segundos.
+            Trevalis é o jeito mais rápido de jogar colonização hexagonal online. Crie sua conta
+            grátis, monte uma mesa e jogue — sozinho contra bots ou com amigos pelo link. É preciso
+            entrar para jogar; o servidor cuida de cada partida.
           </p>
           <div className="hero-buttons">
             <button className="cta big" onClick={onPlay}>Entrar no lobby</button>

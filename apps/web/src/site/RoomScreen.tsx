@@ -8,10 +8,11 @@ import type { Difficulty } from '@trevalis/bot';
 import { authClient } from '../auth/client.js';
 import { PLAYER_FILL, PLAYER_LABEL } from '../game/theme.js';
 import { pickBotName } from '../game/botNames.js';
-import type { GameConfig, GameSetup, Pace } from '../game/config.js';
-import { Game, type OnlineGameProps } from '../Game.js';
+import type { GameSetup, Pace } from '../game/config.js';
+import { Game } from '../Game.js';
 import { GameClient } from '../net/client.js';
 import { createRoomApi, getRoomApi, joinRoomApi, roomLink, startRoomApi, type RoomView } from './rooms.js';
+import { LoginGate } from './LoginGate.js';
 
 const MAP_LABEL: Record<string, string> = {
   standard: 'Clássico (3–4)',
@@ -54,7 +55,6 @@ function wsUrl(): string {
 export function RoomScreen({
   code,
   onRoomCreated,
-  onStartLocal,
   onLeave,
   onNeedAuth,
   onFullscreenChange,
@@ -62,11 +62,9 @@ export function RoomScreen({
   code: string | null;
   /** Sala online criada (sem sair da tela) — o App sincroniza a URL para /room/CODE. */
   onRoomCreated: (code: string) => void;
-  /** Jogo LOCAL imediato (hotseat/bots) — sem link, sem URL. */
-  onStartLocal: (cfg: GameSetup) => void;
   onLeave: () => void;
   onNeedAuth: () => void;
-  /** A partida em si ocupa a tela inteira (sem o header do site) — igual ao hotseat. */
+  /** A partida em si ocupa a tela inteira (sem o header do site). */
   onFullscreenChange: (fullscreen: boolean) => void;
 }) {
   useEffect(() => {
@@ -74,7 +72,7 @@ export function RoomScreen({
   }, [code, onFullscreenChange]);
 
   if (!code) {
-    return <RoomSetupForm onStartLocal={onStartLocal} onRoomCreated={onRoomCreated} onBack={onLeave} />;
+    return <RoomSetupForm onRoomCreated={onRoomCreated} onNeedAuth={onNeedAuth} onBack={onLeave} />;
   }
   return <RoomLive code={code} onLeave={onLeave} onNeedAuth={onNeedAuth} onFullscreenChange={onFullscreenChange} />;
 }
@@ -84,15 +82,15 @@ export function RoomScreen({
 /* ------------------------------------------------------------------ */
 
 function RoomSetupForm({
-  onStartLocal,
   onRoomCreated,
+  onNeedAuth,
   onBack,
 }: {
-  onStartLocal: (cfg: GameSetup) => void;
   onRoomCreated: (code: string) => void;
+  onNeedAuth: () => void;
   onBack?: () => void;
 }) {
-  const { data: session } = authClient.useSession();
+  const { data: session, isPending } = authClient.useSession();
   const loggedIn = Boolean(session?.user);
 
   const [mapKey, setMapKey] = useState<BoardLayout>('standard');
@@ -178,11 +176,6 @@ function RoomSetupForm({
     };
   }
 
-  function startLocal() {
-    if (!canStart) return;
-    onStartLocal(buildSetup());
-  }
-
   /** Cria a sala ONLINE (gera link único) sem sair desta tela. */
   async function createOnline() {
     if (!canStart || creating) return;
@@ -202,6 +195,20 @@ function RoomSetupForm({
       return;
     }
     onRoomCreated(res.room.code);
+  }
+
+  // Criar sala é rota protegida (só a Home é pública): sem login, redireciona.
+  if (isPending) {
+    return <div className="page"><p className="muted-note">Carregando…</p></div>;
+  }
+  if (!loggedIn) {
+    return (
+      <LoginGate
+        title="Entre para criar uma sala"
+        hint="Você precisa de uma conta para criar uma mesa (com bots ou com amigos)."
+        onNeedAuth={onNeedAuth}
+      />
+    );
   }
 
   return (
@@ -312,50 +319,37 @@ function RoomSetupForm({
             </div>
           </div>
 
-          {loggedIn && (
-            <div className="su-room-online">
-              <h3 className="su-sub">Sala online (link compartilhável)</h3>
-              <div className="su-slider">
-                <label>Nome da sala</label>
-                <input
-                  className="su-roomname"
-                  value={roomName}
-                  maxLength={40}
-                  placeholder={`Sala de ${hostName.trim() || 'anfitrião'}`}
-                  onChange={(e) => setRoomName(e.target.value)}
-                />
-              </div>
-              <button
-                className={`su-tile su-private${isPrivate ? ' active' : ''}`}
-                onClick={() => setIsPrivate((v) => !v)}
-                type="button"
-              >
-                <span className="su-tile-icon"><Lock size={18} /></span>
-                <span className="su-tile-label">Sala privada</span>
-                <span className="su-tile-hint">{isPrivate ? 'só por link; fora da listagem' : 'aparece no lobby público'}</span>
-              </button>
+          <div className="su-room-online">
+            <h3 className="su-sub">Sala online (link compartilhável)</h3>
+            <div className="su-slider">
+              <label>Nome da sala</label>
+              <input
+                className="su-roomname"
+                value={roomName}
+                maxLength={40}
+                placeholder={`Sala de ${hostName.trim() || 'anfitrião'}`}
+                onChange={(e) => setRoomName(e.target.value)}
+              />
             </div>
-          )}
+            <button
+              className={`su-tile su-private${isPrivate ? ' active' : ''}`}
+              onClick={() => setIsPrivate((v) => !v)}
+              type="button"
+            >
+              <span className="su-tile-icon"><Lock size={18} /></span>
+              <span className="su-tile-label">Sala privada</span>
+              <span className="su-tile-hint">{isPrivate ? 'só por link; fora da listagem' : 'aparece no lobby público'}</span>
+            </button>
+          </div>
 
           {createError && <div className="auth-error">{createError}</div>}
 
-          {loggedIn ? (
-            <>
-              <button className="cta big su-start" disabled={!canStart || creating} onClick={createOnline}>
-                <LinkIcon size={16} /> {creating ? 'Criando sala…' : 'Criar sala'}
-              </button>
-              <button className="ghost su-start-local" disabled={!canStart} onClick={startLocal}>
-                <Play size={15} /> Jogar local (hotseat/bots)
-              </button>
-            </>
-          ) : (
-            <>
-              <button className="cta big su-start" disabled={!canStart} onClick={startLocal}>
-                <Play size={16} /> Começar partida
-              </button>
-              <p className="su-note">Entre na sua conta para criar uma sala com link compartilhável.</p>
-            </>
-          )}
+          <button className="cta big su-start" disabled={!canStart || creating} onClick={createOnline}>
+            <LinkIcon size={16} /> {creating ? 'Criando sala…' : 'Criar sala'}
+          </button>
+          <p className="su-note">
+            Jogue sozinho contra bots (preencha as vagas com "Adicionar bot") ou convide amigos pelo link — o servidor gerencia a partida.
+          </p>
         </div>
       </div>
     </div>
@@ -428,17 +422,28 @@ function RoomLive({
     });
   }, [user, code]);
 
-  // Atualiza a lista de jogadores periodicamente (presença "quase ao vivo")
-  // enquanto a sala ainda aguarda — reflete em tempo real quem entrou pelo link.
+  // Reflete quem entrou pelo link em tempo (quase) real: enquanto a sala aguarda,
+  // todo cliente conectado consulta a sala em ciclo curto e também assim que a aba
+  // recupera o foco. Esse mesmo ciclo é o heartbeat que mantém a sala viva (item 6).
   useEffect(() => {
     if (!user || error || room?.status !== 'waiting') return;
-    const id = setInterval(() => {
+    const refresh = () => {
       void getRoomApi(code).then((r) => {
         if (r.ok) setRoom(r.room);
         else setError(r.error);
       });
-    }, 4000);
-    return () => clearInterval(id);
+    };
+    const id = setInterval(refresh, 2500);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [user, code, error, room?.status]);
 
   function copy() {
@@ -559,24 +564,10 @@ function RoomLive({
     if (!online?.state) {
       return <div className="page"><p className="muted-note">Conectando à partida…</p></div>;
     }
-    const gameConfig: GameConfig = {
-      players: online.state.players.map((p) => ({ color: p.color, name: p.name })),
-      bots: online.bots,
-      botDifficulty: {} as GameConfig['botDifficulty'],
-      seed: 0,
-      boardLayout: (room.boardLayout as BoardLayout) ?? 'standard',
-      pace: 'normal',
-      numberLayout: 'balanced',
-      desert: 'random',
-      pointsToWin: online.state.victoryTarget,
-      discardLimit: online.state.discardLimit,
-      friendlyRobber: online.state.friendlyRobber,
-    };
     return (
       <>
         {wsDisconnected && <div className="wr-reconnect-banner">Conexão perdida — reconectando…</div>}
         <Game
-          config={gameConfig}
           onExit={exitGame}
           online={{
             client: clientRef.current!,

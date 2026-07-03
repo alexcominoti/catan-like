@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { makeRoomCode, nextSeat, isListable, decideJoin } from '../src/rooms.js';
+import {
+  makeRoomCode,
+  nextSeat,
+  isListable,
+  decideJoin,
+  isStaleWaitingRoom,
+  STALE_WAITING_ROOM_TTL_MS,
+} from '../src/rooms.js';
 
 describe('makeRoomCode', () => {
   it('gera um código de 6 caracteres do alfabeto seguro (sem I/O/0/1)', () => {
@@ -60,5 +67,39 @@ describe('decideJoin (entrar via link / lobby)', () => {
   it('é idempotente para quem já é membro (mesmo cheia ou em andamento)', () => {
     expect(decideJoin({ status: 'waiting', current: 4, max: 4 }, true)).toEqual({ ok: true });
     expect(decideJoin({ status: 'in_progress', current: 4, max: 4 }, true)).toEqual({ ok: true });
+  });
+});
+
+describe('isStaleWaitingRoom (expiração de salas inativas — item 6)', () => {
+  const TTL = STALE_WAITING_ROOM_TTL_MS;
+
+  it('cria uma sala, simula a inatividade e confirma que ela expira', () => {
+    const created = 1_000_000; // "criação" da sala (lastActivityAt inicial)
+    const room = { status: 'waiting' as const, lastActivityAt: created };
+
+    // Logo após criar / com heartbeat recente: NÃO expira (fica no lobby).
+    expect(isStaleWaitingRoom(room, TTL, created)).toBe(false);
+    expect(isStaleWaitingRoom(room, TTL, created + TTL - 1)).toBe(false);
+
+    // Passado o período de inatividade sem heartbeat: expira (será removida).
+    expect(isStaleWaitingRoom(room, TTL, created + TTL)).toBe(true);
+    expect(isStaleWaitingRoom(room, TTL, created + TTL + 60_000)).toBe(true);
+  });
+
+  it('um heartbeat (nova atividade) reinicia a contagem e mantém a sala viva', () => {
+    const t0 = 1_000_000;
+    const room = { status: 'waiting' as const, lastActivityAt: t0 };
+    const now = t0 + TTL + 5_000; // já passou do TTL desde t0
+    expect(isStaleWaitingRoom(room, TTL, now)).toBe(true);
+    // Heartbeat recente (aba aberta) → lastActivityAt avança → deixa de estar stale.
+    expect(isStaleWaitingRoom({ ...room, lastActivityAt: now - 1_000 }, TTL, now)).toBe(false);
+  });
+
+  it('só salas waiting expiram assim (in_progress/finished não)', () => {
+    const old = { lastActivityAt: 0 };
+    expect(isStaleWaitingRoom({ status: 'in_progress', ...old }, TTL, TTL + 1)).toBe(false);
+    expect(isStaleWaitingRoom({ status: 'finished', ...old }, TTL, TTL + 1)).toBe(false);
+    expect(isStaleWaitingRoom({ status: 'abandoned', ...old }, TTL, TTL + 1)).toBe(false);
+    expect(isStaleWaitingRoom({ status: 'waiting', ...old }, TTL, TTL + 1)).toBe(true);
   });
 });

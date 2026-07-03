@@ -211,7 +211,7 @@ export type GameEvent =
   | { t: 'built'; kind: 'road' | 'settlement' | 'city'; owner: PlayerColor; id: string }
   | { t: 'progressCardBought'; owner: PlayerColor }
   | { t: 'progressCardPlayed'; owner: PlayerColor; card: ProgressCard }
-  | { t: 'blockerMoved'; hexId: string; stoleFrom?: PlayerColor; resource?: Resource }
+  | { t: 'blockerMoved'; hexId: string; by: PlayerColor; stoleFrom?: PlayerColor; resource?: Resource }
   | { t: 'mustDiscard'; players: { color: PlayerColor; count: number }[] }
   | { t: 'discarded'; owner: PlayerColor }
   | { t: 'bankTrade'; owner: PlayerColor; give: Resource; want: Resource; rate: number }

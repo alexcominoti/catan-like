@@ -19,8 +19,8 @@ export interface GameConfig {
 }
 
 /**
- * O que a tela de configuração devolve: igual ao GameConfig, mas a seed pode
- * vir NULL (= aleatória). Quem inicia o jogo local resolve a seed via crypto;
- * salas online deixam o SERVIDOR resolver ao montar o RoomConfig final.
+ * O que a tela "Monte sua mesa" devolve ao criar a sala: igual ao GameConfig, mas
+ * a seed pode vir NULL (= aleatória). O SERVIDOR resolve a seed ao montar o
+ * RoomConfig final da sala (toda partida é online/autoritativa).
  */
 export type GameSetup = Omit<GameConfig, 'seed'> & { seed: number | null };

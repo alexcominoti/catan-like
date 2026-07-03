@@ -13,7 +13,7 @@ import { eq } from 'drizzle-orm';
 import { getDb, user as userTable } from '@trevalis/db';
 import { getAuth, isUsernameTaken } from './auth.js';
 import { validateUsername } from './username.js';
-import { buildRoomConfig, createRoom, getRoom, joinRoom, listOpenRooms, startRoom } from './rooms.js';
+import { buildRoomConfig, createRoom, getRoom, joinRoom, listOpenRooms, startRoom, touchRoomActivity } from './rooms.js';
 import { getProfileStats, getPublicProfileByUsername } from './stats.js';
 import type { RoomManager } from './room.js';
 
@@ -228,12 +228,10 @@ async function handleRequest(
     return;
   }
 
-  // --- salas: listagem pública (não exige login para apenas navegar) ---
+  // --- salas: listagem do lobby (exige login — só a Home é pública) ---
   if (path === '/api/rooms' && req.method === 'GET') {
-    if (!getAuth()) {
-      sendJson(res, 503, { error: 'Listagem indisponivel (sem banco configurado).' });
-      return;
-    }
+    const u = await authedUser(req, res);
+    if (!u) return;
     sendJson(res, 200, { rooms: await listOpenRooms() });
     return;
   }
@@ -288,6 +286,9 @@ async function handleRequest(
         sendJson(res, 404, { error: 'Sala não encontrada.' });
         return;
       }
+      // Heartbeat: a tela de espera consulta esta rota em ciclo; enquanto um
+      // membro a mantém aberta, adia a expiração da sala (item 6).
+      if (session?.user.id) await touchRoomActivity(code, session.user.id);
       sendJson(res, 200, { room });
       return;
     }

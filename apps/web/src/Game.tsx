@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  createInitialState,
-  reduce,
   publicScoreOf,
   handTotal,
   longestRoadLength,
@@ -21,16 +19,14 @@ import {
   Dices, ArrowLeftRight, Hand, MessageSquare, Send, Landmark,
   Volume2, VolumeX, HelpCircle, LogOut,
 } from 'lucide-react';
-import { planBotAction, resolveBotProposal, suggestSetupSettlement } from '@trevalis/bot';
+import { suggestSetupSettlement } from '@trevalis/bot';
 import { Board, type InteractionMode } from './board/Board.js';
 import { Dice } from './ui/Dice.js';
 import { HandBar } from './ui/HandBar.js';
-import { useFlyer, FlyLayer, type Pt } from './ui/FlyLayer.js';
+import { useFlyer, FlyLayer, type Pt, type FlyOpts } from './ui/FlyLayer.js';
 import { RES_IMG, DEV_IMG } from './game/cards.js';
 import { Toasts, useToasts, type ToastTone } from './ui/Toasts.js';
 import { play as playSound, setMuted, unlockAudio, type SoundKind } from './ui/sound.js';
-import { saveReplay } from './ui/replays.js';
-import type { GameConfig } from './game/config.js';
 import type { GameClient } from './net/client.js';
 import { PLAYER_FILL, PLAYER_LABEL, RESOURCE_ICON, RESOURCE_LABEL } from './game/theme.js';
 
@@ -56,43 +52,8 @@ export interface OnlineGameProps {
   errorSeq: number;
 }
 
-/** Limites de tempo (s) por acao, por ritmo — espelham o servidor (PACE_TIMERS). */
-const PACE_TIMERS = {
-  fast: { settlement: 120, road: 30, dice: 10, robber: 20, discard: 20, turn: 60 },
-  normal: { settlement: 180, road: 45, dice: 20, robber: 40, discard: 40, turn: 120 },
-} as const;
-
 function fmtSecs(s: number): string {
   return s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s}s`;
-}
-
-/** Descarte aleatorio de n cartas da mao (default por tempo). */
-function randomDiscard(s: GameState, me: PlayerColor): Partial<Record<Resource, number>> {
-  const p = s.players.find((pl) => pl.color === me)!;
-  const n = s.pendingDiscards[me] ?? 0;
-  const pool: Resource[] = [];
-  for (const r of RESOURCES) for (let i = 0; i < p.hand[r]; i++) pool.push(r);
-  for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [pool[i], pool[j]] = [pool[j]!, pool[i]!];
-  }
-  const out: Partial<Record<Resource, number>> = {};
-  for (let i = 0; i < n && i < pool.length; i++) {
-    const r = pool[i]!;
-    out[r] = (out[r] ?? 0) + 1;
-  }
-  return out;
-}
-
-/** Hex para mover o ladrao por tempo: um deserto (senao um hex sem construcoes). */
-function desertHex(s: GameState): string {
-  const cur = s.blocker.hexId;
-  const desert = s.board.hexOrder.find((h) => h !== cur && s.board.hexes[h]!.terrain === 'desert');
-  if (desert) return desert;
-  const empty = s.board.hexOrder.find(
-    (h) => h !== cur && s.board.hexes[h]!.corners.every((v) => !s.buildings[v]),
-  );
-  return empty ?? s.board.hexOrder.find((h) => h !== cur)!;
 }
 
 type LogEntry =
@@ -127,32 +88,15 @@ function fmtTime(s: number): string {
 }
 
 export function Game({
-  config,
   onExit,
   online,
 }: {
-  config: GameConfig;
   onExit: () => void;
-  /** Presente = partida ONLINE (servidor autoritativo via WebSocket); ausente = hotseat local. */
-  online?: OnlineGameProps;
+  /** Toda partida é ONLINE: servidor autoritativo via WebSocket (não há mais hotseat local). */
+  online: OnlineGameProps;
 }) {
-  const [localState, setLocalState] = useState<GameState>(() =>
-    online
-      ? online.state
-      : createInitialState({
-          seed: config.seed,
-          boardLayout: config.boardLayout,
-          players: config.players,
-          numberLayout: config.numberLayout,
-          desert: config.desert,
-          pointsToWin: config.pointsToWin,
-          discardLimit: config.discardLimit,
-          friendlyRobber: config.friendlyRobber,
-        }),
-  );
-  // Online: o RoomScreen manda o estado (controlado); local: o proprio Game o possui.
-  const state = online ? online.state : localState;
-  const setState = setLocalState;
+  // O estado é sempre controlado pelo RoomScreen a partir das mensagens do servidor.
+  const state = online.state;
   const [log, setLog] = useState<LogEntry[]>([{ kind: 'event', text: 'Partida iniciada. Coloquem as vilas iniciais.' }]);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<InteractionMode>('idle');
@@ -171,8 +115,6 @@ export function Game({
   const [turnCount, setTurnCount] = useState(1); // contador de turno
   const [chatInput, setChatInput] = useState('');
   const [chat, setChat] = useState<ChatMsg[]>([]);
-  // Historico de acoes da partida (para replay + treino da IA).
-  const historyRef = useRef<{ by: PlayerColor; action: Action }[]>([]);
   const { toasts, push } = useToasts();
   const { items: flyItems, fly } = useFlyer();
 
@@ -190,33 +132,18 @@ export function Game({
     setChatInput('');
   }
 
+  // Bots: cores nunca humanas (fixas) + assentos humanos hoje pilotados por bot (AFK/desconexão).
   const isBot = useMemo(() => {
-    if (online) {
-      const pureBots = new Set(online.bots);
-      const away = new Set(online.awayColors);
-      return (c: PlayerColor) => pureBots.has(c) || away.has(c);
-    }
-    const set = new Set(config.bots);
-    return (c: PlayerColor) => set.has(c);
-  }, [online, config.bots]);
-  const difficultyOf = useMemo(() => {
-    const map = config.botDifficulty ?? {};
-    return (c: PlayerColor) => map[c] ?? 'medium';
-  }, [config.botDifficulty]);
+    const pureBots = new Set(online.bots);
+    const away = new Set(online.awayColors);
+    return (c: PlayerColor) => pureBots.has(c) || away.has(c);
+  }, [online.bots, online.awayColors]);
   const botTurn = isBot(state.currentPlayer);
 
-  // "Eu" (jogador local): online, e sempre a MINHA cor (fixa; null = espectador).
-  // Local: com 1 humano e sempre ele; em hotseat com varios, e o humano da vez.
-  const humanColors = state.players.filter((p) => !isBot(p.color)).map((p) => p.color);
-  const localColor: PlayerColor = online
-    ? (online.viewerColor ?? state.currentPlayer)
-    : humanColors.length === 1
-      ? humanColors[0]!
-      : !isBot(state.currentPlayer)
-        ? state.currentPlayer
-        : (humanColors[0] ?? state.currentPlayer);
+  // "Eu": sempre a MINHA cor fixa (null = espectador, sem ação).
+  const localColor: PlayerColor = online.viewerColor ?? state.currentPlayer;
   const localPlayer = getPlayer(state, localColor);
-  const isSpectator = online != null && online.viewerColor == null;
+  const isSpectator = online.viewerColor == null;
   const myTurn = !isSpectator && state.currentPlayer === localColor;
 
   const effMode: InteractionMode = useMemo(() => {
@@ -266,138 +193,64 @@ export function Game({
     if (events.some((e) => e.t === 'turnEnded')) setTurnCount((n) => n + 1);
   }
 
-  function dispatch(action: Action, by: PlayerColor = state.currentPlayer) {
-    if (online) {
-      if (online.viewerColor == null) return false; // espectador: sem acao
-      online.client.send(action);
-      resetTransient();
-      return true; // otimista: o servidor confirma via novo `state` (ou `error`)
-    }
-
-    const prevBlocker = state.blocker.hexId;
-    const res = reduce(state, by, action);
-    if (!res.ok) {
-      setError(res.error);
-      push(res.error, 'warn');
-      return false;
-    }
-    setError(null);
-    setState(res.state);
-    historyRef.current.push({ by, action });
-    if (res.events.some((e) => e.t === 'gameWon')) {
-      saveReplay({
-        id: `${config.seed}-${Date.now()}`,
-        date: Date.now(),
-        seed: config.seed,
-        players: config.players,
-        humans: config.players.map((p) => p.color).filter((c) => !isBot(c)),
-        winner: res.state.winner,
-        pointsToWin: config.pointsToWin,
-        discardLimit: config.discardLimit,
-        boardLayout: config.boardLayout,
-        friendlyRobber: config.friendlyRobber,
-        numberLayout: config.numberLayout,
-        desert: config.desert,
-        turns: turnCount,
-        durationSec: elapsed,
-        actions: historyRef.current,
-      });
-    }
-    applyEvents(res.events, res.state);
-    scheduleAnimations(res.events, res.state, action, by, prevBlocker);
+  /** Envia a ação ao servidor autoritativo (otimista: o servidor confirma via novo `state`/`error`). */
+  function dispatch(action: Action): boolean {
+    if (online.viewerColor == null) return false; // espectador: sem ação
+    online.client.send(action);
     resetTransient();
     return true;
   }
 
   // Online: processa a mensagem de estado mais recente do servidor exatamente
-  // uma vez (identificada por `seq`) — log/toasts/sons via os eventos que ela
-  // carrega (sem animacao de voo: precisaria da `action` original, que o
-  // protocolo online nao expoe).
+  // uma vez (identificada por `seq`) — log/toasts/sons E as animacoes de voo,
+  // reconstruidas a partir dos eventos + estado (ver scheduleOnlineAnimations).
   const lastSeqRef = useRef(-1);
+  const prevOnlineBlockerRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!online || online.seq === lastSeqRef.current) return;
+    if (online.seq === lastSeqRef.current) return;
     lastSeqRef.current = online.seq;
-    if (online.events.length > 0) applyEvents(online.events, online.state);
+    const prevBlocker = prevOnlineBlockerRef.current;
+    if (online.events.length > 0) {
+      applyEvents(online.events, online.state);
+      // prevBlocker null = primeiro instantaneo (enter): so registra, sem animar.
+      if (prevBlocker !== null) scheduleOnlineAnimations(online.events, online.state, prevBlocker);
+    }
+    prevOnlineBlockerRef.current = online.state.blocker.hexId;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [online?.seq]);
+  }, [online.seq]);
 
   // Online: erros do servidor (acao rejeitada) — mostrados exatamente uma vez.
   const lastErrSeqRef = useRef(-1);
   useEffect(() => {
-    if (!online || online.errorSeq === lastErrSeqRef.current) return;
+    if (online.errorSeq === lastErrSeqRef.current) return;
     lastErrSeqRef.current = online.errorSeq;
     if (online.error) {
       setError(online.error);
       push(online.error, 'warn');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [online?.errorSeq]);
+  }, [online.errorSeq]);
 
-  /** Anima cartas/peças voando após uma jogada (espera o DOM atualizar). */
-  function scheduleAnimations(
-    events: GameEvent[],
-    newState: GameState,
-    action: Action,
-    by: PlayerColor,
-    prevBlocker: string,
-  ) {
+  /**
+   * Anima cartas/peças voando (espera o DOM atualizar), reconstruídas só a partir dos eventos +
+   * estado que o servidor envia (o protocolo não expõe a `action` original):
+   *  - produção de recursos: soma dos dados + tabuleiro (idêntico ao local);
+   *  - ladrão movido/roubo: `prevBlocker` (rastreado) + `by` no evento;
+   *  - gasto p/ o banco: derivado por dono dos eventos `built`/carta/troca.
+   */
+  function scheduleOnlineAnimations(events: GameEvent[], newState: GameState, prevBlocker: string) {
     const rolled = events.find((e) => e.t === 'diceRolled');
     const producedSum = rolled && events.some((e) => e.t === 'produced') ? rolled.sum : null;
     const moved = events.find((e) => e.t === 'blockerMoved');
-    const spend = spentResources(action, events);
-    if (producedSum === null && !moved && !spend) return;
+    const spends = spentByOwnerFromEvents(events);
+    if (producedSum === null && !moved && spends.length === 0) return;
 
     raf2(() => {
       const svg = document.querySelector<SVGSVGElement>('.board-wrap > svg');
-      // Ganho de recurso: hexágono -> mão (meu) ou avatar do dono.
-      if (producedSum !== null && svg) {
-        let delay = 0;
-        for (const hid of newState.board.hexOrder) {
-          const hex = newState.board.hexes[hid]!;
-          if (hex.number !== producedSum || newState.blocker.hexId === hid) continue;
-          const resource = TERRAIN_RESOURCE[hex.terrain];
-          if (!resource) continue;
-          const from = svgScreen(svg, hex.cx, hex.cy);
-          for (const vid of hex.corners) {
-            const b = newState.buildings[vid];
-            if (!b) continue;
-            const to = handDest(resource, b.owner, localColor);
-            if (!to) continue;
-            const n = b.kind === 'city' ? 2 : 1;
-            for (let k = 0; k < n; k++) {
-              fly({ kind: 'card', img: RES_IMG[resource], from, to, delay });
-              delay += 70;
-            }
-          }
-        }
-      }
-      // Ladrão: movimento do hex antigo para o novo.
-      if (moved && svg && prevBlocker !== moved.hexId) {
-        const a = newState.board.hexes[prevBlocker];
-        const b = newState.board.hexes[moved.hexId];
-        // O ladrao e desenhado em (cx, cy-26); a animacao mira essa posicao, nao o centro do hex.
-        if (a && b) fly({ kind: 'robber', from: svgScreen(svg, a.cx, a.cy - 26), to: svgScreen(svg, b.cx, b.cy - 26), duration: 650 });
-      }
-      // Roubo pelo ladrão: carta da vítima -> ladrão (após o ladrão pousar).
-      if (moved && moved.stoleFrom && moved.resource) {
-        const from = destForOwner(moved.stoleFrom, localColor);
-        const to = destForOwner(by, localColor);
-        if (from && to) fly({ kind: 'card', img: RES_IMG[moved.resource], from, to, delay: 380, duration: 560 });
-      }
-      // Gasto/descarte: mão (ou avatar) -> Banco.
-      if (spend) {
-        const from = destForOwner(by, localColor);
-        const to = anchorCenter('[data-anchor="bank"]');
-        if (from && to) {
-          let delay = 0;
-          for (const r of RESOURCES) {
-            for (let k = 0; k < (spend[r] ?? 0); k++) {
-              fly({ kind: 'card', img: RES_IMG[r], from, to, delay });
-              delay += 70;
-            }
-          }
-        }
-      }
+      if (producedSum !== null && svg) animateProduced(fly, svg, producedSum, newState, localColor);
+      if (moved && svg) animateRobberMove(fly, svg, moved, prevBlocker, newState);
+      if (moved) animateSteal(fly, moved, localColor);
+      for (const s of spends) animateSpend(fly, s.owner, s.spend, localColor);
     });
   }
 
@@ -422,36 +275,8 @@ export function Game({
     };
   }, []);
 
-  // Auto-jogo dos bots: ao menos 1s entre acoes para o humano acompanhar.
-  // Online, quem auto-joga os bots e o SERVIDOR (GameRoom.runBots) — nao aqui.
-  useEffect(() => {
-    if (online) return;
-    const move = planBotAction(state, isBot, difficultyOf);
-    if (!move) return;
-    const delay = state.phase === 'setup1' || state.phase === 'setup2' ? 1000 : 1100;
-    const id = setTimeout(() => dispatch(move.action, move.by), delay);
-    return () => clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [online, state, isBot, difficultyOf]);
-
-  // Resolucao automatica de trocas (janela de 20s). Vale quando o proponente e o
-  // jogador local (humano propos/contrapropos) ou quando um bot propos na sua vez.
-  // Online, quem resolve e o SERVIDOR (deadline/forceTimeout) — nao aqui.
-  useEffect(() => {
-    if (online) return;
-    const t = state.activeTrade;
-    if (!t) return;
-    let wait: number;
-    if (t.from === localColor) wait = 20000; // eu propus: janela de 20s (ou Fecho antes)
-    else if (isBot(t.from) && isBot(state.currentPlayer)) wait = t.accepted.length > 0 ? 1500 : 20000; // bot propos
-    else return;
-    const id = setTimeout(() => {
-      const mv = resolveBotProposal(state);
-      if (mv) dispatch(mv.action, mv.by);
-    }, wait);
-    return () => clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state, isBot, localColor]);
+  // Bots e resolução de trocas por tempo são responsabilidade do SERVIDOR
+  // (GameRoom.runBots / deadline+forceTimeout) — o cliente só envia as ações do humano.
 
   // Toca um som quando vira a minha vez (entrada na fase de rolar).
   const wasMyRoll = useRef(false);
@@ -532,75 +357,12 @@ export function Game({
     [state.players],
   );
 
-  // ---- Limite de tempo por acao (ritmo Rapido/Normal) ----
-  const pace = config.pace ?? 'normal';
-  const stateRef = useRef(state);
-  stateRef.current = state;
-  const dispatchRef = useRef(dispatch);
-  dispatchRef.current = dispatch;
-
-  /** Acao default quando o tempo de `me` estoura (mesmas regras do servidor). */
-  function computeTimeoutAction(s: GameState, me: PlayerColor): { action: Action; by: PlayerColor } | null {
-    if (s.activeTrade) return { action: { t: 'cancelTrade' }, by: s.activeTrade.from };
-    if (s.phase === 'discard' && (s.pendingDiscards[me] ?? 0) > 0)
-      return { action: { t: 'discard', resources: randomDiscard(s, me) }, by: me };
-    if (s.currentPlayer !== me) return null;
-    if (s.phase === 'moveBlocker') return { action: { t: 'moveBlocker', hexId: desertHex(s) }, by: me };
-    if (s.phase === 'roll') return { action: { t: 'rollDice' }, by: me }; // sem cavaleiro
-    if (s.phase === 'setup1' || s.phase === 'setup2') {
-      const mv = planBotAction(s, (c) => c === me || isBot(c), difficultyOf); // um bot coloca
-      return mv ? { action: mv.action, by: mv.by } : null;
-    }
-    if (s.phase === 'main') return { action: { t: 'endTurn' }, by: me };
-    return null;
-  }
-
-  // Situacao atual que tem prazo para o JOGADOR LOCAL (ou null). A troca tem seu
-  // proprio relogio (popup), entao fica de fora daqui. Online, quem manda no prazo
-  // e o SERVIDOR (deadlineSeconds) — este calculo local so vale para o hotseat.
-  const turnTimer = useMemo((): { secs: number; key: string } | null => {
-    if (online || state.activeTrade || state.winner) return null;
-    const me = localColor;
-    const tt = PACE_TIMERS[pace];
-    if (state.phase === 'discard' && (state.pendingDiscards[me] ?? 0) > 0)
-      return { secs: tt.discard, key: `discard:${state.pendingDiscards[me]}` };
-    if (state.currentPlayer !== me) return null;
-    if (state.phase === 'setup1' || state.phase === 'setup2')
-      return { secs: state.setupLastVertex ? tt.road : tt.settlement, key: `setup:${state.setupStep}:${state.setupLastVertex ?? '-'}` };
-    if (state.phase === 'roll') return { secs: tt.dice, key: `roll:${turnCount}` };
-    if (state.phase === 'moveBlocker') return { secs: tt.robber, key: `robber:${state.blocker.hexId}` };
-    if (state.phase === 'main') return { secs: tt.turn, key: `main:${turnCount}` };
-    return null;
-  }, [state, localColor, pace, turnCount]);
-
   const [secsLeft, setSecsLeft] = useState<number | null>(null);
 
-  // Hotseat local: alem de exibir, FORCA a acao default quando o tempo estoura
-  // (o "servidor" e o proprio navegador aqui — ninguem mais aplicaria o timeout).
+  // Só EXIBE a contagem que o servidor manda (ele é a autoridade do timeout, via
+  // GameRoom.forceTimeout) — reinicia a cada mensagem nova de estado, que já
+  // reflete o tempo restante correto naquele instante.
   useEffect(() => {
-    if (online || !turnTimer) {
-      if (!online) setSecsLeft(null);
-      return;
-    }
-    setSecsLeft(turnTimer.secs);
-    const deadline = Date.now() + turnTimer.secs * 1000;
-    const iv = setInterval(() => setSecsLeft(Math.max(0, Math.ceil((deadline - Date.now()) / 1000))), 250);
-    const to = setTimeout(() => {
-      const mv = computeTimeoutAction(stateRef.current, localColor);
-      if (mv) dispatchRef.current(mv.action, mv.by);
-    }, turnTimer.secs * 1000);
-    return () => {
-      clearInterval(iv);
-      clearTimeout(to);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [online, turnTimer?.key]);
-
-  // Online: so EXIBE a contagem que o servidor manda (ele e quem decide o
-  // timeout de verdade, via GameRoom.forceTimeout) — reinicia a cada mensagem
-  // nova de estado, que ja reflete o tempo restante correto naquele instante.
-  useEffect(() => {
-    if (!online) return;
     if (online.deadlineSeconds == null) {
       setSecsLeft(null);
       return;
@@ -611,7 +373,7 @@ export function Game({
     const iv = setInterval(() => setSecsLeft(Math.max(0, Math.ceil((deadline - Date.now()) / 1000))), 250);
     return () => clearInterval(iv);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [online, online?.seq, online?.deadlineSeconds]);
+  }, [online.seq, online.deadlineSeconds]);
 
   const resourceCount = RESOURCES.reduce((s, r) => s + localPlayer.hand[r], 0);
 
@@ -813,7 +575,7 @@ export function Game({
           setTradeGive={setTradeGive} setTradeWant={setTradeWant}
           onPropose={(to) =>
             arming === 'counter'
-              ? dispatch({ t: 'counterTrade', give: tradeGive, want: tradeWant }, localColor)
+              ? dispatch({ t: 'counterTrade', give: tradeGive, want: tradeWant })
               : dispatch({ t: 'proposeTrade', give: tradeGive, want: tradeWant, to })
           }
           onClose={resetTransient} />
@@ -826,15 +588,16 @@ export function Game({
         />
       )}
       {(() => {
-        if (state.phase !== 'discard') return null;
-        const who = (Object.keys(state.pendingDiscards) as PlayerColor[]).find((c) => !isBot(c));
-        if (!who) return null;
+        // Online: cada cliente só descarta as PRÓPRIAS cartas (o servidor aplica
+        // pela conexão); mostro o modal só quando EU tenho descarte pendente.
+        if (state.phase !== 'discard' || isSpectator) return null;
+        if ((state.pendingDiscards[localColor] ?? 0) <= 0) return null;
         return (
           <DiscardModal
             state={state}
-            color={who}
-            count={state.pendingDiscards[who]!}
-            onDiscard={(resources) => dispatch({ t: 'discard', resources }, who)}
+            color={localColor}
+            count={state.pendingDiscards[localColor]!}
+            onDiscard={(resources) => dispatch({ t: 'discard', resources })}
           />
         );
       })()}
@@ -1161,26 +924,79 @@ function handDest(resource: Resource, owner: PlayerColor, localColor: PlayerColo
   return anchorCenter(`.hand-cards [data-card="${resource}"]`) ?? anchorCenter('.hand-cards');
 }
 
-/** Recursos gastos por uma ação (para a animação mão -> banco). */
-function spentResources(action: Action, events: GameEvent[]): Partial<Record<Resource, number>> | null {
-  switch (action.t) {
-    case 'buildRoad':
-      return COSTS.road;
-    case 'buildSettlement':
-      return COSTS.settlement;
-    case 'buildCity':
-      return COSTS.city;
-    case 'buyProgressCard':
-      return COSTS.progressCard;
-    case 'discard':
-      return action.resources;
-    case 'tradeBank': {
-      const e = events.find((x) => x.t === 'bankTrade');
-      return e && e.t === 'bankTrade' ? ({ [action.give]: e.rate } as Partial<Record<Resource, number>>) : null;
+type FlyFn = (opts: FlyOpts) => void;
+type BlockerMovedEvent = Extract<GameEvent, { t: 'blockerMoved' }>;
+
+/** Ganho de recurso: de cada hex que casa a soma dos dados -> mão (minha) ou avatar do dono. */
+function animateProduced(fly: FlyFn, svg: SVGSVGElement, producedSum: number, newState: GameState, localColor: PlayerColor): void {
+  let delay = 0;
+  for (const hid of newState.board.hexOrder) {
+    const hex = newState.board.hexes[hid]!;
+    if (hex.number !== producedSum || newState.blocker.hexId === hid) continue;
+    const resource = TERRAIN_RESOURCE[hex.terrain];
+    if (!resource) continue;
+    const from = svgScreen(svg, hex.cx, hex.cy);
+    for (const vid of hex.corners) {
+      const b = newState.buildings[vid];
+      if (!b) continue;
+      const to = handDest(resource, b.owner, localColor);
+      if (!to) continue;
+      const n = b.kind === 'city' ? 2 : 1;
+      for (let k = 0; k < n; k++) {
+        fly({ kind: 'card', img: RES_IMG[resource], from, to, delay });
+        delay += 70;
+      }
     }
-    default:
-      return null;
   }
+}
+
+/** Ladrão: movimento do hex antigo para o novo (desenhado em cy-26). */
+function animateRobberMove(fly: FlyFn, svg: SVGSVGElement, moved: BlockerMovedEvent, prevBlocker: string, newState: GameState): void {
+  if (prevBlocker === moved.hexId) return;
+  const a = newState.board.hexes[prevBlocker];
+  const b = newState.board.hexes[moved.hexId];
+  if (a && b) fly({ kind: 'robber', from: svgScreen(svg, a.cx, a.cy - 26), to: svgScreen(svg, b.cx, b.cy - 26), duration: 650 });
+}
+
+/** Roubo pelo ladrão: carta da vítima -> quem moveu o ladrão (após o ladrão pousar). */
+function animateSteal(fly: FlyFn, moved: BlockerMovedEvent, localColor: PlayerColor): void {
+  if (!moved.stoleFrom || !moved.resource) return;
+  const from = destForOwner(moved.stoleFrom, localColor);
+  const to = destForOwner(moved.by, localColor);
+  if (from && to) fly({ kind: 'card', img: RES_IMG[moved.resource], from, to, delay: 380, duration: 560 });
+}
+
+/** Gasto/descarte de um jogador: mão (ou avatar) -> Banco. */
+function animateSpend(fly: FlyFn, owner: PlayerColor, spend: Partial<Record<Resource, number>>, localColor: PlayerColor): void {
+  const from = destForOwner(owner, localColor);
+  const to = anchorCenter('[data-anchor="bank"]');
+  if (!from || !to) return;
+  let delay = 0;
+  for (const r of RESOURCES) {
+    for (let k = 0; k < (spend[r] ?? 0); k++) {
+      fly({ kind: 'card', img: RES_IMG[r], from, to, delay });
+      delay += 70;
+    }
+  }
+}
+
+/**
+ * Recursos gastos POR DONO derivados só dos eventos (modo online, que não expõe a
+ * `action`): construção (custo por tipo), compra de carta e troca com o banco.
+ */
+function spentByOwnerFromEvents(events: GameEvent[]): { owner: PlayerColor; spend: Partial<Record<Resource, number>> }[] {
+  const out: { owner: PlayerColor; spend: Partial<Record<Resource, number>> }[] = [];
+  for (const e of events) {
+    if (e.t === 'built') {
+      const cost = e.kind === 'road' ? COSTS.road : e.kind === 'settlement' ? COSTS.settlement : COSTS.city;
+      out.push({ owner: e.owner, spend: cost });
+    } else if (e.t === 'progressCardBought') {
+      out.push({ owner: e.owner, spend: COSTS.progressCard });
+    } else if (e.t === 'bankTrade') {
+      out.push({ owner: e.owner, spend: { [e.give]: e.rate } });
+    }
+  }
+  return out;
 }
 
 function phaseLabel(state: GameState): string {

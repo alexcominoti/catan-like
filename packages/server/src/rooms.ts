@@ -11,7 +11,7 @@
  *     listabilidade. Coberto por test/rooms.test.ts.
  *  2. I/O no banco (Drizzle) — usa o núcleo puro.
  */
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, lt, sql } from 'drizzle-orm';
 import {
   getDb,
   room as roomTable,
@@ -51,6 +51,24 @@ export function nextSeat(usedColors: readonly PlayerColor[]): { color: PlayerCol
 /** Uma sala aparece na listagem pública? (aguardando jogadores e não privada). */
 export function isListable(r: { status: RoomStatus; isPrivate: boolean }): boolean {
   return r.status === 'waiting' && !r.isPrivate;
+}
+
+/** Tempo (ms) sem NENHUM membro com a aba aberta até uma sala 'waiting' expirar. */
+export const STALE_WAITING_ROOM_TTL_MS = 15 * 60 * 1000;
+
+/**
+ * Uma sala 'waiting' está inativa (elegível para limpeza automática)? É o caso
+ * quando nenhum membro toca a sala (a tela de espera faz um heartbeat enquanto
+ * aberta) há mais que `ttlMs`. Só salas 'waiting' expiram assim; 'in_progress'
+ * é cuidada pela presença ao vivo (LiveRoom) e 'finished' é preservada.
+ * Função pura (ms) para ser testável sem banco.
+ */
+export function isStaleWaitingRoom(
+  r: { status: RoomStatus; lastActivityAt: number },
+  ttlMs: number,
+  now: number,
+): boolean {
+  return r.status === 'waiting' && now - r.lastActivityAt >= ttlMs;
 }
 
 export interface JoinDecision {
@@ -280,8 +298,50 @@ export async function joinRoom(code: string, userId: string): Promise<JoinResult
     });
   }
 
+  // Entrar (ou reabrir o link) é atividade: adia a expiração da sala de espera.
+  await db.update(roomTable).set({ lastActivityAt: new Date() }).where(eq(roomTable.id, r.id));
+
   const room = await getRoom(code, userId);
   return { ok: true, room: room! };
+}
+
+/**
+ * Heartbeat da sala de espera: enquanto um MEMBRO (host ou sentado) tem a tela
+ * aberta, ela toca a sala periodicamente para adiar a expiração. Sem membro com
+ * a aba aberta, `lastActivityAt` para de avançar e a sala 'waiting' expira após
+ * `STALE_WAITING_ROOM_TTL_MS`. Ignora salas que já saíram de 'waiting'.
+ */
+export async function touchRoomActivity(code: string, userId: string): Promise<void> {
+  const db = getDb();
+  await db
+    .update(roomTable)
+    .set({ lastActivityAt: new Date() })
+    .where(
+      and(
+        eq(roomTable.code, code),
+        eq(roomTable.status, 'waiting'),
+        sql`(${roomTable.hostUserId} = ${userId} or exists (select 1 from ${roomPlayerTable} where ${roomPlayerTable.roomId} = ${roomTable.id} and ${roomPlayerTable.userId} = ${userId}))`,
+      ),
+    );
+}
+
+/**
+ * Limpeza automática (item 6): apaga do banco as salas 'waiting' inativas há mais
+ * de `ttlMs` (nenhum membro com a aba aberta). Some do lobby (a listagem só mostra
+ * 'waiting') e do banco (o `room_player` cai por cascade). Devolve os códigos
+ * removidos. Não toca 'in_progress' (presença ao vivo) nem 'finished' (histórico).
+ */
+export async function sweepStaleWaitingRooms(
+  ttlMs = STALE_WAITING_ROOM_TTL_MS,
+  now = Date.now(),
+): Promise<string[]> {
+  const db = getDb();
+  const cutoff = new Date(now - ttlMs);
+  const deleted = await db
+    .delete(roomTable)
+    .where(and(eq(roomTable.status, 'waiting'), lt(roomTable.lastActivityAt, cutoff)))
+    .returning({ code: roomTable.code });
+  return deleted.map((r) => r.code);
 }
 
 /** Marca a sala como 'in_progress' (host inicia a partida) — sai da listagem. */

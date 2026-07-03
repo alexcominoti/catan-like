@@ -25,6 +25,8 @@ export interface GameServerDeps {
   onGameEnded?: (code: string) => Promise<void>;
   /** Chamado quando uma sala fica vazia por >= EMPTY_ROOM_TTL_MS (persistir/limpar). */
   onRoomExpired?: (code: string) => Promise<void>;
+  /** Limpeza periódica das salas 'waiting' inativas no banco (item 6). */
+  onSweepStaleRooms?: () => Promise<string[]>;
 }
 
 async function defaultResolveUserId(req: IncomingMessage): Promise<string | null> {
@@ -52,6 +54,10 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
   const onRoomExpired = deps.onRoomExpired ?? (async (code: string) => {
     const { abandonIfNotFinished } = await import('./rooms.js');
     await abandonIfNotFinished(code);
+  });
+  const onSweepStaleRooms = deps.onSweepStaleRooms ?? (async () => {
+    const { sweepStaleWaitingRooms } = await import('./rooms.js');
+    return sweepStaleWaitingRooms();
   });
 
   const sockets = new Map<string, WebSocket>(); // connId -> socket
@@ -108,11 +114,17 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
   }, HEARTBEAT_INTERVAL_MS);
   wss.on('close', () => clearInterval(heartbeat));
 
-  // Limpeza de sala vazia (item 6): varre a cada SWEEP_INTERVAL_MS.
+  // Limpeza de sala vazia (item 6): a cada SWEEP_INTERVAL_MS varre tanto as salas
+  // AO VIVO sem ninguém (in_progress abandonadas, via presença em memória) quanto
+  // as salas de espera inativas no BANCO (waiting expiradas, que nunca abrem WS).
   const sweeper = setInterval(() => {
     manager.sweep(EMPTY_ROOM_TTL_MS, (code) => {
       manager.remove(code);
       void onRoomExpired(code);
+    });
+    void onSweepStaleRooms().catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error('[trevalis][sweep] falha ao limpar salas inativas:', err);
     });
   }, SWEEP_INTERVAL_MS);
   wss.on('close', () => clearInterval(sweeper));

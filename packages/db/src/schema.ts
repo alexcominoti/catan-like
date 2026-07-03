@@ -256,6 +256,12 @@ export const room = pgTable(
     createdAt: timestamp('created_at')
       .$defaultFn(() => new Date())
       .notNull(),
+    // Última atividade (criação/entrada/heartbeat da sala de espera). Usada para
+    // expirar salas 'waiting' inativas (limpeza automática — sem isso o lobby
+    // acumula salas de teste que nunca começam).
+    lastActivityAt: timestamp('last_activity_at')
+      .$defaultFn(() => new Date())
+      .notNull(),
     startedAt: timestamp('started_at'),
     finishedAt: timestamp('finished_at'),
   },

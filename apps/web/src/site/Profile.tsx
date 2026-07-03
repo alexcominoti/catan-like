@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Trophy, CircleDot, TrendingUp, Flame, Award, Settings, Lock, Check } from 'lucide-react';
 import { authClient } from '../auth/client.js';
 import { validateUsername } from '../auth/username.js';
+import { LoginGate } from './LoginGate.js';
 
 // PARTIDAS/VITÓRIAS/SEQUÊNCIA e "Últimas partidas" vêm de GET /api/profile/stats
 // (dados REAIS do banco). Como ainda não persistimos partidas, na prática vêm
@@ -47,9 +48,17 @@ function relativeTime(iso: string | null): string {
  * `onOwnUsername` sincroniza a URL do App assim que o próprio username resolve
  * (útil quando "Perfil" é clicado antes da sessão carregar).
  */
-export function Profile({ username, onOwnUsername }: { username?: string; onOwnUsername?: (u: string) => void }) {
+export function Profile({
+  username,
+  onOwnUsername,
+  onNeedAuth,
+}: {
+  username?: string;
+  onOwnUsername?: (u: string) => void;
+  onNeedAuth?: () => void;
+}) {
   const isOwn = username == null;
-  const { data: session } = authClient.useSession();
+  const { data: session, isPending } = authClient.useSession();
   const u = session?.user as
     | (NonNullable<typeof session>['user'] & { username?: string | null; usernameChanged?: boolean | null })
     | undefined;
@@ -121,6 +130,21 @@ export function Profile({ username, onOwnUsername }: { username?: string; onOwnU
   const joined = isOwn && u?.createdAt
     ? new Date(u.createdAt).toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' })
     : null;
+
+  // Perfil PRÓPRIO é rota protegida (só a Home é pública); perfil público por
+  // username segue acessível por link (somente leitura).
+  if (isOwn && isPending) {
+    return <div className="page"><p className="muted-note">Carregando…</p></div>;
+  }
+  if (isOwn && !session?.user) {
+    return (
+      <LoginGate
+        title="Entre para ver seu perfil"
+        hint="Você precisa de uma conta para acessar seu perfil."
+        onNeedAuth={onNeedAuth ?? (() => {})}
+      />
+    );
+  }
 
   if (!isOwn && publicError) {
     return (
