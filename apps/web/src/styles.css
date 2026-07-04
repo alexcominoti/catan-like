@@ -1599,3 +1599,16 @@ button.link {
 .friend-actions { display: inline-flex; align-items: center; gap: 8px; }
 .ghost.sm.danger { color: var(--accent); }
 .ghost.sm.danger:hover { background: #fbe6d8; }
+
+/* ---- Tela de fim de jogo + compartilhar resultado (Tier 3) ---- */
+.endgame-modal { max-width: 460px; text-align: center; }
+.endgame-crown { width: 68px; height: 68px; border-radius: 18px; display: flex; align-items: center; justify-content: center; color: #fff; margin: 0 auto 10px; box-shadow: 0 10px 24px -8px rgba(80,40,20,.5); }
+.endgame-title { margin: 0; font-size: 30px; }
+.endgame-sub { margin: 2px 0 14px; }
+.endgame-standings { display: flex; flex-direction: column; gap: 4px; margin-bottom: 16px; text-align: left; }
+.endgame-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: #fff; border: 1px solid var(--border); }
+.endgame-row.win { border-color: var(--accent); background: #fbe6d8; }
+.endgame-rank { width: 26px; color: var(--muted); font-weight: 700; font-size: 14px; }
+.endgame-nm { flex: 1; font-weight: 600; }
+.endgame-pts { font-variant-numeric: tabular-nums; }
+.endgame-actions { justify-content: center; }

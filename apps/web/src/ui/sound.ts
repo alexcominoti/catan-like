@@ -24,6 +24,7 @@ export type SoundKind =
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let muted = false;
+let volume = 0.8; // 0..1 — controlado pelas setas ↑/↓ (atalhos de teclado)
 
 function init(): boolean {
   try {
@@ -31,7 +32,7 @@ function init(): boolean {
       const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       ctx = new Ctor();
       master = ctx.createGain();
-      master.gain.value = 0.8;
+      master.gain.value = volume;
       master.connect(ctx.destination);
       // Reverb de salao (impulso curto gerado).
       const conv = ctx.createConvolver();
@@ -57,6 +58,23 @@ export function setMuted(m: boolean): void {
 }
 export function isMuted(): boolean {
   return muted;
+}
+
+/** Volume atual (0..1). */
+export function getVolume(): number {
+  return volume;
+}
+
+/** Define o volume (0..1) e aplica no ganho principal (se o áudio já iniciou). */
+export function setVolume(v: number): number {
+  volume = Math.max(0, Math.min(1, v));
+  if (master) master.gain.value = volume;
+  return volume;
+}
+
+/** Ajusta o volume por um delta (para as setas ↑/↓). Retorna o novo valor. */
+export function nudgeVolume(delta: number): number {
+  return setVolume(Math.round((volume + delta) * 20) / 20);
 }
 
 function impulse(c: AudioContext, dur: number, decay: number): AudioBuffer {
