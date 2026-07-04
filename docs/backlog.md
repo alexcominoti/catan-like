@@ -11,13 +11,14 @@ real. Para cada item: **o que era**, **por que saiu** e **o que falta para volta
 
 ## Landing (página inicial)
 
-### Contagem de "jogadores online"
+### Contagem de "jogadores online" — FEITO (Tier 1, item 4)
 - **O que era:** o selo "12,4k jogadores online" na seção de prova social, abaixo dos
   CTAs (`apps/web/src/site/Landing.tsx`, `.hero-stats`).
-- **Por que saiu:** número fixo, mockado — não reflete jogadores reais.
-- **Para voltar:** criar um **serviço de presença/contagem de jogadores online**
-  (heartbeat por conexão WS + agregação) e expor um endpoint (ex.: `GET /api/presence`)
-  que a landing consome.
+- **O que é agora:** número REAL de jogadores online, via serviço de presença em
+  memória (`packages/server/src/presence.ts` = `PresenceTracker`). O cliente logado
+  faz um heartbeat a cada 30s (`POST /api/presence/ping`, com a sala atual se houver);
+  a landing consome `GET /api/presence` (público). Uma entrada expira após 60s sem
+  heartbeat. Também alimenta o status online/sala dos amigos (ver Amigos abaixo).
 
 ### "Anticheat ativo"
 - **O que era:** selo "Anticheat ativo" na mesma seção `.hero-stats`.
@@ -110,7 +111,25 @@ real. Para cada item: **o que era**, **por que saiu** e **o que falta para volta
 - **Para voltar/evoluir:** persistir o estado (ou o log de ações para replay
   determinístico) das salas `in_progress`, permitindo retomar após restart.
 
-### Gravação de partidas/estatísticas — ainda pendente
-- **O que falta:** `match`/`match_player`/`player_stats` continuam sem escrita — o
-  perfil mostra stats zeradas mesmo após partidas online reais. Ao detectar
-  `state.phase === 'ended'`, gravar o resultado nessas tabelas.
+### Gravação de partidas/estatísticas — FEITO (Tier 1, item 1)
+- **O que era:** `match`/`match_player`/`player_stats` sem escrita — o perfil mostrava
+  stats zeradas mesmo após partidas online reais.
+- **O que é agora:** ao detectar `state.phase === 'ended'`, o servidor grava o
+  resultado (`packages/server/src/match.ts`): `match` (seed + config resumida +
+  vencedor), `match_player` (só humanos: cor, pontos via `scoreOf`, venceu) e atualiza
+  `player_stats` (jogos, vitórias, sequência atual/recorde). O núcleo é puro/testável
+  (`summarizeMatch`, `applyStatsDelta`); a persistência é best-effort (uma falha não
+  derruba a partida em memória). O perfil (`GET /api/profile/stats`) já reflete tudo.
+
+### Amigos + Karma — FEITO (Tier 1, itens 2 e 3)
+- **Amigos:** `packages/server/src/friends.ts` + página `apps/web/src/site/Friends.tsx`.
+  Adicionar por username, aceitar/recusar/cancelar pedidos (pedido recíproco é
+  auto-aceito), lista com status online e atalho para entrar/assistir a sala do amigo
+  (usa a presença). Botão "Adicionar amigo" também no perfil público.
+- **Karma (anti-abandono):** contadores `games_completed`/`games_abandoned` em
+  `player_stats` (migration `0003_social_stats`). Ao encerrar a partida, quem terminou
+  como bot (vaga convertida = `awayColors`) conta como abandono; senão, concluída. A %
+  de karma (`packages/server/src/karma.ts`, 100% até ter amostra mínima) aparece no
+  perfil. **Follow-up:** filtro de karma na sala (bloquear entrada abaixo de um mínimo)
+  — a base pura (`meetsKarma`) já existe; falta o controle no editor da sala + o gate
+  no join.

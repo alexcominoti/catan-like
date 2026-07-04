@@ -4,6 +4,8 @@ import { fromNodeHeaders } from 'better-auth/node';
 import { getAuth } from './auth.js';
 import { getRoom, finishRoom } from './rooms.js';
 import { EMPTY_ROOM_TTL_MS, RECONNECT_GRACE_MS, RoomManager, type LiveRoom } from './room.js';
+import { presence } from './presence.js';
+import { summarizeMatch, type MatchSummary } from './match.js';
 import type { ClientMessage, ServerMessage } from './protocol.js';
 
 /** Caminho do WebSocket quando anexado ao servidor HTTP unico (producao). */
@@ -21,8 +23,8 @@ export interface GameServerDeps {
   resolveUserId?: (req: IncomingMessage) => Promise<string | null>;
   /** A sala existe nos metadados (banco)? So usada para validar um `code` desconhecido. */
   roomExists?: (code: string) => Promise<boolean>;
-  /** Chamado quando uma partida termina (persistir status 'finished'). */
-  onGameEnded?: (code: string) => Promise<void>;
+  /** Chamado quando uma partida termina (persistir status 'finished' + gravar histórico/stats). */
+  onGameEnded?: (code: string, summary: MatchSummary) => Promise<void>;
   /** Chamado quando uma sala fica vazia por >= EMPTY_ROOM_TTL_MS (persistir/limpar). */
   onRoomExpired?: (code: string) => Promise<void>;
   /** Limpeza periódica das salas 'waiting' inativas no banco (item 6). */
@@ -50,7 +52,19 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
   const manager = deps.manager ?? new RoomManager();
   const resolveUserId = deps.resolveUserId ?? defaultResolveUserId;
   const roomExists = deps.roomExists ?? defaultRoomExists;
-  const onGameEnded = deps.onGameEnded ?? finishRoom;
+  // Fim de partida (padrão): marca a sala 'finished' E grava o histórico/stats
+  // (match/match_player/player_stats). Best-effort — uma falha de persistência
+  // (ex.: sem banco) não pode derrubar a partida em memória.
+  const onGameEnded = deps.onGameEnded ?? (async (code: string, summary: MatchSummary) => {
+    try {
+      await finishRoom(code);
+      const { persistMatch } = await import('./match.js');
+      await persistMatch(code, summary);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[trevalis][match] falha ao gravar a partida encerrada:', err);
+    }
+  });
   const onRoomExpired = deps.onRoomExpired ?? (async (code: string) => {
     const { abandonIfNotFinished } = await import('./rooms.js');
     await abandonIfNotFinished(code);
@@ -149,7 +163,14 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
     }
     if (room.state.phase === 'ended' && !live.finishNotified) {
       live.finishNotified = true;
-      void onGameEnded(code);
+      const cfg = room.config;
+      const summary = summarizeMatch(room.state, room.humans, awayColors, {
+        seed: cfg.seed,
+        boardLayout: cfg.boardLayout,
+        pace: cfg.pace,
+        pointsToWin: cfg.pointsToWin,
+      });
+      void onGameEnded(code, summary);
     }
   }
 
@@ -189,6 +210,9 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
       send(ws, { t: 'error', error: 'Você precisa entrar para acessar uma sala.' });
       return;
     }
+    // Presença: quem está ativo numa sala conta como online (a sala vem do WS;
+    // o heartbeat HTTP global cobre lobby/landing). Ver presence.ts.
+    presence.touch(userId, msg.t === 'enter' ? msg.code.toUpperCase() : conn.code ?? null);
 
     switch (msg.t) {
       case 'enter': {

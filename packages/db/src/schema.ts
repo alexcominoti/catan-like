@@ -182,6 +182,11 @@ export const playerStats = pgTable('player_stats', {
   // Sequencia de vitorias: atual (zera ao perder) e o recorde historico.
   currentStreak: integer('current_streak').notNull().default(0),
   longestStreak: integer('longest_streak').notNull().default(0),
+  // Karma (anti-abandono, estilo Colonist): partidas levadas ate o fim conectado
+  // vs. partidas abandonadas (a vaga humana virou bot antes do fim). A % de karma
+  // e derivada desses dois (ver karma.ts) — mostrada no perfil.
+  gamesCompleted: integer('games_completed').notNull().default(0),
+  gamesAbandoned: integer('games_abandoned').notNull().default(0),
   // Pontuacao de ranking (ex.: Elo); default neutro.
   rating: integer('rating').notNull().default(1000),
   updatedAt: timestamp('updated_at')

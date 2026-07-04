@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Trophy, CircleDot, TrendingUp, Flame, Award, Settings, Lock, Check } from 'lucide-react';
+import { Trophy, CircleDot, TrendingUp, Flame, Award, Settings, Lock, Check, ShieldCheck, UserPlus } from 'lucide-react';
 import { authClient } from '../auth/client.js';
 import { validateUsername } from '../auth/username.js';
+import { sendFriendRequest } from './social.js';
 import { LoginGate } from './LoginGate.js';
 
 // PARTIDAS/VITÓRIAS/SEQUÊNCIA e "Últimas partidas" vêm de GET /api/profile/stats
@@ -26,6 +27,8 @@ interface ProfileStats {
   gamesWon: number;
   currentStreak: number;
   longestStreak: number;
+  karma: number;
+  gamesAbandoned: number;
   matches: ProfileMatch[];
 }
 
@@ -121,6 +124,22 @@ export function Profile({
 
   const stats = isOwn ? ownStats : (publicProfile?.stats ?? null);
 
+  // Adicionar amigo a partir de um perfil público (só logado e não sendo você mesmo).
+  const [friendMsg, setFriendMsg] = useState<string | null>(null);
+  const [friendBusy, setFriendBusy] = useState(false);
+  const publicName = publicProfile?.username ?? username ?? '';
+  const viewingSelf =
+    !isOwn && Boolean(u) && (u?.username ?? u?.name ?? '').toLowerCase() === publicName.toLowerCase();
+  const canAddFriend = !isOwn && Boolean(session?.user) && !viewingSelf && Boolean(publicProfile);
+
+  async function addFriend() {
+    setFriendBusy(true);
+    setFriendMsg(null);
+    const res = await sendFriendRequest(publicName);
+    setFriendBusy(false);
+    setFriendMsg(res.ok ? 'Pedido de amizade enviado!' : res.error);
+  }
+
   const winRate =
     stats && stats.gamesPlayed > 0 ? Math.round((stats.gamesWon / stats.gamesPlayed) * 100) : 0;
   const losses = stats ? stats.gamesPlayed - stats.gamesWon : 0;
@@ -177,7 +196,13 @@ export function Profile({
             <Settings size={15} /> Editar perfil
           </button>
         )}
+        {canAddFriend && (
+          <button className="cta" onClick={addFriend} disabled={friendBusy}>
+            <UserPlus size={15} /> {friendBusy ? 'Enviando…' : 'Adicionar amigo'}
+          </button>
+        )}
       </div>
+      {friendMsg && <div className="friend-notice">{friendMsg}</div>}
 
       <div className="stat-row">
         {/* ELO: "Em breve" — sem sistema de rating ainda. Ver docs/backlog.md → Perfil. */}
@@ -199,6 +224,12 @@ export function Profile({
           <span className="eyebrow stat-eyebrow"><Flame size={14} /> SEQUÊNCIA</span>
           <span className="stat-value">{stats?.currentStreak ?? 0}</span>
           <span className="muted-note">recorde: {stats?.longestStreak ?? 0}</span>
+        </div>
+        {/* KARMA: anti-abandono (partidas levadas até o fim). Ver karma.ts no servidor. */}
+        <div className="card stat-box">
+          <span className="eyebrow stat-eyebrow"><ShieldCheck size={14} /> KARMA</span>
+          <span className="stat-value">{stats?.karma ?? 100}%</span>
+          <span className="muted-note">{stats?.gamesAbandoned ? `${stats.gamesAbandoned} abandonada(s)` : 'sem abandonos'}</span>
         </div>
       </div>
 
