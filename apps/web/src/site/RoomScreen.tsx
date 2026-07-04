@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Copy, Check, Crown, Lock, Play, ArrowLeft, Users, Bot, Dices, Target, Shield,
-  Shuffle, UserPlus, X,
+  Shuffle, UserPlus, X, Circle, Send,
 } from 'lucide-react';
 import { type BoardLayout, type PlayerColor } from '@trevalis/engine';
 import type { Difficulty } from '@trevalis/bot';
@@ -15,6 +15,7 @@ import {
   roomLink, setBotDifficultyApi, startRoomApi, updateRoomApi,
   type RoomSeatView, type RoomView,
 } from './rooms.js';
+import { getFriends, sendInvite, type FriendView } from './social.js';
 import { LoginGate } from './LoginGate.js';
 
 const MAP_LABEL: Record<string, string> = {
@@ -372,13 +373,44 @@ function LinkCard({ code }: { code: string }) {
     });
   }
   return (
-    <div className="card wr-link">
-      <label>Link da sala — compartilhe para convidar</label>
-      <div className="wr-link-row">
-        <input readOnly value={roomLink(code)} onFocus={(e) => e.target.select()} />
-        <button className="cta" onClick={copy}>
-          {copied ? <><Check size={15} /> Copiado!</> : <><Copy size={15} /> Copiar link</>}
-        </button>
+    <>
+      <div className="card wr-link">
+        <label>Link da sala — compartilhe para convidar</label>
+        <div className="wr-link-row">
+          <input readOnly value={roomLink(code)} onFocus={(e) => e.target.select()} />
+          <button className="cta" onClick={copy}>
+            {copied ? <><Check size={15} /> Copiado!</> : <><Copy size={15} /> Copiar link</>}
+          </button>
+        </div>
+      </div>
+      <InviteFriends code={code} />
+    </>
+  );
+}
+
+/** Convidar amigos online para esta sala (aparece só se houver amigos online). */
+function InviteFriends({ code }: { code: string }) {
+  const [online, setOnline] = useState<FriendView[]>([]);
+  const [sent, setSent] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    let alive = true;
+    void getFriends().then((f) => alive && setOnline(f.friends.filter((x) => x.online)));
+    return () => { alive = false; };
+  }, []);
+  if (online.length === 0) return null;
+  return (
+    <div className="card wr-invite">
+      <label>Convidar amigos online</label>
+      <div className="wr-invite-list">
+        {online.map((f) => (
+          <div key={f.userId} className="wr-invite-row">
+            <span className="friend-name"><Circle size={9} className="presence-dot on" fill="currentColor" /> @{f.username}</span>
+            <button className="cta sm" disabled={sent[f.userId]}
+              onClick={() => { void sendInvite(f.userId, code); setSent((s) => ({ ...s, [f.userId]: true })); }}>
+              {sent[f.userId] ? 'Convidado ✓' : <><Send size={13} /> Convidar</>}
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   );

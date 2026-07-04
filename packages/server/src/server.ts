@@ -6,6 +6,7 @@ import { getRoom, finishRoom } from './rooms.js';
 import { EMPTY_ROOM_TTL_MS, RECONNECT_GRACE_MS, RoomManager, type LiveRoom } from './room.js';
 import { presence } from './presence.js';
 import { summarizeMatch, type MatchSummary } from './match.js';
+import { hasDatabase } from '@trevalis/db';
 import type { ClientMessage, ServerMessage } from './protocol.js';
 
 /** Caminho do WebSocket quando anexado ao servidor HTTP unico (producao). */
@@ -15,6 +16,8 @@ export const WS_PATH = '/ws';
 const SWEEP_INTERVAL_MS = 30_000;
 /** Heartbeat ws (ping/pong): detecta quedas "silenciosas" (sem `close` limpo). */
 const HEARTBEAT_INTERVAL_MS = 10_000;
+/** Com que frequência o matchmaking tenta formar/iniciar mesas (Tier 2). */
+const MATCHMAKING_INTERVAL_MS = 5_000;
 
 export interface GameServerDeps {
   /** Compartilhado com a camada HTTP (rota `/start` chama `manager.startGame`). */
@@ -29,6 +32,8 @@ export interface GameServerDeps {
   onRoomExpired?: (code: string) => Promise<void>;
   /** Limpeza periódica das salas 'waiting' inativas no banco (item 6). */
   onSweepStaleRooms?: () => Promise<string[]>;
+  /** Tick do matchmaking (forma/inicia mesas de "Jogo rápido"). */
+  onMatchmakingTick?: () => Promise<void>;
 }
 
 async function defaultResolveUserId(req: IncomingMessage): Promise<string | null> {
@@ -72,6 +77,11 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
   const onSweepStaleRooms = deps.onSweepStaleRooms ?? (async () => {
     const { sweepStaleWaitingRooms } = await import('./rooms.js');
     return sweepStaleWaitingRooms();
+  });
+  const onMatchmakingTick = deps.onMatchmakingTick ?? (async () => {
+    if (!hasDatabase()) return; // sem banco (ex.: testes) não há matchmaking
+    const { matchmakingTick } = await import('./matchmaking.js');
+    await matchmakingTick(manager);
   });
 
   const sockets = new Map<string, WebSocket>(); // connId -> socket
@@ -142,6 +152,15 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
     });
   }, SWEEP_INTERVAL_MS);
   wss.on('close', () => clearInterval(sweeper));
+
+  // Matchmaking (Tier 2): forma/inicia as mesas de "Jogo rápido" periodicamente.
+  const matchmaker = setInterval(() => {
+    void onMatchmakingTick().catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error('[trevalis][matchmaking] falha no tick:', err);
+    });
+  }, MATCHMAKING_INTERVAL_MS);
+  wss.on('close', () => clearInterval(matchmaker));
 
   function send(ws: WebSocket, m: ServerMessage): void {
     ws.send(JSON.stringify(m));

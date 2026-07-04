@@ -1,5 +1,6 @@
 import { Hexagon } from 'lucide-react';
 import { authClient } from '../auth/client.js';
+import { NotificationsBell } from './NotificationsBell.js';
 
 export type Page = 'landing' | 'lobby' | 'room' | 'profile' | 'friends' | 'auth';
 
@@ -23,6 +24,7 @@ export function SiteHeader({ page, onNav }: { page: Page; onNav: (p: Page, param
       <div className="site-actions">
         {user ? (
           <>
+            <NotificationsBell onEnterRoom={(code) => onNav('room', code)} />
             <button className="ghost" onClick={() => onNav('profile', ownUsername)}>{user.name ?? user.email}</button>
             <button className="cta" onClick={() => void authClient.signOut()}>Sair</button>
           </>
