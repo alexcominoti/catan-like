@@ -657,6 +657,7 @@ export function Game({
             color={localColor}
             count={state.pendingDiscards[localColor]!}
             onDiscard={(resources) => dispatch({ t: 'discard', resources })}
+            onSelect={(resources) => online.client.sendSelect({ t: 'discard', resources })}
           />
         );
       })()}
@@ -967,15 +968,24 @@ function DiscardModal({
   color,
   count,
   onDiscard,
+  onSelect,
 }: {
   state: GameState;
   color: PlayerColor;
   count: number;
   onDiscard: (resources: Partial<Record<Resource, number>>) => void;
+  /** Envia a seleção tentativa ao servidor (usada se o tempo acabar). */
+  onSelect: (resources: Partial<Record<Resource, number>>) => void;
 }) {
   const hand = getPlayer(state, color).hand;
   const [picks, setPicks] = useState<Record<Resource, number>>({ wood: 0, brick: 0, wool: 0, grain: 0, ore: 0 });
   const total = RESOURCES.reduce((s, r) => s + picks[r], 0);
+  // Salva a seleção completa no servidor: se o tempo acabar, ela é usada em vez
+  // de um descarte aleatório (Colonist v196).
+  useEffect(() => {
+    if (total === count) onSelect(picks);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [picks, total, count]);
   return (
     <div className="overlay">
       <div className="modal" onClick={(e) => e.stopPropagation()}>

@@ -59,6 +59,15 @@ export class GameClient {
     this.sendRaw({ t: 'action', action });
   }
 
+  /**
+   * Envia uma SELECAO tentativa (ex.: cartas de descarte ja escolhidas). O
+   * servidor apenas a guarda e a usa se o tempo acabar, no lugar do default
+   * aleatorio — nao aplica nem responde agora.
+   */
+  sendSelect(action: Action): void {
+    this.sendRaw({ t: 'select', action });
+  }
+
   /** Fecha definitivamente (nao tenta reconectar). */
   close(): void {
     this.closedByUser = true;
