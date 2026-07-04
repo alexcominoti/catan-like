@@ -30,6 +30,7 @@ export interface RoomConfig {
   pointsToWin: number;
   discardLimit: number;
   friendlyRobber: boolean;
+  balancedDice: boolean;
 }
 
 /**
@@ -37,7 +38,12 @@ export interface RoomConfig {
  * sala — o servidor resolve tudo (config, assento) pelo `code` + a sessao
  * (cookie) autenticada na conexao WS.
  */
-export type ClientMessage = { t: 'enter'; code: string } | { t: 'action'; action: Action };
+export type ClientMessage =
+  | { t: 'enter'; code: string }
+  | { t: 'action'; action: Action }
+  /** Seleção TENTATIVA (ex.: cartas de descarte já escolhidas): o servidor a usa
+   *  se o tempo acabar, em vez de um default aleatório (Colonist v196). */
+  | { t: 'select'; action: Action };
 
 /** Mensagens do SERVIDOR para o cliente. */
 export type ServerMessage =

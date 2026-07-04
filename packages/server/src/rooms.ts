@@ -135,6 +135,7 @@ export interface RoomSettings {
   pointsToWin: number;
   discardLimit: number;
   friendlyRobber: boolean;
+  balancedDice: boolean;
 }
 
 export interface RoomView {
@@ -290,6 +291,7 @@ function settingsOf(config: unknown): RoomSettings {
     pointsToWin: typeof c.pointsToWin === 'number' ? c.pointsToWin : 10,
     discardLimit: typeof c.discardLimit === 'number' ? c.discardLimit : 7,
     friendlyRobber: c.friendlyRobber === true,
+    balancedDice: c.balancedDice === true,
   };
 }
 
@@ -508,6 +510,7 @@ export async function updateRoomSettings(code: string, hostUserId: string, patch
     pointsToWin: clampInt(typeof p.pointsToWin === 'number' ? p.pointsToWin : cur.pointsToWin, 3, 15),
     discardLimit: clampInt(typeof p.discardLimit === 'number' ? p.discardLimit : cur.discardLimit, 5, 15),
     friendlyRobber: has('friendlyRobber') ? p.friendlyRobber === true : cur.friendlyRobber,
+    balancedDice: has('balancedDice') ? p.balancedDice === true : cur.balancedDice,
     bots: botsOf(r.config),
   };
   await db
@@ -672,5 +675,6 @@ export async function buildRoomConfig(code: string): Promise<RoomConfig | null> 
     pointsToWin: typeof raw.pointsToWin === 'number' ? raw.pointsToWin : 10,
     discardLimit: typeof raw.discardLimit === 'number' ? raw.discardLimit : 7,
     friendlyRobber: raw.friendlyRobber === true,
+    balancedDice: raw.balancedDice === true,
   };
 }

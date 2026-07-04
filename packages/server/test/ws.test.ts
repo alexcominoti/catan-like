@@ -23,6 +23,7 @@ function config(): RoomConfig {
     pointsToWin: 10,
     discardLimit: 7,
     friendlyRobber: false,
+    balancedDice: false,
   };
 }
 

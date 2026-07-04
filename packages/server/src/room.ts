@@ -24,6 +24,11 @@ const PACE_TIMERS: Record<Pace, {
 /** Turnos consecutivos perdidos por tempo ate a vaga virar bot medio (AFK). */
 const MAX_TURN_TIMEOUTS = 3;
 
+/** Bonus de tempo (s) somado ao prazo do turno a cada acao/troca (Colonist v35). */
+const BONUS_PER_ACTION = 15;
+/** Teto do bonus acumulado num mesmo turno. */
+const MAX_TURN_BONUS = 60;
+
 /** Segundos de "graca" apos uma desconexao antes de a vaga virar bot medio. */
 export const RECONNECT_GRACE_MS = 15_000;
 
@@ -49,6 +54,11 @@ export class GameRoom {
   private readonly botSet: Set<PlayerColor>;
   /** Turnos seguidos perdidos por tempo, por cor (zera ao agir manualmente). */
   private readonly timeoutStreak = new Map<PlayerColor, number>();
+  /** Bonus de tempo acumulado no turno atual + de quem é (Colonist v35). */
+  private turnBonusSeconds = 0;
+  private bonusColor: PlayerColor | null = null;
+  /** Seleção tentativa por cor (descarte/ladrão já escolhidos): usada no timeout. */
+  private readonly pendingSelection = new Map<PlayerColor, Action>();
   /** Eventos acumulados desde o ultimo `drainEvents()` (log/toast/som no cliente). */
   private pendingEvents: GameEvent[] = [];
 
@@ -65,6 +75,7 @@ export class GameRoom {
       pointsToWin: config.pointsToWin,
       discardLimit: config.discardLimit,
       friendlyRobber: config.friendlyRobber,
+      balancedDice: config.balancedDice,
     });
     this.humans = config.players
       .filter((p) => !this.botSet.has(p.color))
@@ -108,6 +119,11 @@ export class GameRoom {
     return this.humans.find((h) => h.userId === userId)?.color ?? null;
   }
 
+  /** Guarda a seleção tentativa de uma cor (usada no timeout em vez do default). */
+  setPendingSelection(color: PlayerColor, action: Action): void {
+    this.pendingSelection.set(color, action);
+  }
+
   /** Esvazia e devolve os eventos acumulados desde a ultima chamada (uma vez por broadcast). */
   drainEvents(): GameEvent[] {
     const events = this.pendingEvents;
@@ -117,11 +133,23 @@ export class GameRoom {
 
   /** Aplica uma acao de `by` (so legal pelo reduce) e auto-joga os bots em seguida. */
   apply(by: PlayerColor, action: Action): { ok: boolean; error?: string } {
+    const wasMain = this.state.phase === 'main';
     const r = reduce(this.state, by, action);
     if (!r.ok) return { ok: false, error: r.error };
     this.state = r.state;
     this.pendingEvents.push(...r.events);
     this.timeoutStreak.set(by, 0); // agiu manualmente: zera o contador de AFK
+    this.pendingSelection.delete(by); // agiu: descarta qualquer seleção tentativa antiga
+    // Bonus de tempo: cada acao/troca "produtiva" no turno principal estende o
+    // prazo (evita timeout injusto de quem esta construindo/negociando). Passar a
+    // vez ou cancelar nao conta.
+    if (wasMain && action.t !== 'endTurn' && action.t !== 'cancelTrade') {
+      if (this.bonusColor !== by) {
+        this.bonusColor = by;
+        this.turnBonusSeconds = 0;
+      }
+      this.turnBonusSeconds = Math.min(MAX_TURN_BONUS, this.turnBonusSeconds + BONUS_PER_ACTION);
+    }
     this.runBots();
     return { ok: true };
   }
@@ -157,7 +185,8 @@ export class GameRoom {
     if (s.phase === 'setup1' || s.phase === 'setup2') return s.setupLastVertex ? t.road : t.settlement;
     if (s.phase === 'roll') return t.dice;
     if (s.phase === 'moveBlocker') return t.robber;
-    return t.turn; // fase principal: orcamento do turno
+    // Fase principal: orcamento do turno + bonus acumulado (so do jogador da vez).
+    return t.turn + (this.bonusColor === s.currentPlayer ? this.turnBonusSeconds : 0);
   }
 
   /**
@@ -182,10 +211,12 @@ export class GameRoom {
     if (!who) return false;
 
     if (s.phase === 'discard') {
-      return this.applyForced(who, { t: 'discard', resources: this.randomDiscard(who) });
+      // Usa o descarte que o jogador já tinha escolhido (se enviado e válido);
+      // senão, descarte aleatório (Colonist v196: não descartar às cegas).
+      return this.applySavedOr(who, 'discard', { t: 'discard', resources: this.randomDiscard(who) });
     }
     if (s.phase === 'moveBlocker') {
-      return this.applyForced(who, { t: 'moveBlocker', hexId: this.desertOrHarmlessHex() });
+      return this.applySavedOr(who, 'moveBlocker', { t: 'moveBlocker', hexId: this.desertOrHarmlessHex() });
     }
     if (s.phase === 'roll') {
       return this.applyForced(who, { t: 'rollDice' }); // sem cavaleiro
@@ -206,6 +237,25 @@ export class GameRoom {
       return true;
     }
     return this.applyForced(who, { t: 'endTurn' });
+  }
+
+  /**
+   * No timeout: se `who` tinha uma seleção tentativa do tipo esperado e ela ainda
+   * é válida (reduce ok), aplica-a; senão, aplica o `fallback` (default aleatório).
+   */
+  private applySavedOr(who: PlayerColor, expect: Action['t'], fallback: Action): boolean {
+    const sel = this.pendingSelection.get(who);
+    if (sel && sel.t === expect) {
+      const r = reduce(this.state, who, sel);
+      if (r.ok) {
+        this.state = r.state;
+        this.pendingEvents.push(...r.events);
+        this.pendingSelection.delete(who);
+        this.runBots();
+        return true;
+      }
+    }
+    return this.applyForced(who, fallback);
   }
 
   /** Aplica uma acao "default" (timeout) e segue auto-jogando os bots. */

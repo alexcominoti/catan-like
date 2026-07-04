@@ -96,6 +96,7 @@ const DEFAULT_CONFIG = {
   pointsToWin: 10,
   discardLimit: 7,
   friendlyRobber: false,
+  balancedDice: false,
   seed: null,
   bots: [] as unknown[],
 };
@@ -453,6 +454,7 @@ function HostRoom({
   const [numberLayout, setNumberLayout] = useState(s0.numberLayout === 'random' ? 'random' : 'balanced');
   const [desert, setDesert] = useState(s0.desert === 'center' ? 'center' : 'random');
   const [friendlyRobber, setFriendlyRobber] = useState(s0.friendlyRobber);
+  const [balancedDice, setBalancedDice] = useState(s0.balancedDice);
   const [pace, setPace] = useState<'fast' | 'normal'>(s0.pace === 'fast' ? 'fast' : 'normal');
   const [pointsToWin, setPointsToWin] = useState(s0.pointsToWin);
   const [discardLimit, setDiscardLimit] = useState(s0.discardLimit);
@@ -587,6 +589,13 @@ function HostRoom({
                 const v = !friendlyRobber;
                 setFriendlyRobber(v);
                 void patch({ friendlyRobber: v });
+              }} />
+            <SetupTile icon={<Dices size={20} />} label="Dados balanceados" hint="suaviza sequências de azar"
+              active={balancedDice}
+              onClick={() => {
+                const v = !balancedDice;
+                setBalancedDice(v);
+                void patch({ balancedDice: v });
               }} />
           </div>
 

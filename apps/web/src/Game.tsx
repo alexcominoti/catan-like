@@ -17,7 +17,7 @@ import {
 import {
   Hexagon, Crown, Clock, Layers, Sparkles, Scroll, Swords, Trophy,
   Dices, ArrowLeftRight, Hand, MessageSquare, Send, Landmark,
-  Volume2, VolumeX, HelpCircle, LogOut,
+  Volume2, VolumeX, HelpCircle, LogOut, Share2, Download, Ban,
 } from 'lucide-react';
 import { suggestSetupSettlement } from '@trevalis/bot';
 import { Board, type InteractionMode } from './board/Board.js';
@@ -26,7 +26,7 @@ import { HandBar } from './ui/HandBar.js';
 import { useFlyer, FlyLayer, type Pt, type FlyOpts } from './ui/FlyLayer.js';
 import { RES_IMG, DEV_IMG } from './game/cards.js';
 import { Toasts, useToasts, type ToastTone } from './ui/Toasts.js';
-import { play as playSound, setMuted, unlockAudio, type SoundKind } from './ui/sound.js';
+import { play as playSound, setMuted, unlockAudio, nudgeVolume, type SoundKind } from './ui/sound.js';
 import type { GameClient } from './net/client.js';
 import { PLAYER_FILL, PLAYER_LABEL, RESOURCE_ICON, RESOURCE_LABEL } from './game/theme.js';
 
@@ -106,6 +106,9 @@ export function Game({
   const [yopPicks, setYopPicks] = useState<Resource[]>([]);
   const [tradeGive, setTradeGive] = useState<Record<Resource, number>>(zeroRes);
   const [tradeWant, setTradeWant] = useState<Record<Resource, number>>(zeroRes);
+  const [tradeAny, setTradeAny] = useState(0); // carta coringa: nº de recursos "quaisquer" pedidos
+  // Oferta coringa a resolver ao aceitar (o aceitante escolhe quais recursos dar).
+  const [wildcard, setWildcard] = useState<NonNullable<GameState['activeTrade']> | null>(null);
   const [help, setHelp] = useState(false);
   // Quando o ladrao pode roubar de 2+ jogadores, o humano escolhe a vitima.
   const [robberChoice, setRobberChoice] = useState<{ hexId: string; victims: PlayerColor[] } | null>(null);
@@ -169,6 +172,7 @@ export function Game({
     setYopPicks([]);
     setTradeGive(zeroRes());
     setTradeWant(zeroRes());
+    setTradeAny(0);
   }
 
   /**
@@ -375,6 +379,41 @@ export function Game({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [online.seq, online.deadlineSeconds]);
 
+  // Atalhos de teclado (Colonist v140/v151/v152): Espaço rola os dados / passa a
+  // vez; M muda o som; ↑/↓ ajustam o volume; F alterna a tela cheia. ESC (cancelar)
+  // já está no efeito acima. Ignora quando o foco está num campo/botão.
+  useEffect(() => {
+    function blocked(el: EventTarget | null): boolean {
+      const tag = (el as HTMLElement | null)?.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON';
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.altKey || e.ctrlKey || e.metaKey || blocked(e.target)) return;
+      switch (e.key) {
+        case ' ':
+          if (myRoll) { e.preventDefault(); dispatch({ t: 'rollDice' }); }
+          else if (myMain) { e.preventDefault(); dispatch({ t: 'endTurn' }); }
+          break;
+        case 'm': case 'M':
+          setMutedState((m) => { const n = !m; setMuted(n); return n; });
+          break;
+        case 'f': case 'F':
+          if (document.fullscreenElement) void document.exitFullscreen();
+          else void document.documentElement.requestFullscreen?.();
+          break;
+        case 'ArrowUp':
+          e.preventDefault(); push(`🔊 Volume ${Math.round(nudgeVolume(0.1) * 100)}%`, 'info');
+          break;
+        case 'ArrowDown':
+          e.preventDefault(); push(`🔊 Volume ${Math.round(nudgeVolume(-0.1) * 100)}%`, 'info');
+          break;
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myRoll, myMain]);
+
   const resourceCount = RESOURCES.reduce((s, r) => s + localPlayer.hand[r], 0);
 
   return (
@@ -415,6 +454,16 @@ export function Game({
                     ) : (
                       isBot(p.color) && <span className="bot-tag">bot</span>
                     )}
+                    {!isSpectator && p.color !== localColor && (() => {
+                      const on = (state.embargoes ?? []).some((e) => e.by === localColor && e.target === p.color);
+                      return (
+                        <button className={`embargo-btn${on ? ' on' : ''}`}
+                          title={on ? 'Embargo ativo — clique para comerciar de novo' : 'Embargar: recusar comércio com este jogador'}
+                          onClick={() => dispatch({ t: 'setEmbargo', target: p.color, on: !on })}>
+                          <Ban size={12} />
+                        </button>
+                      );
+                    })()}
                   </div>
                   <div className="noble-stats">
                     <Stat icon={<Layers size={12} />} label={`${handTotal(p)} recursos`} />
@@ -461,7 +510,8 @@ export function Game({
             <Board state={state} mode={effMode} hintVertex={setupHint} onBuild={onBuild} onHex={onHex} />
             {state.activeTrade && (
               <ActiveTradePopup state={state} dispatch={dispatch} localColor={localColor}
-                botOffer={isBot(state.activeTrade.from)} onCounter={() => openCounter(state.activeTrade!)} />
+                botOffer={isBot(state.activeTrade.from)} onCounter={() => openCounter(state.activeTrade!)}
+                onWildcardAccept={() => setWildcard(state.activeTrade)} />
             )}
             <Dice dice={state.dice} />
             {myRoll && (
@@ -571,14 +621,23 @@ export function Game({
       )}
       {(arming === 'trade' || arming === 'counter') && (
         <TradeBuilderModal state={state} proposer={localColor} tradeGive={tradeGive} tradeWant={tradeWant}
-          counter={arming === 'counter'}
-          setTradeGive={setTradeGive} setTradeWant={setTradeWant}
+          counter={arming === 'counter'} wantAny={tradeAny}
+          setTradeGive={setTradeGive} setTradeWant={setTradeWant} setWantAny={setTradeAny}
           onPropose={(to) =>
             arming === 'counter'
               ? dispatch({ t: 'counterTrade', give: tradeGive, want: tradeWant })
-              : dispatch({ t: 'proposeTrade', give: tradeGive, want: tradeWant, to })
+              : dispatch({ t: 'proposeTrade', give: tradeGive, want: tradeWant, wantAny: tradeAny, to })
           }
           onClose={resetTransient} />
+      )}
+      {wildcard && (
+        <WildcardPickModal
+          state={state}
+          color={localColor}
+          count={wildcard.wantAny!}
+          onConfirm={(resolveAny) => { dispatch({ t: 'respondTrade', accept: true, resolveAny }); setWildcard(null); }}
+          onClose={() => setWildcard(null)}
+        />
       )}
       {robberChoice && (
         <RobberVictimModal
@@ -598,9 +657,13 @@ export function Game({
             color={localColor}
             count={state.pendingDiscards[localColor]!}
             onDiscard={(resources) => dispatch({ t: 'discard', resources })}
+            onSelect={(resources) => online.client.sendSelect({ t: 'discard', resources })}
           />
         );
       })()}
+      {state.phase === 'ended' && state.winner && (
+        <EndGameOverlay state={state} localColor={localColor} elapsed={elapsed} turns={turnCount} onExit={onExit} />
+      )}
     </div>
   );
 
@@ -660,7 +723,13 @@ function HelpModal({ onClose }: { onClose: () => void }) {
         <h4>Portos</h4>
         <p className="muted-note">3:1 troca 3 iguais por 1 qualquer · 2:1 troca 2 do recurso do porto.</p>
         <h4>Controles</h4>
-        <p className="muted-note">Passe o mouse para ver alvos válidos · clique para colocar · ESC cancela.</p>
+        <p className="muted-note">Passe o mouse para ver alvos válidos · clique para colocar.</p>
+        <h4>Atalhos de teclado</h4>
+        <ul className="help-list">
+          <li><b>Espaço</b> — rolar os dados / passar a vez</li>
+          <li><b>M</b> — ligar/desligar o som · <b>↑ / ↓</b> — volume</li>
+          <li><b>F</b> — tela cheia · <b>ESC</b> — cancelar</li>
+        </ul>
         <button className="link" onClick={onClose}>Fechar (ESC)</button>
       </div>
     </div>
@@ -692,15 +761,17 @@ function Stepper({ value, max, onChange }: { value: number; max: number; onChang
 }
 
 function TradeBuilderModal({
-  state, proposer, counter, tradeGive, tradeWant, setTradeGive, setTradeWant, onPropose, onClose,
+  state, proposer, counter, tradeGive, tradeWant, wantAny, setTradeGive, setTradeWant, setWantAny, onPropose, onClose,
 }: {
   state: GameState;
   proposer: PlayerColor;
   counter?: boolean;
   tradeGive: Record<Resource, number>;
   tradeWant: Record<Resource, number>;
+  wantAny: number;
   setTradeGive: (v: Record<Resource, number>) => void;
   setTradeWant: (v: Record<Resource, number>) => void;
+  setWantAny: (v: number) => void;
   onPropose: (to: PlayerColor[]) => void;
   onClose: () => void;
 }) {
@@ -708,6 +779,7 @@ function TradeBuilderModal({
   const [to, setTo] = useState<PlayerColor[]>(others);
   const cur = state.players.find((p) => p.color === proposer)!;
   const total = (m: Record<Resource, number>) => RESOURCES.reduce((s, r) => s + m[r], 0);
+  const wantTotal = total(tradeWant) + (counter ? 0 : wantAny);
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal wide" onClick={(e) => e.stopPropagation()}>
@@ -730,6 +802,12 @@ function TradeBuilderModal({
                 <Stepper value={tradeWant[r]} max={19} onChange={(v) => setTradeWant({ ...tradeWant, [r]: v })} />
               </div>
             ))}
+            {!counter && (
+              <div className="trade-row trade-any">
+                <span title="Coringa: quem aceitar escolhe quais recursos dar">🃏 Qualquer recurso</span>
+                <Stepper value={wantAny} max={9} onChange={setWantAny} />
+              </div>
+            )}
           </div>
         </div>
         {!counter && (
@@ -745,8 +823,45 @@ function TradeBuilderModal({
           </div>
         )}
         <div className="modal-actions">
-          <button className="primary" disabled={total(tradeGive) === 0 || total(tradeWant) === 0 || (!counter && to.length === 0)}
+          <button className="primary" disabled={total(tradeGive) === 0 || wantTotal === 0 || (!counter && to.length === 0)}
             onClick={() => onPropose(to)}>{counter ? 'Enviar contraproposta' : 'Propor'}</button>
+          <button onClick={onClose}>Cancelar (ESC)</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Ao aceitar uma oferta CORINGA, quem aceita escolhe quais recursos dar (total = count). */
+function WildcardPickModal({
+  state, color, count, onConfirm, onClose,
+}: {
+  state: GameState;
+  color: PlayerColor;
+  count: number;
+  onConfirm: (resolveAny: Partial<Record<Resource, number>>) => void;
+  onClose: () => void;
+}) {
+  const hand = getPlayer(state, color).hand;
+  const [picks, setPicks] = useState<Record<Resource, number>>(zeroRes);
+  const total = RESOURCES.reduce((s, r) => s + picks[r], 0);
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h3>🃏 Escolha {count} recurso(s) para o coringa</h3>
+        <p className="muted-note">Selecionados: {total}/{count}</p>
+        <div className="trade-grid" style={{ gridTemplateColumns: '1fr' }}>
+          <div>
+            {RESOURCES.map((r) => (
+              <div key={r} className="trade-row">
+                <span>{RESOURCE_ICON[r]} {RESOURCE_LABEL[r]} ({hand[r]})</span>
+                <Stepper value={picks[r]} max={hand[r]} onChange={(v) => setPicks((p) => ({ ...p, [r]: v }))} />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="modal-actions">
+          <button className="primary" disabled={total !== count} onClick={() => onConfirm(picks)}>Aceitar troca</button>
           <button onClick={onClose}>Cancelar (ESC)</button>
         </div>
       </div>
@@ -761,16 +876,19 @@ function ActiveTradePopup({
   localColor,
   botOffer,
   onCounter,
+  onWildcardAccept,
 }: {
   state: GameState;
   dispatch: (a: Action, by?: PlayerColor) => boolean;
   localColor: PlayerColor;
   botOffer: boolean;
   onCounter: () => void;
+  onWildcardAccept: () => void;
 }) {
   const t = state.activeTrade!;
   const fmt = (m: Partial<Record<Resource, number>>) =>
     (Object.entries(m) as [Resource, number][]).filter(([, n]) => n > 0).map(([r, n]) => `${n}${RESOURCE_ICON[r]}`).join(' ') || '—';
+  const wantLabel = `${fmt(t.want)}${t.wantAny ? `${Object.values(t.want).some((n) => n > 0) ? ' + ' : ''}${t.wantAny}🃏` : ''}`;
   const iAmProposer = t.from === localColor;
   const iAmRecipient = t.to.includes(localColor);
   // Barra de tempo (20s): na oferta de um bot para mim, ou quando EU proponho.
@@ -778,7 +896,7 @@ function ActiveTradePopup({
   return (
     <div className="trade-popup">
       <h3>{PLAYER_LABEL[t.from]} quer trocar</h3>
-      <p className="trade-summary">Dá <b>{fmt(t.give)}</b> &nbsp;→&nbsp; quer <b>{fmt(t.want)}</b></p>
+      <p className="trade-summary">Dá <b>{fmt(t.give)}</b> &nbsp;→&nbsp; quer <b>{wantLabel}</b></p>
       {showTimer && (
         // key muda a cada nova proposta -> a barra remonta e o tempo reinicia em sincronia.
         <div className="trade-timer">
@@ -806,7 +924,10 @@ function ActiveTradePopup({
         <div className="modal-actions wrap">
           <button onClick={() => dispatch({ t: 'cancelTrade' }, t.from)}>✗ Recusar</button>
           <button onClick={onCounter}>✎ Contraproposta</button>
-          <button className="primary" onClick={() => dispatch({ t: 'respondTrade', accept: true }, localColor)}>✓ Aceitar</button>
+          <button className="primary"
+            onClick={() => (t.wantAny ? onWildcardAccept() : dispatch({ t: 'respondTrade', accept: true }, localColor))}>
+            ✓ Aceitar
+          </button>
         </div>
       ) : (
         <p className="muted-note">Aguardando resposta…</p>
@@ -847,15 +968,24 @@ function DiscardModal({
   color,
   count,
   onDiscard,
+  onSelect,
 }: {
   state: GameState;
   color: PlayerColor;
   count: number;
   onDiscard: (resources: Partial<Record<Resource, number>>) => void;
+  /** Envia a seleção tentativa ao servidor (usada se o tempo acabar). */
+  onSelect: (resources: Partial<Record<Resource, number>>) => void;
 }) {
   const hand = getPlayer(state, color).hand;
   const [picks, setPicks] = useState<Record<Resource, number>>({ wood: 0, brick: 0, wool: 0, grain: 0, ore: 0 });
   const total = RESOURCES.reduce((s, r) => s + picks[r], 0);
+  // Salva a seleção completa no servidor: se o tempo acabar, ela é usada em vez
+  // de um descarte aleatório (Colonist v196).
+  useEffect(() => {
+    if (total === count) onSelect(picks);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [picks, total, count]);
   return (
     <div className="overlay">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -882,6 +1012,143 @@ function DiscardModal({
 
 function getPlayer(state: GameState, color: PlayerColor) {
   return state.players.find((p) => p.color === color)!;
+}
+
+/** Placar final (pontos públicos, maior primeiro) — usado na tela de fim e na imagem. */
+function standingsOf(state: GameState): { color: PlayerColor; name: string; pts: number }[] {
+  return state.players
+    .map((p) => ({ color: p.color, name: p.name, pts: publicScoreOf(state, p.color) }))
+    .sort((a, b) => b.pts - a.pts);
+}
+
+/**
+ * Tela de fim de jogo (não existia): pódio + placar + botão de COMPARTILHAR uma
+ * imagem do resultado (Colonist v195 — marketing orgânico). Usa a Web Share API
+ * quando disponível (celular), senão baixa o PNG.
+ */
+function EndGameOverlay({
+  state, localColor, elapsed, turns, onExit,
+}: {
+  state: GameState;
+  localColor: PlayerColor;
+  elapsed: number;
+  turns: number;
+  onExit: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const winner = state.winner!;
+  const winnerName = getPlayer(state, winner).name;
+  const iWon = winner === localColor;
+  const standings = standingsOf(state);
+
+  async function share() {
+    setBusy(true);
+    try {
+      const blob = await renderResultBlob(state, elapsed, turns);
+      if (!blob) return;
+      const file = new File([blob], 'trevalis-resultado.png', { type: 'image/png' });
+      const nav = navigator as Navigator & { canShare?: (d: unknown) => boolean; share?: (d: unknown) => Promise<void> };
+      const text = `🏆 ${winnerName} venceu no Trevalis! Jogue em trevalis.app`;
+      if (nav.canShare?.({ files: [file] }) && nav.share) {
+        try { await nav.share({ files: [file], title: 'Trevalis', text }); return; } catch { /* usuário cancelou / não suportado: baixa */ }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'trevalis-resultado.png';
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="overlay endgame-overlay">
+      <div className="modal endgame-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="endgame-crown" style={{ background: PLAYER_FILL[winner] }}><Trophy size={30} /></div>
+        <h3 className="endgame-title">{iWon ? 'Você venceu!' : `${winnerName} venceu!`}</h3>
+        <p className="muted-note endgame-sub">{fmtTime(elapsed)} · {turns} turnos</p>
+        <div className="endgame-standings">
+          {standings.map((s, i) => (
+            <div key={s.color} className={`endgame-row${s.color === winner ? ' win' : ''}`}>
+              <span className="endgame-rank">{i + 1}º</span>
+              <span className="swatch" style={{ background: PLAYER_FILL[s.color] }} />
+              <span className="endgame-nm">{s.name}{s.color === localColor && <small className="you-tag"> você</small>}</span>
+              <b className="endgame-pts">{s.pts} pts</b>
+            </div>
+          ))}
+        </div>
+        <div className="modal-actions endgame-actions">
+          <button className="primary" onClick={share} disabled={busy}>
+            {navigatorCanShare() ? <Share2 size={15} /> : <Download size={15} />} {busy ? 'Gerando…' : 'Compartilhar resultado'}
+          </button>
+          <button onClick={onExit}><LogOut size={15} /> Sair</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function navigatorCanShare(): boolean {
+  return typeof navigator !== 'undefined' && typeof (navigator as { share?: unknown }).share === 'function';
+}
+
+/** Desenha um cartão de resultado (1200×630, formato de social card) e devolve um PNG. */
+function renderResultBlob(state: GameState, elapsed: number, turns: number): Promise<Blob | null> {
+  const W = 1200, H = 630;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return Promise.resolve(null);
+
+  // Fundo creme + moldura coral.
+  ctx.fillStyle = '#f6f0e7';
+  ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = '#c0563a';
+  ctx.lineWidth = 10;
+  ctx.strokeRect(14, 14, W - 28, H - 28);
+
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = '#8a7a64';
+  ctx.font = '700 26px Georgia, serif';
+  ctx.fillText('TREVALIS', 60, 78);
+
+  const winner = state.winner!;
+  const winnerName = getPlayer(state, winner).name;
+  ctx.fillStyle = '#362e24';
+  ctx.font = '700 62px Georgia, serif';
+  ctx.fillText(`🏆 ${winnerName} venceu!`, 60, 150);
+
+  ctx.fillStyle = '#8a7a64';
+  ctx.font = '400 26px Georgia, serif';
+  ctx.fillText(`${fmtTime(elapsed)} de partida · ${turns} turnos`, 60, 196);
+
+  // Placar.
+  const standings = standingsOf(state);
+  let y = 262;
+  for (let i = 0; i < standings.length && i < 8; i++) {
+    const s = standings[i]!;
+    ctx.fillStyle = '#8a7a64';
+    ctx.font = '700 30px Georgia, serif';
+    ctx.fillText(`${i + 1}º`, 60, y);
+    ctx.fillStyle = PLAYER_FILL[s.color];
+    ctx.fillRect(112, y - 26, 30, 30);
+    ctx.fillStyle = '#362e24';
+    ctx.font = `${s.color === winner ? '700' : '400'} 32px Georgia, serif`;
+    ctx.fillText(s.name, 160, y);
+    ctx.textAlign = 'right';
+    ctx.fillText(`${s.pts} pts`, W - 70, y);
+    ctx.textAlign = 'left';
+    y += 46;
+  }
+
+  ctx.fillStyle = '#c0563a';
+  ctx.font = '700 28px Georgia, serif';
+  ctx.fillText('Jogue em trevalis.app', 60, H - 46);
+
+  return new Promise((resolve) => canvas.toBlob((b) => resolve(b), 'image/png'));
 }
 
 // ---- Animação (coordenadas em tela) ----

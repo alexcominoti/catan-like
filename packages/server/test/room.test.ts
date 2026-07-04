@@ -24,6 +24,7 @@ function makeConfig(opts: { seed?: number; humans?: PlayerColor[] } = {}): RoomC
     pointsToWin: 10,
     discardLimit: 7,
     friendlyRobber: false,
+    balancedDice: false,
   };
 }
 
@@ -41,6 +42,44 @@ describe('GameRoom (servidor autoritativo)', () => {
     expect(room.seat(uid('red'))).toBe('red');
     expect(room.seat('quem-nao-e-jogador')).toBeNull(); // nao e dono de nenhum assento
     expect(room.colorOf(uid('red'))).toBe('red');
+  });
+
+  it('bônus de tempo: cada ação produtiva estende o prazo do turno (só do jogador da vez)', () => {
+    const room = new GameRoom('RB', makeConfig({ humans: ['red', 'blue'] }));
+    // Cenário controlado de fase principal: red com recursos para trocar com o banco.
+    room.state.phase = 'main';
+    room.state.currentPlayer = 'red';
+    room.state.activeTrade = null;
+    const red = room.state.players.find((p) => p.color === 'red')!;
+    red.hand.wood = 8;
+    const base = room.deadlineSeconds()!; // pace normal → 120s, sem bônus ainda
+
+    expect(room.apply('red', { t: 'tradeBank', give: 'wood', want: 'brick' }).ok).toBe(true);
+    const after1 = room.deadlineSeconds()!;
+    expect(after1).toBe(base + 15);
+
+    expect(room.apply('red', { t: 'tradeBank', give: 'wood', want: 'brick' }).ok).toBe(true);
+    expect(room.deadlineSeconds()).toBe(base + 30);
+
+    // O bônus é do jogador da vez: se passar para outra cor, não se aplica.
+    room.state.currentPlayer = 'blue';
+    expect(room.deadlineSeconds()).toBe(base);
+  });
+
+  it('timeout usa a seleção de descarte salva (não aleatória)', () => {
+    const room = new GameRoom('RS', makeConfig({ humans: ['red'] }));
+    // Cenário de descarte: red precisa descartar 2 e só tem madeira.
+    room.state.phase = 'discard';
+    room.state.pendingDiscards = { red: 2 };
+    const red = room.state.players.find((p) => p.color === 'red')!;
+    red.hand = { wood: 3, brick: 0, wool: 0, grain: 0, ore: 0 };
+    // O jogador já havia escolhido descartar 2 madeiras antes do tempo acabar.
+    room.setPendingSelection('red', { t: 'discard', resources: { wood: 2 } });
+
+    expect(room.forceTimeout()).toBe(true);
+    const after = room.state.players.find((p) => p.color === 'red')!;
+    expect(after.hand.wood).toBe(1); // descartou exatamente a seleção salva
+    expect(room.state.pendingDiscards.red).toBeUndefined();
   });
 
   it('aplica uma acao do humano e segue auto-jogando os bots', () => {

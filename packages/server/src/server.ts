@@ -260,6 +260,15 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
         broadcastAndSchedule(conn.code, live!);
         break;
       }
+      case 'select': {
+        // Seleção tentativa (ex.: descarte já escolhido): só guarda no servidor
+        // para usar no timeout — não valida agora nem faz broadcast.
+        if (!conn.code) return;
+        const room = manager.get(conn.code)?.gameRoom;
+        const color = room?.colorOf(userId) ?? null;
+        if (room && color) room.setPendingSelection(color, msg.action);
+        break;
+      }
     }
   }
 

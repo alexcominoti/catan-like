@@ -1,4 +1,5 @@
-import { nextInt, rollDie } from './rng.js';
+import { nextInt, rollDie, shuffle } from './rng.js';
+import { allDiceCombos } from './setup.js';
 import {
   COSTS,
   LARGEST_ARMY_MIN,
@@ -77,15 +78,17 @@ export function reduce(state: GameState, by: PlayerColor, action: Action): Reduc
     case 'playMonopoly':
       return playMonopoly(state, by, action.resource);
     case 'proposeTrade':
-      return proposeTrade(state, by, action.give, action.want, action.to);
+      return proposeTrade(state, by, action.give, action.want, action.to, action.wantAny);
     case 'counterTrade':
       return counterTrade(state, by, action.give, action.want);
     case 'respondTrade':
-      return respondTrade(state, by, action.accept);
+      return respondTrade(state, by, action.accept, action.resolveAny);
     case 'confirmTrade':
       return confirmTrade(state, by, action.with);
     case 'cancelTrade':
       return cancelTrade(state, by);
+    case 'setEmbargo':
+      return setEmbargo(state, by, action.target, action.on);
     case 'endTurn':
       return endTurn(state, by);
     default:
@@ -185,10 +188,22 @@ function rollDice(state: GameState, by: PlayerColor): ReduceResult {
   if (by !== state.currentPlayer) return err('Nao e a sua vez.');
 
   const next = clone(state);
-  const d1 = rollDie(next.rng);
-  const d2 = rollDie(d1.rng);
-  next.rng = d2.rng;
-  const dice: [number, number] = [d1.value, d2.value];
+  let dice: [number, number];
+  if (next.balancedDice) {
+    // Dados balanceados: puxa a proxima combinacao do saco; reabastece+embaralha
+    // ao esvaziar (mantem a distribuicao teorica a cada ciclo de 36 rolagens).
+    if (!next.diceBag || next.diceBag.length === 0) {
+      const b = shuffle(next.rng, allDiceCombos());
+      next.rng = b.rng;
+      next.diceBag = b.value;
+    }
+    dice = next.diceBag.pop()!;
+  } else {
+    const d1 = rollDie(next.rng);
+    const d2 = rollDie(d1.rng);
+    next.rng = d2.rng;
+    dice = [d1.value, d2.value];
+  }
   next.dice = dice;
   const sum = dice[0] + dice[1];
   const events: GameEvent[] = [{ t: 'diceRolled', dice, sum }];
@@ -565,26 +580,64 @@ function moveResources(
   }
 }
 
+/** Total de cartas num mapa de recursos. */
+function totalRes(m: Partial<Record<Resource, number>>): number {
+  return (Object.values(m) as number[]).reduce((s, n) => s + (n ?? 0), 0);
+}
+
+/** Soma dois mapas de recursos num novo mapa. */
+function mergeRes(
+  a: Partial<Record<Resource, number>>,
+  b: Partial<Record<Resource, number>>,
+): Partial<Record<Resource, number>> {
+  const out: Partial<Record<Resource, number>> = { ...a };
+  for (const [r, n] of Object.entries(b) as [Resource, number][]) out[r] = (out[r] ?? 0) + (n ?? 0);
+  return out;
+}
+
+/** Existe embargo comercial (em qualquer direção) entre `a` e `b`? */
+export function embargoed(state: GameState, a: PlayerColor, b: PlayerColor): boolean {
+  return (state.embargoes ?? []).some(
+    (e) => (e.by === a && e.target === b) || (e.by === b && e.target === a),
+  );
+}
+
+/** Liga/desliga o embargo de `by` sobre `target` (recusa comerciar com ele). */
+function setEmbargo(state: GameState, by: PlayerColor, target: PlayerColor, on: boolean): ReduceResult {
+  if (target === by) return err('Nao da pra embargar a si mesmo.');
+  if (!state.players.some((p) => p.color === target)) return err('Jogador inexistente.');
+  const next = clone(state);
+  const list = (next.embargoes ?? []).filter((e) => !(e.by === by && e.target === target));
+  if (on) list.push({ by, target });
+  next.embargoes = list;
+  return ok(next, [{ t: 'embargo', by, target, on }]);
+}
+
 function proposeTrade(
   state: GameState,
   by: PlayerColor,
   give: Partial<Record<Resource, number>>,
   want: Partial<Record<Resource, number>>,
   to?: PlayerColor[],
+  wantAny?: number,
 ): ReduceResult {
   if (state.phase !== 'main') return err('So da pra comerciar na fase principal.');
   if (by !== state.currentPlayer) return err('Nao e a sua vez.');
   const g = sanitizeResMap(give);
   const w = sanitizeResMap(want);
-  if (Object.keys(g).length === 0 || Object.keys(w).length === 0) {
+  const any = Number.isInteger(wantAny) && (wantAny ?? 0) > 0 ? wantAny! : 0;
+  if (Object.keys(g).length === 0 || (Object.keys(w).length === 0 && any === 0)) {
     return err('A troca precisa de recursos dos dois lados.');
   }
   const next = clone(state);
   const p = getPlayer(next, by);
   if (!canAfford(p, g)) return err('Voce nao tem os recursos oferecidos.');
-  const recipients = (to ?? next.players.map((pl) => pl.color)).filter((c) => c !== by);
-  if (recipients.length === 0) return err('Sem destinatarios.');
-  next.activeTrade = { from: by, give: g, want: w, to: recipients, accepted: [] };
+  // Destinatarios: exclui a si mesmo e quem esta em embargo (qualquer direcao).
+  const recipients = (to ?? next.players.map((pl) => pl.color)).filter(
+    (c) => c !== by && !embargoed(next, by, c),
+  );
+  if (recipients.length === 0) return err('Sem destinatarios (embargo?).');
+  next.activeTrade = { from: by, give: g, want: w, wantAny: any || undefined, to: recipients, accepted: [] };
   next.tradeOffersThisTurn += 1;
   return ok(next, [{ t: 'tradeProposed', from: by }]);
 }
@@ -605,6 +658,7 @@ function counterTrade(
   const g = sanitizeResMap(give);
   const w = sanitizeResMap(want);
   if (Object.keys(g).length === 0 || Object.keys(w).length === 0) return err('A troca precisa de recursos dos dois lados.');
+  if (embargoed(state, by, trade.from)) return err('Ha um embargo com esse jogador.');
   const next = clone(state);
   const p = getPlayer(next, by);
   if (!canAfford(p, g)) return err('Voce nao tem os recursos oferecidos.');
@@ -612,7 +666,12 @@ function counterTrade(
   return ok(next, [{ t: 'tradeCountered', from: by }]);
 }
 
-function respondTrade(state: GameState, by: PlayerColor, accept: boolean): ReduceResult {
+function respondTrade(
+  state: GameState,
+  by: PlayerColor,
+  accept: boolean,
+  resolveAny?: Partial<Record<Resource, number>>,
+): ReduceResult {
   const trade = state.activeTrade;
   if (!trade) return err('Nao ha proposta ativa.');
   if (by === trade.from) return err('O proponente nao responde.');
@@ -621,10 +680,19 @@ function respondTrade(state: GameState, by: PlayerColor, accept: boolean): Reduc
   const t = next.activeTrade!;
   if (accept) {
     const responder = getPlayer(next, by);
-    if (!canAfford(responder, t.want)) return err('Voce nao tem o que foi pedido.');
+    // Carta CORINGA: o aceitante escolhe quais recursos dar pelo `wantAny`.
+    let wantTotal = t.want;
+    if (t.wantAny && t.wantAny > 0) {
+      const resolve = sanitizeResMap(resolveAny ?? {});
+      if (totalRes(resolve) !== t.wantAny) return err(`Escolha ${t.wantAny} recurso(s) para o coringa.`);
+      wantTotal = mergeRes(t.want, resolve);
+      t.resolutions = { ...(t.resolutions ?? {}), [by]: resolve };
+    }
+    if (!canAfford(responder, wantTotal)) return err('Voce nao tem o que foi pedido.');
     if (!t.accepted.includes(by)) t.accepted.push(by);
   } else {
     t.accepted = t.accepted.filter((c) => c !== by);
+    if (t.resolutions) delete t.resolutions[by];
   }
   return ok(next, [{ t: 'tradeResponded', player: by, accept }]);
 }
@@ -633,14 +701,18 @@ function confirmTrade(state: GameState, by: PlayerColor, withPlayer: PlayerColor
   const trade = state.activeTrade;
   if (!trade) return err('Nao ha proposta ativa.');
   if (by !== trade.from) return err('Apenas o proponente fecha o negocio.');
+  if (embargoed(state, by, withPlayer)) return err('Ha um embargo com esse jogador.');
   if (!trade.accepted.includes(withPlayer)) return err('Esse jogador nao aceitou.');
   const next = clone(state);
+  const t = next.activeTrade!;
   const from = getPlayer(next, by);
   const to = getPlayer(next, withPlayer);
-  if (!canAfford(from, trade.give)) return err('Voce nao tem mais os recursos.');
-  if (!canAfford(to, trade.want)) return err('O outro jogador nao tem mais os recursos.');
-  moveResources(from, to, trade.give);
-  moveResources(to, from, trade.want);
+  // Coringa: soma a resolucao escolhida por quem aceitou ao que foi pedido.
+  const wantTotal = t.wantAny && t.wantAny > 0 ? mergeRes(t.want, t.resolutions?.[withPlayer] ?? {}) : t.want;
+  if (!canAfford(from, t.give)) return err('Voce nao tem mais os recursos.');
+  if (!canAfford(to, wantTotal)) return err('O outro jogador nao tem mais os recursos.');
+  moveResources(from, to, t.give);
+  moveResources(to, from, wantTotal);
   next.activeTrade = null;
   return ok(next, [{ t: 'tradeExecuted', from: by, with: withPlayer }]);
 }
