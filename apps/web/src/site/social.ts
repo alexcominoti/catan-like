@@ -73,6 +73,49 @@ export async function getOnlineCount(): Promise<number> {
   }
 }
 
+/* ---- Notificações + convites de sala (Tier 2) ---- */
+
+export interface RoomInvite {
+  fromUserId: string;
+  fromUsername: string;
+  code: string;
+  at: number;
+}
+
+export interface Notifications {
+  friendRequests: PendingView[];
+  invites: RoomInvite[];
+  onlineFriends: FriendView[];
+  count: number;
+}
+
+const EMPTY_NOTIFS: Notifications = { friendRequests: [], invites: [], onlineFriends: [], count: 0 };
+
+/** Agregado do sino: pedidos de amizade + convites de sala + amigos online. */
+export async function getNotifications(): Promise<Notifications> {
+  try {
+    const res = await fetch('/api/notifications');
+    if (!res.ok) return EMPTY_NOTIFS;
+    return (await res.json().catch(() => EMPTY_NOTIFS)) as Notifications;
+  } catch {
+    return EMPTY_NOTIFS;
+  }
+}
+
+/** Convida um amigo (por userId) para a sala `code`. */
+export function sendInvite(toUserId: string, code: string): Promise<SocialResult> {
+  return post('/api/invites', { toUserId, code });
+}
+
+/** Dispensa um convite recebido. */
+export async function dismissInvite(code: string): Promise<void> {
+  try {
+    await fetch('/api/invites/dismiss', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ code }) });
+  } catch {
+    /* best-effort */
+  }
+}
+
 /* ---- Matchmaking "Jogo rápido" (Tier 2) ---- */
 
 export type MatchmakingStatus =

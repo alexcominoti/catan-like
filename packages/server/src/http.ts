@@ -9,7 +9,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { join, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { toNodeHandler, fromNodeHeaders } from 'better-auth/node';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { getDb, user as userTable } from '@trevalis/db';
 import { getAuth, isUsernameTaken } from './auth.js';
 import { validateUsername } from './username.js';
@@ -36,6 +36,7 @@ import {
   sendFriendRequest,
 } from './friends.js';
 import { joinQuickMatch, leaveQuickMatch, matchmakingStatus } from './matchmaking.js';
+import { invites } from './invites.js';
 import type { RoomManager } from './room.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -329,6 +330,71 @@ async function handleRequest(
       sendJson(res, result.httpStatus, { error: result.error });
       return;
     }
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  // --- notificações: pedidos de amizade + convites de sala + amigos online ---
+  if (path === '/api/notifications' && req.method === 'GET') {
+    const u = await authedUser(req, res);
+    if (!u) return;
+    const f = await listFriends(u.id);
+    const inv = invites.listFor(u.id);
+    const onlineFriends = f.friends.filter((x) => x.online);
+    sendJson(res, 200, {
+      friendRequests: f.incoming,
+      invites: inv,
+      onlineFriends,
+      count: f.incoming.length + inv.length,
+    });
+    return;
+  }
+
+  // --- convidar um amigo para a minha sala ---
+  if (path === '/api/invites' && req.method === 'POST') {
+    const u = await authedUser(req, res);
+    if (!u) return;
+    let body: unknown;
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      sendJson(res, 400, { error: 'Corpo inválido.' });
+      return;
+    }
+    const b = body as { toUserId?: unknown; code?: unknown };
+    const toUserId = typeof b.toUserId === 'string' ? b.toUserId : '';
+    const code = typeof b.code === 'string' ? b.code.toUpperCase() : '';
+    if (!toUserId || !code) {
+      sendJson(res, 400, { error: 'Convite inválido.' });
+      return;
+    }
+    const room = await getRoom(code);
+    if (!room || room.status !== 'waiting') {
+      sendJson(res, 409, { error: 'A sala não está mais aberta.' });
+      return;
+    }
+    const [me] = await getDb()
+      .select({ username: sql<string>`coalesce(${userTable.username}, ${userTable.name})` })
+      .from(userTable)
+      .where(eq(userTable.id, u.id))
+      .limit(1);
+    invites.add(toUserId, { userId: u.id, username: me?.username ?? 'alguém' }, code);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  // --- dispensar um convite recebido ---
+  if (path === '/api/invites/dismiss' && req.method === 'POST') {
+    const u = await authedUser(req, res);
+    if (!u) return;
+    let body: unknown;
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      body = {};
+    }
+    const code = typeof (body as { code?: unknown }).code === 'string' ? (body as { code: string }).code.toUpperCase() : '';
+    if (code) invites.remove(u.id, code);
     sendJson(res, 200, { ok: true });
     return;
   }
