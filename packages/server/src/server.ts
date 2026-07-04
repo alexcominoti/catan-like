@@ -86,6 +86,7 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
 
   const sockets = new Map<string, WebSocket>(); // connId -> socket
   const timers = new Map<string, ReturnType<typeof setTimeout>>(); // code -> timer de acao da partida
+  const botTimers = new Map<string, ReturnType<typeof setTimeout>>(); // code -> timer da PRÓXIMA jogada de bot
 
   interface Conn {
     connId: string;
@@ -143,6 +144,8 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
   // as salas de espera inativas no BANCO (waiting expiradas, que nunca abrem WS).
   const sweeper = setInterval(() => {
     manager.sweep(EMPTY_ROOM_TTL_MS, (code) => {
+      const bt = botTimers.get(code);
+      if (bt) { clearTimeout(bt); botTimers.delete(code); }
       manager.remove(code);
       void onRoomExpired(code);
     });
@@ -161,6 +164,10 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
     });
   }, MATCHMAKING_INTERVAL_MS);
   wss.on('close', () => clearInterval(matchmaker));
+  wss.on('close', () => {
+    for (const t of botTimers.values()) clearTimeout(t);
+    botTimers.clear();
+  });
 
   function send(ws: WebSocket, m: ServerMessage): void {
     ws.send(JSON.stringify(m));
@@ -215,6 +222,33 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
   function broadcastAndSchedule(code: string, live: LiveRoom): void {
     broadcast(code, live);
     scheduleTimer(code, live);
+    scheduleBotPump(code, live);
+  }
+
+  /**
+   * Naturalidade dos bots: em vez de rodar TODAS as jogadas dos bots de uma vez,
+   * o servidor aplica UMA por vez com um intervalo entre elas. Se houver jogada de
+   * bot pendente, agenda a próxima; ao aplicá-la, re-emite o estado (mostrando só
+   * aquela ação) e o ciclo se repete via `broadcastAndSchedule`.
+   */
+  function scheduleBotPump(code: string, live: LiveRoom): void {
+    const prev = botTimers.get(code);
+    if (prev) {
+      clearTimeout(prev);
+      botTimers.delete(code);
+    }
+    const room = live.gameRoom;
+    if (!room || !room.botHasMove()) return;
+    const delay = room.config.pace === 'fast' ? 650 : 1100; // ms entre jogadas de bot
+    botTimers.set(
+      code,
+      setTimeout(() => {
+        botTimers.delete(code);
+        const cur = manager.get(code);
+        if (!cur || cur.gameRoom !== room) return; // sala trocada/removida entretanto
+        if (room.stepBot()) broadcastAndSchedule(code, live); // re-agenda a próxima jogada
+      }, delay),
+    );
   }
 
   function leaveRoom(code: string, userId: string, connId: string): void {
@@ -256,6 +290,7 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
             events: [], // instantaneo inicial: sem "delta" para tocar som/log
           });
           scheduleTimer(code, live);
+          scheduleBotPump(code, live); // caso entre durante a vez de um bot
         }
         break;
       }

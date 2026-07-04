@@ -91,6 +91,17 @@ describe('GameRoom (servidor autoritativo)', () => {
     expect(room.state.buildings[vid]?.owner).toBe('red');
   });
 
+  it('stepBot aplica UMA jogada de bot por vez (o servidor pausa entre elas)', () => {
+    const room = new GameRoom('RP', makeConfig({ humans: ['red'] })); // blue/white/orange = bots
+    // Cenário controlado: é a vez de um bot (blue) rolar os dados.
+    room.state.phase = 'roll';
+    room.state.currentPlayer = 'blue';
+    room.state.dice = null;
+    expect(room.botHasMove()).toBe(true);
+    expect(room.stepBot()).toBe(true);
+    expect(room.state.dice).not.toBeNull(); // blue rolou — exatamente uma ação
+  });
+
   it('rejeita acao ilegal sem mudar o estado', () => {
     const room = new GameRoom('R4', makeConfig({ humans: ['red'] }));
     const before = JSON.stringify(room.state);
@@ -139,7 +150,10 @@ describe('GameRoom (servidor autoritativo)', () => {
     room.seat(uid('red'));
     expect(room.awaitedHuman()).toBe('red');
     room.markDisconnected(uid('red'));
-    room.convertToBot(uid('red')); // graca esgotada -> vira bot medio e assume
+    room.convertToBot(uid('red')); // graca esgotada -> vira bot medio
+    // Na prod o servidor pilota os bots (um por vez, com intervalo); aqui drenamos.
+    let g = 0;
+    while (g++ < 100000 && room.stepBot()) { /* joga ate o fim */ }
     expect(room.awaitedHuman()).toBeNull();
     expect(room.state.phase).toBe('ended');
   });
@@ -158,8 +172,9 @@ describe('GameRoom (servidor autoritativo)', () => {
     room.seat(uid('red'));
     let guard = 0;
     while (room.state.phase !== 'ended' && guard++ < 100000) {
-      if (room.deadlineSeconds() == null) break; // so resolve quando ha janela ativa
-      room.forceTimeout();
+      if (room.botHasMove()) { room.stepBot(); continue; } // vez de bot: o servidor pilota
+      if (room.deadlineSeconds() == null) break; // sem janela ativa (não deveria)
+      room.forceTimeout(); // humano AFK: resolve por tempo (e após N vira bot)
     }
     expect(room.state.phase).toBe('ended');
     expect(room.state.winner).not.toBeNull();
