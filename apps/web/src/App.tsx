@@ -20,12 +20,19 @@ function profileUsernameFromPath(): string | null {
   return m ? decodeURIComponent(m[1]!) : null;
 }
 
-/** Deep-link inicial: link de redefinicao de senha, link de sala, link de perfil, ou landing. */
+/** É a rota do lobby (`/lobby`)? */
+function isLobbyPath(): boolean {
+  if (typeof window === 'undefined') return false;
+  return /^\/lobby\/?$/.test(window.location.pathname);
+}
+
+/** Deep-link inicial: link de redefinicao de senha, link de sala, link de perfil, lobby, ou landing. */
 function initialPage(): Page {
   if (typeof window === 'undefined') return 'landing';
   if (window.location.pathname.startsWith('/reset-password')) return 'auth';
   if (roomCodeFromPath()) return 'room';
   if (profileUsernameFromPath()) return 'profile';
+  if (isLobbyPath()) return 'lobby';
   return 'landing';
 }
 
@@ -35,6 +42,7 @@ function syncUrl(page: Page, roomCode: string | null, profileUsername: string | 
   let target = '/';
   if (page === 'room' && roomCode) target = `/room/${roomCode}`;
   else if (page === 'profile' && profileUsername) target = `/profile/${encodeURIComponent(profileUsername)}`;
+  else if (page === 'lobby') target = '/lobby';
   if (window.location.pathname !== target) {
     window.history.pushState({}, '', target);
   }
@@ -62,6 +70,9 @@ export function App() {
         setPage('profile');
       } else if (window.location.pathname.startsWith('/reset-password')) {
         setPage('auth');
+      } else if (isLobbyPath()) {
+        setRoomCode(null);
+        setPage('lobby');
       } else {
         setRoomCode(null);
         setPage('landing');
