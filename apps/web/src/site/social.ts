@@ -73,6 +73,45 @@ export async function getOnlineCount(): Promise<number> {
   }
 }
 
+/* ---- Matchmaking "Jogo rápido" (Tier 2) ---- */
+
+export type MatchmakingStatus =
+  | { state: 'idle' }
+  | { state: 'searching'; code: string; players: number }
+  | { state: 'matched'; code: string };
+
+/** Entra na fila casual; devolve o código da mesa (ou null em erro). */
+export async function joinQuickMatch(): Promise<string | null> {
+  try {
+    const res = await fetch('/api/matchmaking/join', { method: 'POST', headers: JSON_HEADERS });
+    if (!res.ok) return null;
+    const data = (await res.json().catch(() => ({}))) as { code?: string };
+    return data.code ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Estado atual na fila (polling do cliente). */
+export async function getMatchmakingStatus(): Promise<MatchmakingStatus> {
+  try {
+    const res = await fetch('/api/matchmaking/status');
+    if (!res.ok) return { state: 'idle' };
+    return (await res.json().catch(() => ({ state: 'idle' }))) as MatchmakingStatus;
+  } catch {
+    return { state: 'idle' };
+  }
+}
+
+/** Sai da fila. */
+export async function leaveQuickMatch(): Promise<void> {
+  try {
+    await fetch('/api/matchmaking/leave', { method: 'POST', headers: JSON_HEADERS });
+  } catch {
+    /* best-effort */
+  }
+}
+
 /** Heartbeat: marca o usuário logado como online (com a sala atual, se houver). */
 export async function pingPresence(room: string | null = null): Promise<void> {
   try {

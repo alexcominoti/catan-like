@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
-import { Zap, Users, Lock, Plus, Globe, RefreshCw } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Zap, Users, Lock, Plus, Globe, RefreshCw, X } from 'lucide-react';
 import { authClient } from '../auth/client.js';
 import { joinRoomApi, listRooms, type RoomListItem } from './rooms.js';
+import { getMatchmakingStatus, joinQuickMatch, leaveQuickMatch } from './social.js';
 import { LoginGate } from './LoginGate.js';
 
 const MAP_LABEL: Record<string, string> = {
@@ -26,6 +27,57 @@ export function RoomBrowser({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [joining, setJoining] = useState<string | null>(null);
+  // Matchmaking "Jogo rápido": busca automática por uma mesa.
+  const [searching, setSearching] = useState(false);
+  const [queueCount, setQueueCount] = useState(1);
+  const searchingRef = useRef(false);
+
+  useEffect(() => {
+    searchingRef.current = searching;
+  }, [searching]);
+
+  // Polling da fila: enquanto busca, consulta o status; ao casar, entra na mesa.
+  useEffect(() => {
+    if (!searching) return;
+    let alive = true;
+    const tick = async () => {
+      const s = await getMatchmakingStatus();
+      if (!alive) return;
+      if (s.state === 'matched') {
+        setSearching(false);
+        onEnterRoom(s.code);
+      } else if (s.state === 'searching') {
+        setQueueCount(s.players);
+      } else {
+        setSearching(false);
+      }
+    };
+    void tick();
+    const id = setInterval(() => void tick(), 2000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [searching, onEnterRoom]);
+
+  // Se sair da tela buscando, libera a vaga na fila.
+  useEffect(() => () => { if (searchingRef.current) void leaveQuickMatch(); }, []);
+
+  async function startQuickMatch() {
+    setError(null);
+    const code = await joinQuickMatch();
+    if (!code) {
+      setError('Não foi possível entrar na fila agora.');
+      return;
+    }
+    setQueueCount(1);
+    setSearching(true);
+  }
+
+  function cancelQuickMatch() {
+    setSearching(false);
+    void leaveQuickMatch();
+  }
 
   function refresh() {
     setLoading(true);
@@ -83,16 +135,16 @@ export function RoomBrowser({
 
       <div className="quick-cards">
         {/*
-          "Jogo rápido" e "Ranqueada" desativados ("Em breve"): não há matchmaking nem
-          ranking implementados. Ver docs/backlog.md → Lobby. Reativar ao construir a
-          fila de matchmaking / sistema de ELO.
+          "Jogo rápido" (matchmaking casual) LIGADO — Tier 2. "Ranqueada" segue
+          "Em breve" até o sistema de ELO (branch competitiva). Ver docs/backlog.md.
         */}
-        <div className="quick-card disabled" aria-disabled="true">
-          <span className="soon-tag">Em breve</span>
+        <div className="quick-card">
           <span className="quick-icon"><Zap size={18} /></span>
           <h3>Jogo rápido</h3>
-          <p>Entramos em qualquer mesa casual aberta.</p>
-          <button className="dark" disabled>Jogar</button>
+          <p>Entramos numa mesa casual e completamos com bots.</p>
+          <button className="dark" onClick={startQuickMatch} disabled={searching}>
+            {searching ? 'Procurando…' : 'Jogar'}
+          </button>
         </div>
         <div className="quick-card green disabled" aria-disabled="true">
           <span className="soon-tag">Em breve</span>
@@ -158,6 +210,19 @@ export function RoomBrowser({
           ))
         )}
       </div>
+
+      {searching && (
+        <div className="overlay">
+          <div className="modal mm-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="mm-spinner"><Zap size={26} /></div>
+            <h3>Procurando partida…</h3>
+            <p className="muted-note">
+              {queueCount > 1 ? `${queueCount} jogadores na fila` : 'Você entrou na fila'} · completamos com bots em alguns segundos.
+            </p>
+            <button className="ghost" onClick={cancelQuickMatch}><X size={15} /> Cancelar</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

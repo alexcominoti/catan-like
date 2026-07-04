@@ -35,6 +35,7 @@ import {
   removeFriend,
   sendFriendRequest,
 } from './friends.js';
+import { joinQuickMatch, leaveQuickMatch, matchmakingStatus } from './matchmaking.js';
 import type { RoomManager } from './room.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -328,6 +329,27 @@ async function handleRequest(
       sendJson(res, result.httpStatus, { error: result.error });
       return;
     }
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  // --- matchmaking "Jogo rápido": entrar na fila / status / sair ---
+  if (path === '/api/matchmaking/join' && req.method === 'POST') {
+    const u = await authedUser(req, res);
+    if (!u) return;
+    sendJson(res, 200, await joinQuickMatch(u.id));
+    return;
+  }
+  if (path === '/api/matchmaking/status' && req.method === 'GET') {
+    const u = await authedUser(req, res);
+    if (!u) return;
+    sendJson(res, 200, await matchmakingStatus(u.id));
+    return;
+  }
+  if (path === '/api/matchmaking/leave' && req.method === 'POST') {
+    const u = await authedUser(req, res);
+    if (!u) return;
+    await leaveQuickMatch(u.id);
     sendJson(res, 200, { ok: true });
     return;
   }

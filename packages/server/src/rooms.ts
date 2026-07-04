@@ -437,6 +437,21 @@ export async function startRoom(code: string, hostUserId: string): Promise<JoinR
   return { ok: true, room: room! };
 }
 
+/**
+ * Inicia uma sala pelo SISTEMA (sem checagem de anfitrião) — usado pelo
+ * matchmaking, que enche a mesa de bots e começa a partida automaticamente.
+ * Só age em salas ainda 'waiting'.
+ */
+export async function forceStartRoom(code: string): Promise<boolean> {
+  const db = getDb();
+  const updated = await db
+    .update(roomTable)
+    .set({ status: 'in_progress', startedAt: new Date() })
+    .where(and(eq(roomTable.code, code), eq(roomTable.status, 'waiting')))
+    .returning({ id: roomTable.id });
+  return updated.length > 0;
+}
+
 /* ------------------------------------------------------------------ */
 /* Edição AO VIVO da sala de espera (host muda regras/bots; convidados entram/saem)  */
 /* ------------------------------------------------------------------ */
