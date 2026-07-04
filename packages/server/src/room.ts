@@ -24,6 +24,11 @@ const PACE_TIMERS: Record<Pace, {
 /** Turnos consecutivos perdidos por tempo ate a vaga virar bot medio (AFK). */
 const MAX_TURN_TIMEOUTS = 3;
 
+/** Bonus de tempo (s) somado ao prazo do turno a cada acao/troca (Colonist v35). */
+const BONUS_PER_ACTION = 15;
+/** Teto do bonus acumulado num mesmo turno. */
+const MAX_TURN_BONUS = 60;
+
 /** Segundos de "graca" apos uma desconexao antes de a vaga virar bot medio. */
 export const RECONNECT_GRACE_MS = 15_000;
 
@@ -49,6 +54,9 @@ export class GameRoom {
   private readonly botSet: Set<PlayerColor>;
   /** Turnos seguidos perdidos por tempo, por cor (zera ao agir manualmente). */
   private readonly timeoutStreak = new Map<PlayerColor, number>();
+  /** Bonus de tempo acumulado no turno atual + de quem é (Colonist v35). */
+  private turnBonusSeconds = 0;
+  private bonusColor: PlayerColor | null = null;
   /** Eventos acumulados desde o ultimo `drainEvents()` (log/toast/som no cliente). */
   private pendingEvents: GameEvent[] = [];
 
@@ -118,11 +126,22 @@ export class GameRoom {
 
   /** Aplica uma acao de `by` (so legal pelo reduce) e auto-joga os bots em seguida. */
   apply(by: PlayerColor, action: Action): { ok: boolean; error?: string } {
+    const wasMain = this.state.phase === 'main';
     const r = reduce(this.state, by, action);
     if (!r.ok) return { ok: false, error: r.error };
     this.state = r.state;
     this.pendingEvents.push(...r.events);
     this.timeoutStreak.set(by, 0); // agiu manualmente: zera o contador de AFK
+    // Bonus de tempo: cada acao/troca "produtiva" no turno principal estende o
+    // prazo (evita timeout injusto de quem esta construindo/negociando). Passar a
+    // vez ou cancelar nao conta.
+    if (wasMain && action.t !== 'endTurn' && action.t !== 'cancelTrade') {
+      if (this.bonusColor !== by) {
+        this.bonusColor = by;
+        this.turnBonusSeconds = 0;
+      }
+      this.turnBonusSeconds = Math.min(MAX_TURN_BONUS, this.turnBonusSeconds + BONUS_PER_ACTION);
+    }
     this.runBots();
     return { ok: true };
   }
@@ -158,7 +177,8 @@ export class GameRoom {
     if (s.phase === 'setup1' || s.phase === 'setup2') return s.setupLastVertex ? t.road : t.settlement;
     if (s.phase === 'roll') return t.dice;
     if (s.phase === 'moveBlocker') return t.robber;
-    return t.turn; // fase principal: orcamento do turno
+    // Fase principal: orcamento do turno + bonus acumulado (so do jogador da vez).
+    return t.turn + (this.bonusColor === s.currentPlayer ? this.turnBonusSeconds : 0);
   }
 
   /**

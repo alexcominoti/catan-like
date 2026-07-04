@@ -44,6 +44,28 @@ describe('GameRoom (servidor autoritativo)', () => {
     expect(room.colorOf(uid('red'))).toBe('red');
   });
 
+  it('bônus de tempo: cada ação produtiva estende o prazo do turno (só do jogador da vez)', () => {
+    const room = new GameRoom('RB', makeConfig({ humans: ['red', 'blue'] }));
+    // Cenário controlado de fase principal: red com recursos para trocar com o banco.
+    room.state.phase = 'main';
+    room.state.currentPlayer = 'red';
+    room.state.activeTrade = null;
+    const red = room.state.players.find((p) => p.color === 'red')!;
+    red.hand.wood = 8;
+    const base = room.deadlineSeconds()!; // pace normal → 120s, sem bônus ainda
+
+    expect(room.apply('red', { t: 'tradeBank', give: 'wood', want: 'brick' }).ok).toBe(true);
+    const after1 = room.deadlineSeconds()!;
+    expect(after1).toBe(base + 15);
+
+    expect(room.apply('red', { t: 'tradeBank', give: 'wood', want: 'brick' }).ok).toBe(true);
+    expect(room.deadlineSeconds()).toBe(base + 30);
+
+    // O bônus é do jogador da vez: se passar para outra cor, não se aplica.
+    room.state.currentPlayer = 'blue';
+    expect(room.deadlineSeconds()).toBe(base);
+  });
+
   it('aplica uma acao do humano e segue auto-jogando os bots', () => {
     const room = new GameRoom('R3', makeConfig({ humans: ['red'] }));
     const vid = room.state.board.vertexOrder[0]!;
