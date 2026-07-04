@@ -1612,3 +1612,10 @@ button.link {
 .endgame-nm { flex: 1; font-weight: 600; }
 .endgame-pts { font-variant-numeric: tabular-nums; }
 .endgame-actions { justify-content: center; }
+
+/* ---- Embargo (Nobres) + coringa (troca) — Tier 3 ---- */
+.embargo-btn { display: inline-flex; align-items: center; justify-content: center; padding: 2px 5px; margin-left: 6px; border-radius: 6px; background: transparent; border: 1px solid transparent; color: var(--muted); opacity: .45; }
+.embargo-btn:hover:not(:disabled) { opacity: 1; border-color: var(--border); }
+.embargo-btn.on { color: #fff; background: var(--destructive); opacity: 1; border-color: transparent; }
+.trade-any span { font-weight: 600; }
+.trade-any { border-top: 1px dashed var(--border); margin-top: 4px; padding-top: 8px; }

@@ -11,6 +11,7 @@ import {
   RESOURCES,
   TERRAIN_RESOURCE,
   distanceRuleOk,
+  embargoed,
   handTotal,
   longestRoadLength,
   maritimeRate,
@@ -58,7 +59,9 @@ export function planBotAction(
   if (state.activeTrade) {
     const t = state.activeTrade;
     for (const c of t.to) {
-      if (isBot(c) && !t.accepted.includes(c) && tradeFavorable(state, c, t)) {
+      // Ofertas com coringa (wantAny) exigem que quem aceita escolha os recursos —
+      // o bot não resolve isso; simplesmente ignora essas ofertas.
+      if (isBot(c) && !t.accepted.includes(c) && !t.wantAny && tradeFavorable(state, c, t)) {
         return { by: c, action: { t: 'respondTrade', accept: true } };
       }
     }
@@ -267,7 +270,9 @@ function planTradeProposal(
   level: Difficulty,
   humans: PlayerColor[],
 ): Action | null {
-  if (humans.length === 0 || state.tradeOffersThisTurn > 0) return null;
+  // Nunca oferece a quem está em embargo (senão o reduce recusaria e o bot travaria).
+  const targets = humans.filter((h) => !embargoed(state, me, h));
+  if (targets.length === 0 || state.tradeOffersThisTurn > 0) return null;
   const p = getPlayer(state, me);
   for (const cost of expansionGoals(state, me, level)) {
     const needed = RESOURCES.find((r) => (cost[r] ?? 0) - p.hand[r] > 0);
@@ -276,7 +281,7 @@ function planTradeProposal(
       (r) => r !== needed && p.hand[r] - (cost[r] ?? 0) >= 1 && maritimeRate(state, me, r) >= 3,
     );
     if (!give) continue;
-    return { t: 'proposeTrade', give: { [give]: 1 }, want: { [needed]: 1 }, to: humans };
+    return { t: 'proposeTrade', give: { [give]: 1 }, want: { [needed]: 1 }, to: targets };
   }
   return null;
 }

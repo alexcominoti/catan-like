@@ -12,7 +12,7 @@ export {
   type NumberLayout,
   type DesertPlacement,
 } from './setup.js';
-export { reduce } from './reduce.js';
+export { reduce, embargoed } from './reduce.js';
 export { projectFor, projectForSpectator } from './project.js';
 export {
   COSTS,

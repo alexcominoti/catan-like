@@ -155,12 +155,23 @@ export interface TradeOffer {
   from: PlayerColor;
   /** O que 'from' oferece (vai para quem aceitar). */
   give: Partial<Record<Resource, number>>;
-  /** O que 'from' quer receber. */
+  /** O que 'from' quer receber (recursos especificos). */
   want: Partial<Record<Resource, number>>;
+  /** Carta CORINGA: quantos recursos "quaisquer" 'from' quer, alem de `want`
+   *  (quem aceita escolhe quais dar). 0/ausente = sem coringa. */
+  wantAny?: number;
   /** Jogadores elegiveis a responder. */
   to: PlayerColor[];
   /** Quem ja aceitou (o proponente escolhe com quem fechar). */
   accepted: PlayerColor[];
+  /** Como cada aceitante resolveu o coringa (recursos que dara pelo `wantAny`). */
+  resolutions?: Partial<Record<PlayerColor, Partial<Record<Resource, number>>>>;
+}
+
+/** Um embargo comercial: `by` se recusa a comerciar com `target`. */
+export interface Embargo {
+  by: PlayerColor;
+  target: PlayerColor;
 }
 
 export interface GameState {
@@ -181,6 +192,8 @@ export interface GameState {
   returnPhaseAfterBlocker: 'roll' | 'main' | null;
   /** Oferta de comercio entre jogadores ativa (ou null). */
   activeTrade: TradeOffer | null;
+  /** Embargos comerciais ativos (quem se recusa a negociar com quem). */
+  embargoes: Embargo[];
   /** Quantas propostas de troca foram feitas no turno atual (limita bots). */
   tradeOffersThisTurn: number;
   /** Pontos necessarios para vencer (padrao 10). */
@@ -231,6 +244,7 @@ export type GameEvent =
   | { t: 'tradeResponded'; player: PlayerColor; accept: boolean }
   | { t: 'tradeExecuted'; from: PlayerColor; with: PlayerColor }
   | { t: 'tradeCancelled' }
+  | { t: 'embargo'; by: PlayerColor; target: PlayerColor; on: boolean }
   | { t: 'longestRoad'; owner: PlayerColor | null }
   | { t: 'largestArmy'; owner: PlayerColor | null }
   | { t: 'turnEnded'; next: PlayerColor }
@@ -251,11 +265,12 @@ export type Action =
   | { t: 'moveBlocker'; hexId: string; stealFrom?: PlayerColor }
   | { t: 'discard'; resources: Partial<Record<Resource, number>> }
   | { t: 'tradeBank'; give: Resource; want: Resource }
-  | { t: 'proposeTrade'; give: Partial<Record<Resource, number>>; want: Partial<Record<Resource, number>>; to?: PlayerColor[] }
+  | { t: 'proposeTrade'; give: Partial<Record<Resource, number>>; want: Partial<Record<Resource, number>>; wantAny?: number; to?: PlayerColor[] }
   | { t: 'counterTrade'; give: Partial<Record<Resource, number>>; want: Partial<Record<Resource, number>> }
-  | { t: 'respondTrade'; accept: boolean }
+  | { t: 'respondTrade'; accept: boolean; resolveAny?: Partial<Record<Resource, number>> }
   | { t: 'confirmTrade'; with: PlayerColor }
   | { t: 'cancelTrade' }
+  | { t: 'setEmbargo'; target: PlayerColor; on: boolean }
   | { t: 'endTurn' };
 
 export type ReduceResult =

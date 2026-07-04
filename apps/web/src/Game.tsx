@@ -17,7 +17,7 @@ import {
 import {
   Hexagon, Crown, Clock, Layers, Sparkles, Scroll, Swords, Trophy,
   Dices, ArrowLeftRight, Hand, MessageSquare, Send, Landmark,
-  Volume2, VolumeX, HelpCircle, LogOut, Share2, Download,
+  Volume2, VolumeX, HelpCircle, LogOut, Share2, Download, Ban,
 } from 'lucide-react';
 import { suggestSetupSettlement } from '@trevalis/bot';
 import { Board, type InteractionMode } from './board/Board.js';
@@ -106,6 +106,9 @@ export function Game({
   const [yopPicks, setYopPicks] = useState<Resource[]>([]);
   const [tradeGive, setTradeGive] = useState<Record<Resource, number>>(zeroRes);
   const [tradeWant, setTradeWant] = useState<Record<Resource, number>>(zeroRes);
+  const [tradeAny, setTradeAny] = useState(0); // carta coringa: nº de recursos "quaisquer" pedidos
+  // Oferta coringa a resolver ao aceitar (o aceitante escolhe quais recursos dar).
+  const [wildcard, setWildcard] = useState<NonNullable<GameState['activeTrade']> | null>(null);
   const [help, setHelp] = useState(false);
   // Quando o ladrao pode roubar de 2+ jogadores, o humano escolhe a vitima.
   const [robberChoice, setRobberChoice] = useState<{ hexId: string; victims: PlayerColor[] } | null>(null);
@@ -169,6 +172,7 @@ export function Game({
     setYopPicks([]);
     setTradeGive(zeroRes());
     setTradeWant(zeroRes());
+    setTradeAny(0);
   }
 
   /**
@@ -450,6 +454,16 @@ export function Game({
                     ) : (
                       isBot(p.color) && <span className="bot-tag">bot</span>
                     )}
+                    {!isSpectator && p.color !== localColor && (() => {
+                      const on = (state.embargoes ?? []).some((e) => e.by === localColor && e.target === p.color);
+                      return (
+                        <button className={`embargo-btn${on ? ' on' : ''}`}
+                          title={on ? 'Embargo ativo — clique para comerciar de novo' : 'Embargar: recusar comércio com este jogador'}
+                          onClick={() => dispatch({ t: 'setEmbargo', target: p.color, on: !on })}>
+                          <Ban size={12} />
+                        </button>
+                      );
+                    })()}
                   </div>
                   <div className="noble-stats">
                     <Stat icon={<Layers size={12} />} label={`${handTotal(p)} recursos`} />
@@ -496,7 +510,8 @@ export function Game({
             <Board state={state} mode={effMode} hintVertex={setupHint} onBuild={onBuild} onHex={onHex} />
             {state.activeTrade && (
               <ActiveTradePopup state={state} dispatch={dispatch} localColor={localColor}
-                botOffer={isBot(state.activeTrade.from)} onCounter={() => openCounter(state.activeTrade!)} />
+                botOffer={isBot(state.activeTrade.from)} onCounter={() => openCounter(state.activeTrade!)}
+                onWildcardAccept={() => setWildcard(state.activeTrade)} />
             )}
             <Dice dice={state.dice} />
             {myRoll && (
@@ -606,14 +621,23 @@ export function Game({
       )}
       {(arming === 'trade' || arming === 'counter') && (
         <TradeBuilderModal state={state} proposer={localColor} tradeGive={tradeGive} tradeWant={tradeWant}
-          counter={arming === 'counter'}
-          setTradeGive={setTradeGive} setTradeWant={setTradeWant}
+          counter={arming === 'counter'} wantAny={tradeAny}
+          setTradeGive={setTradeGive} setTradeWant={setTradeWant} setWantAny={setTradeAny}
           onPropose={(to) =>
             arming === 'counter'
               ? dispatch({ t: 'counterTrade', give: tradeGive, want: tradeWant })
-              : dispatch({ t: 'proposeTrade', give: tradeGive, want: tradeWant, to })
+              : dispatch({ t: 'proposeTrade', give: tradeGive, want: tradeWant, wantAny: tradeAny, to })
           }
           onClose={resetTransient} />
+      )}
+      {wildcard && (
+        <WildcardPickModal
+          state={state}
+          color={localColor}
+          count={wildcard.wantAny!}
+          onConfirm={(resolveAny) => { dispatch({ t: 'respondTrade', accept: true, resolveAny }); setWildcard(null); }}
+          onClose={() => setWildcard(null)}
+        />
       )}
       {robberChoice && (
         <RobberVictimModal
@@ -736,15 +760,17 @@ function Stepper({ value, max, onChange }: { value: number; max: number; onChang
 }
 
 function TradeBuilderModal({
-  state, proposer, counter, tradeGive, tradeWant, setTradeGive, setTradeWant, onPropose, onClose,
+  state, proposer, counter, tradeGive, tradeWant, wantAny, setTradeGive, setTradeWant, setWantAny, onPropose, onClose,
 }: {
   state: GameState;
   proposer: PlayerColor;
   counter?: boolean;
   tradeGive: Record<Resource, number>;
   tradeWant: Record<Resource, number>;
+  wantAny: number;
   setTradeGive: (v: Record<Resource, number>) => void;
   setTradeWant: (v: Record<Resource, number>) => void;
+  setWantAny: (v: number) => void;
   onPropose: (to: PlayerColor[]) => void;
   onClose: () => void;
 }) {
@@ -752,6 +778,7 @@ function TradeBuilderModal({
   const [to, setTo] = useState<PlayerColor[]>(others);
   const cur = state.players.find((p) => p.color === proposer)!;
   const total = (m: Record<Resource, number>) => RESOURCES.reduce((s, r) => s + m[r], 0);
+  const wantTotal = total(tradeWant) + (counter ? 0 : wantAny);
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal wide" onClick={(e) => e.stopPropagation()}>
@@ -774,6 +801,12 @@ function TradeBuilderModal({
                 <Stepper value={tradeWant[r]} max={19} onChange={(v) => setTradeWant({ ...tradeWant, [r]: v })} />
               </div>
             ))}
+            {!counter && (
+              <div className="trade-row trade-any">
+                <span title="Coringa: quem aceitar escolhe quais recursos dar">🃏 Qualquer recurso</span>
+                <Stepper value={wantAny} max={9} onChange={setWantAny} />
+              </div>
+            )}
           </div>
         </div>
         {!counter && (
@@ -789,8 +822,45 @@ function TradeBuilderModal({
           </div>
         )}
         <div className="modal-actions">
-          <button className="primary" disabled={total(tradeGive) === 0 || total(tradeWant) === 0 || (!counter && to.length === 0)}
+          <button className="primary" disabled={total(tradeGive) === 0 || wantTotal === 0 || (!counter && to.length === 0)}
             onClick={() => onPropose(to)}>{counter ? 'Enviar contraproposta' : 'Propor'}</button>
+          <button onClick={onClose}>Cancelar (ESC)</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Ao aceitar uma oferta CORINGA, quem aceita escolhe quais recursos dar (total = count). */
+function WildcardPickModal({
+  state, color, count, onConfirm, onClose,
+}: {
+  state: GameState;
+  color: PlayerColor;
+  count: number;
+  onConfirm: (resolveAny: Partial<Record<Resource, number>>) => void;
+  onClose: () => void;
+}) {
+  const hand = getPlayer(state, color).hand;
+  const [picks, setPicks] = useState<Record<Resource, number>>(zeroRes);
+  const total = RESOURCES.reduce((s, r) => s + picks[r], 0);
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h3>🃏 Escolha {count} recurso(s) para o coringa</h3>
+        <p className="muted-note">Selecionados: {total}/{count}</p>
+        <div className="trade-grid" style={{ gridTemplateColumns: '1fr' }}>
+          <div>
+            {RESOURCES.map((r) => (
+              <div key={r} className="trade-row">
+                <span>{RESOURCE_ICON[r]} {RESOURCE_LABEL[r]} ({hand[r]})</span>
+                <Stepper value={picks[r]} max={hand[r]} onChange={(v) => setPicks((p) => ({ ...p, [r]: v }))} />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="modal-actions">
+          <button className="primary" disabled={total !== count} onClick={() => onConfirm(picks)}>Aceitar troca</button>
           <button onClick={onClose}>Cancelar (ESC)</button>
         </div>
       </div>
@@ -805,16 +875,19 @@ function ActiveTradePopup({
   localColor,
   botOffer,
   onCounter,
+  onWildcardAccept,
 }: {
   state: GameState;
   dispatch: (a: Action, by?: PlayerColor) => boolean;
   localColor: PlayerColor;
   botOffer: boolean;
   onCounter: () => void;
+  onWildcardAccept: () => void;
 }) {
   const t = state.activeTrade!;
   const fmt = (m: Partial<Record<Resource, number>>) =>
     (Object.entries(m) as [Resource, number][]).filter(([, n]) => n > 0).map(([r, n]) => `${n}${RESOURCE_ICON[r]}`).join(' ') || '—';
+  const wantLabel = `${fmt(t.want)}${t.wantAny ? `${Object.values(t.want).some((n) => n > 0) ? ' + ' : ''}${t.wantAny}🃏` : ''}`;
   const iAmProposer = t.from === localColor;
   const iAmRecipient = t.to.includes(localColor);
   // Barra de tempo (20s): na oferta de um bot para mim, ou quando EU proponho.
@@ -822,7 +895,7 @@ function ActiveTradePopup({
   return (
     <div className="trade-popup">
       <h3>{PLAYER_LABEL[t.from]} quer trocar</h3>
-      <p className="trade-summary">Dá <b>{fmt(t.give)}</b> &nbsp;→&nbsp; quer <b>{fmt(t.want)}</b></p>
+      <p className="trade-summary">Dá <b>{fmt(t.give)}</b> &nbsp;→&nbsp; quer <b>{wantLabel}</b></p>
       {showTimer && (
         // key muda a cada nova proposta -> a barra remonta e o tempo reinicia em sincronia.
         <div className="trade-timer">
@@ -850,7 +923,10 @@ function ActiveTradePopup({
         <div className="modal-actions wrap">
           <button onClick={() => dispatch({ t: 'cancelTrade' }, t.from)}>✗ Recusar</button>
           <button onClick={onCounter}>✎ Contraproposta</button>
-          <button className="primary" onClick={() => dispatch({ t: 'respondTrade', accept: true }, localColor)}>✓ Aceitar</button>
+          <button className="primary"
+            onClick={() => (t.wantAny ? onWildcardAccept() : dispatch({ t: 'respondTrade', accept: true }, localColor))}>
+            ✓ Aceitar
+          </button>
         </div>
       ) : (
         <p className="muted-note">Aguardando resposta…</p>

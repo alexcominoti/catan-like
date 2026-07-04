@@ -259,6 +259,7 @@ export function createInitialState(opts: SetupOptions): GameState {
     pendingDiscards: {},
     returnPhaseAfterBlocker: null,
     activeTrade: null,
+    embargoes: [],
     tradeOffersThisTurn: 0,
     victoryTarget: opts.pointsToWin ?? 10,
     discardLimit: opts.discardLimit ?? 7,
