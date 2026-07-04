@@ -15,6 +15,10 @@ function project(state: GameState, hide: (color: PlayerColor) => boolean): GameS
   s.devDeckCount = state.devDeck.length;
   s.devDeck = [];
 
+  // Dados balanceados: o saco revela as PROXIMAS rolagens — esconde-o do cliente
+  // (a flag `balancedDice` pode ficar; ela nao entrega nada).
+  delete s.diceBag;
+
   for (const p of s.players) {
     if (!hide(p.color)) continue;
     // Mao oculta: esconde a composicao, mantem o total.

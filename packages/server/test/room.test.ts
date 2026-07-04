@@ -24,6 +24,7 @@ function makeConfig(opts: { seed?: number; humans?: PlayerColor[] } = {}): RoomC
     pointsToWin: 10,
     discardLimit: 7,
     friendlyRobber: false,
+    balancedDice: false,
   };
 }
 

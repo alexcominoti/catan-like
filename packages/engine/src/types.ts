@@ -198,6 +198,15 @@ export interface GameState {
   devDeckCount?: number;
   blocker: { hexId: string };
   dice: [number, number] | null;
+  /**
+   * Dados balanceados (antídoto para sequências de azar, estilo Colonist): quando
+   * ligado, os resultados saem de um "saco" das 36 combinações 2d6, sorteadas sem
+   * reposição e reembaralhadas ao esvaziar — assim a distribuição de somas segue
+   * a teórica a cada ciclo. Desligado (default) = dois dados aleatórios.
+   */
+  balancedDice?: boolean;
+  /** Combinações restantes no saco (ordem = próximas rolagens). OCULTO na projeção. */
+  diceBag?: [number, number][];
   /** Bonus de Estrada Mais Longa e Maior Exercito (dono atual ou null). */
   longestRoad: { owner: PlayerColor | null; length: number };
   largestArmy: { owner: PlayerColor | null; size: number };

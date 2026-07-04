@@ -162,6 +162,15 @@ export interface SetupOptions {
   discardLimit?: number;
   /** Ladrao amigavel: nao bloquear/roubar quem tem <3 PV publicos (default false). */
   friendlyRobber?: boolean;
+  /** Dados balanceados: rolagens saem de um saco das 36 combinacoes (default false). */
+  balancedDice?: boolean;
+}
+
+/** As 36 combinacoes ordenadas de 2d6 (o "saco" dos dados balanceados). */
+export function allDiceCombos(): [number, number][] {
+  const combos: [number, number][] = [];
+  for (let a = 1; a <= 6; a++) for (let b = 1; b <= 6; b++) combos.push([a, b]);
+  return combos;
 }
 
 /**
@@ -231,6 +240,14 @@ export function createInitialState(opts: SetupOptions): GameState {
   const bank = {} as Record<Resource, number>;
   for (const res of RESOURCES) bank[res] = cfg.bankPerResource;
 
+  // 6. Dados balanceados (opcional): saco das 36 combinacoes, embaralhado.
+  let diceBag: [number, number][] | undefined;
+  if (opts.balancedDice) {
+    const b = shuffle(rng, allDiceCombos());
+    rng = b.rng;
+    diceBag = b.value;
+  }
+
   return {
     phase: 'setup1',
     players,
@@ -253,6 +270,8 @@ export function createInitialState(opts: SetupOptions): GameState {
     devDeck,
     blocker: { hexId: desertHexId },
     dice: null,
+    balancedDice: opts.balancedDice ?? false,
+    diceBag,
     longestRoad: { owner: null, length: 0 },
     largestArmy: { owner: null, size: 0 },
     winner: null,

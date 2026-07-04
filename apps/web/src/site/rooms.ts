@@ -33,6 +33,7 @@ export interface RoomSettings {
   pointsToWin: number;
   discardLimit: number;
   friendlyRobber: boolean;
+  balancedDice: boolean;
 }
 
 export interface RoomView {

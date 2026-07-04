@@ -65,6 +65,7 @@ export class GameRoom {
       pointsToWin: config.pointsToWin,
       discardLimit: config.discardLimit,
       friendlyRobber: config.friendlyRobber,
+      balancedDice: config.balancedDice,
     });
     this.humans = config.players
       .filter((p) => !this.botSet.has(p.color))

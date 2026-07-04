@@ -1,4 +1,5 @@
-import { nextInt, rollDie } from './rng.js';
+import { nextInt, rollDie, shuffle } from './rng.js';
+import { allDiceCombos } from './setup.js';
 import {
   COSTS,
   LARGEST_ARMY_MIN,
@@ -185,10 +186,22 @@ function rollDice(state: GameState, by: PlayerColor): ReduceResult {
   if (by !== state.currentPlayer) return err('Nao e a sua vez.');
 
   const next = clone(state);
-  const d1 = rollDie(next.rng);
-  const d2 = rollDie(d1.rng);
-  next.rng = d2.rng;
-  const dice: [number, number] = [d1.value, d2.value];
+  let dice: [number, number];
+  if (next.balancedDice) {
+    // Dados balanceados: puxa a proxima combinacao do saco; reabastece+embaralha
+    // ao esvaziar (mantem a distribuicao teorica a cada ciclo de 36 rolagens).
+    if (!next.diceBag || next.diceBag.length === 0) {
+      const b = shuffle(next.rng, allDiceCombos());
+      next.rng = b.rng;
+      next.diceBag = b.value;
+    }
+    dice = next.diceBag.pop()!;
+  } else {
+    const d1 = rollDie(next.rng);
+    const d2 = rollDie(d1.rng);
+    next.rng = d2.rng;
+    dice = [d1.value, d2.value];
+  }
   next.dice = dice;
   const sum = dice[0] + dice[1];
   const events: GameEvent[] = [{ t: 'diceRolled', dice, sum }];
