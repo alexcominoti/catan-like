@@ -13,7 +13,20 @@ import { eq } from 'drizzle-orm';
 import { getDb, user as userTable } from '@trevalis/db';
 import { getAuth, isUsernameTaken } from './auth.js';
 import { validateUsername } from './username.js';
-import { buildRoomConfig, createRoom, getRoom, joinRoom, listOpenRooms, startRoom, touchRoomActivity } from './rooms.js';
+import {
+  addBot,
+  buildRoomConfig,
+  createRoom,
+  getRoom,
+  joinRoom,
+  leaveRoom,
+  listOpenRooms,
+  removeBot,
+  startRoom,
+  touchRoomActivity,
+  updateBot,
+  updateRoomSettings,
+} from './rooms.js';
 import { getProfileStats, getPublicProfileByUsername } from './stats.js';
 import type { RoomManager } from './room.js';
 
@@ -267,8 +280,8 @@ async function handleRequest(
     return;
   }
 
-  // --- salas: detalhe / entrar / iniciar (por código) ---
-  const roomMatch = /^\/api\/rooms\/([A-Za-z0-9]{4,12})(\/join|\/start)?$/.exec(path);
+  // --- salas: detalhe / editar / entrar / sair / bots / iniciar (por código) ---
+  const roomMatch = /^\/api\/rooms\/([A-Za-z0-9]{4,12})(\/join|\/leave|\/start|\/bots)?$/.exec(path);
   if (roomMatch) {
     const code = roomMatch[1]!.toUpperCase();
     const sub = roomMatch[2];
@@ -293,10 +306,69 @@ async function handleRequest(
       return;
     }
 
+    // Anfitrião ajusta as regras/mapa/nome/privacidade ao vivo.
+    if (!sub && req.method === 'PATCH') {
+      const u = await authedUser(req, res);
+      if (!u) return;
+      let body: unknown;
+      try {
+        body = await readJsonBody(req);
+      } catch {
+        sendJson(res, 400, { error: 'Corpo inválido.' });
+        return;
+      }
+      const result = await updateRoomSettings(code, u.id, body ?? {});
+      if (!result.ok) {
+        sendJson(res, result.httpStatus, { error: result.error });
+        return;
+      }
+      sendJson(res, 200, { room: result.room });
+      return;
+    }
+
     if (sub === '/join' && req.method === 'POST') {
       const u = await authedUser(req, res);
       if (!u) return;
       const result = await joinRoom(code, u.id);
+      if (!result.ok) {
+        sendJson(res, result.httpStatus, { error: result.error });
+        return;
+      }
+      sendJson(res, 200, { room: result.room });
+      return;
+    }
+
+    // Sair da sala de espera (convidado libera a vaga; host encerra a sala).
+    if (sub === '/leave' && req.method === 'POST') {
+      const u = await authedUser(req, res);
+      if (!u) return;
+      const result = await leaveRoom(code, u.id);
+      if (!result.ok) {
+        sendJson(res, result.httpStatus, { error: result.error });
+        return;
+      }
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    // Bots da sala (host): add / remove / difficulty — ação no corpo.
+    if (sub === '/bots' && req.method === 'POST') {
+      const u = await authedUser(req, res);
+      if (!u) return;
+      let body: unknown;
+      try {
+        body = await readJsonBody(req);
+      } catch {
+        sendJson(res, 400, { error: 'Corpo inválido.' });
+        return;
+      }
+      const b = body as { action?: unknown; color?: unknown; name?: unknown; difficulty?: unknown };
+      const color = typeof b.color === 'string' ? b.color : '';
+      const difficulty = typeof b.difficulty === 'string' ? b.difficulty : undefined;
+      let result;
+      if (b.action === 'remove') result = await removeBot(code, u.id, color);
+      else if (b.action === 'difficulty') result = await updateBot(code, u.id, color, difficulty ?? 'medium');
+      else result = await addBot(code, u.id, { name: typeof b.name === 'string' ? b.name : undefined, difficulty });
       if (!result.ok) {
         sendJson(res, result.httpStatus, { error: result.error });
         return;

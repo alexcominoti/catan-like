@@ -1,6 +1,7 @@
 /**
- * Cliente das rotas REST de salas (camada de metadados — item 2). Conversa com o
- * servidor na MESMA origem; os cookies de sessão (Better Auth) vão junto.
+ * Cliente das rotas REST de salas. Conversa com o servidor na MESMA origem; os
+ * cookies de sessão (Better Auth) vão junto. A sala é estado VIVO no servidor: o
+ * anfitrião edita regras/bots e convidados entram/saem até "Começar partida".
  */
 
 export interface RoomListItem {
@@ -12,10 +13,26 @@ export interface RoomListItem {
   max: number;
 }
 
-export interface RoomPlayerView {
-  username: string;
+export type BotDifficulty = 'easy' | 'medium' | 'hard';
+
+/** Um assento ocupado na sala de espera: humano (host/convidado) OU bot. */
+export interface RoomSeatView {
+  name: string;
   color: string;
   isHost: boolean;
+  isBot: boolean;
+  difficulty?: BotDifficulty;
+}
+
+/** Regras da partida que o anfitrião ajusta ao vivo. */
+export interface RoomSettings {
+  seed: number | null;
+  pace: 'fast' | 'normal';
+  numberLayout: string;
+  desert: string;
+  pointsToWin: number;
+  discardLimit: number;
+  friendlyRobber: boolean;
 }
 
 export interface RoomView {
@@ -27,7 +44,8 @@ export interface RoomView {
   boardLayout: string;
   hostUserId: string;
   isHost: boolean;
-  players: RoomPlayerView[];
+  players: RoomSeatView[];
+  settings: RoomSettings;
 }
 
 /** Resultado de uma ação de sala: sucesso com a sala, ou erro legível + status. */
@@ -49,6 +67,8 @@ async function roomCall(url: string, init?: RequestInit): Promise<RoomResult> {
   return { ok: true, room: data.room };
 }
 
+const JSON_HEADERS = { 'content-type': 'application/json' };
+
 /** Lista as salas públicas abertas (waiting + não privadas). */
 export async function listRooms(): Promise<RoomListItem[]> {
   const res = await fetch('/api/rooms');
@@ -66,11 +86,7 @@ export interface CreateRoomPayload {
 }
 
 export function createRoomApi(payload: CreateRoomPayload): Promise<RoomResult> {
-  return roomCall('/api/rooms', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
+  return roomCall('/api/rooms', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(payload) });
 }
 
 export function getRoomApi(code: string): Promise<RoomResult> {
@@ -83,6 +99,47 @@ export function joinRoomApi(code: string): Promise<RoomResult> {
 
 export function startRoomApi(code: string): Promise<RoomResult> {
   return roomCall(`/api/rooms/${encodeURIComponent(code)}/start`, { method: 'POST' });
+}
+
+/** Anfitrião altera regras/mapa/nome/privacidade ao vivo. */
+export function updateRoomApi(code: string, patch: Record<string, unknown>): Promise<RoomResult> {
+  return roomCall(`/api/rooms/${encodeURIComponent(code)}`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(patch) });
+}
+
+/** Anfitrião adiciona um bot (o servidor escolhe a cor livre). */
+export function addBotApi(code: string, opts: { name?: string; difficulty?: BotDifficulty }): Promise<RoomResult> {
+  return roomCall(`/api/rooms/${encodeURIComponent(code)}/bots`, {
+    method: 'POST',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ action: 'add', ...opts }),
+  });
+}
+
+/** Anfitrião remove um bot pela cor. */
+export function removeBotApi(code: string, color: string): Promise<RoomResult> {
+  return roomCall(`/api/rooms/${encodeURIComponent(code)}/bots`, {
+    method: 'POST',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ action: 'remove', color }),
+  });
+}
+
+/** Anfitrião muda a dificuldade de um bot. */
+export function setBotDifficultyApi(code: string, color: string, difficulty: BotDifficulty): Promise<RoomResult> {
+  return roomCall(`/api/rooms/${encodeURIComponent(code)}/bots`, {
+    method: 'POST',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ action: 'difficulty', color, difficulty }),
+  });
+}
+
+/** Sai da sala de espera (convidado libera a vaga; host encerra a sala). Best-effort. */
+export async function leaveRoomApi(code: string): Promise<void> {
+  try {
+    await fetch(`/api/rooms/${encodeURIComponent(code)}/leave`, { method: 'POST' });
+  } catch {
+    /* best-effort: se falhar, a limpeza automática cuida da sala */
+  }
 }
 
 /** URL compartilhável do link único da sala. */

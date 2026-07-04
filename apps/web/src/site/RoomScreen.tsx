@@ -1,17 +1,20 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Copy, Check, Crown, Lock, Play, ArrowLeft, Users, Bot, Dices, Target, Shield,
-  Shuffle, UserPlus, X, Link as LinkIcon,
+  Shuffle, UserPlus, X,
 } from 'lucide-react';
-import { PLAYER_COLORS, type BoardLayout, type DesertPlacement, type NumberLayout, type PlayerColor } from '@trevalis/engine';
+import { type BoardLayout, type PlayerColor } from '@trevalis/engine';
 import type { Difficulty } from '@trevalis/bot';
 import { authClient } from '../auth/client.js';
 import { PLAYER_FILL, PLAYER_LABEL } from '../game/theme.js';
 import { pickBotName } from '../game/botNames.js';
-import type { GameSetup, Pace } from '../game/config.js';
 import { Game } from '../Game.js';
 import { GameClient } from '../net/client.js';
-import { createRoomApi, getRoomApi, joinRoomApi, roomLink, startRoomApi, type RoomView } from './rooms.js';
+import {
+  addBotApi, createRoomApi, getRoomApi, joinRoomApi, leaveRoomApi, removeBotApi,
+  roomLink, setBotDifficultyApi, startRoomApi, updateRoomApi,
+  type RoomSeatView, type RoomView,
+} from './rooms.js';
 import { LoginGate } from './LoginGate.js';
 
 const MAP_LABEL: Record<string, string> = {
@@ -24,346 +27,21 @@ const MAP_LABEL: Record<string, string> = {
 const CREST: Record<PlayerColor, string> = { red: '👑', blue: '🌿', white: '⚒️', orange: '🪓', green: '🍀', brown: '🐗', purple: '🔮', pink: '🌸' };
 const DIFF_LABEL: Record<Difficulty, string> = { easy: 'Fácil', medium: 'Médio', hard: 'Difícil' };
 
-/** Os tres mapas: cada um define o LIMITE de jogadores e o tabuleiro. */
+/** Os três mapas: cada um define o LIMITE de jogadores e o tabuleiro. */
 const MAPS: { key: BoardLayout; label: string; hint: string; limit: number }[] = [
   { key: 'standard', label: '3–4 jogadores', hint: '19 hexágonos', limit: 4 },
   { key: 'large', label: '5–6 jogadores', hint: '30 hexágonos · 2 desertos', limit: 6 },
   { key: 'huge', label: '7–8 jogadores', hint: '37 hexágonos · 2 desertos', limit: 8 },
 ];
-const MAX_SEATS = 8;
 
-type Seat = { type: 'host' } | { type: 'open' } | { type: 'bot'; diff: Difficulty; name: string };
-
-const initialSeats = (): Seat[] => [
-  { type: 'host' },
-  ...Array.from({ length: MAX_SEATS - 1 }, () => ({ type: 'open' }) as Seat),
-];
+function mapLimit(boardLayout: string): number {
+  return MAPS.find((m) => m.key === boardLayout)?.limit ?? 4;
+}
 
 /** URL do WebSocket na MESMA origem (dev: Vite faz proxy de /ws -> :8080). */
 function wsUrl(): string {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${proto}//${window.location.host}/ws`;
-}
-
-/**
- * Tela única de sala (itens 1-2 do backlog de rotas): "Monte sua mesa" (sem
- * código ainda) e a sala em si (link + jogadores + partida) são o MESMO
- * componente — criar a sala nunca troca de tela, só passa a mostrar o link.
- * `code` vem da URL (`/room/:code`, sincronizada pelo App); `null` = ainda
- * configurando.
- */
-export function RoomScreen({
-  code,
-  onRoomCreated,
-  onLeave,
-  onNeedAuth,
-  onFullscreenChange,
-}: {
-  code: string | null;
-  /** Sala online criada (sem sair da tela) — o App sincroniza a URL para /room/CODE. */
-  onRoomCreated: (code: string) => void;
-  onLeave: () => void;
-  onNeedAuth: () => void;
-  /** A partida em si ocupa a tela inteira (sem o header do site). */
-  onFullscreenChange: (fullscreen: boolean) => void;
-}) {
-  useEffect(() => {
-    if (!code) onFullscreenChange(false);
-  }, [code, onFullscreenChange]);
-
-  if (!code) {
-    return <RoomSetupForm onRoomCreated={onRoomCreated} onNeedAuth={onNeedAuth} onBack={onLeave} />;
-  }
-  return <RoomLive code={code} onLeave={onLeave} onNeedAuth={onNeedAuth} onFullscreenChange={onFullscreenChange} />;
-}
-
-/* ------------------------------------------------------------------ */
-/* 1. "Monte sua mesa" — sem código ainda                              */
-/* ------------------------------------------------------------------ */
-
-function RoomSetupForm({
-  onRoomCreated,
-  onNeedAuth,
-  onBack,
-}: {
-  onRoomCreated: (code: string) => void;
-  onNeedAuth: () => void;
-  onBack?: () => void;
-}) {
-  const { data: session, isPending } = authClient.useSession();
-  const loggedIn = Boolean(session?.user);
-
-  const [mapKey, setMapKey] = useState<BoardLayout>('standard');
-  const [hostName, setHostName] = useState('Você');
-  // Sala recem-criada: so o anfitriao; as demais vagas comecam ABERTAS.
-  const [seats, setSeats] = useState<Seat[]>(initialSeats);
-  const [numberLayout, setNumberLayout] = useState<NumberLayout>('balanced');
-  const [desert, setDesert] = useState<DesertPlacement>('random');
-  const [pointsToWin, setPointsToWin] = useState(10);
-  const [discardLimit, setDiscardLimit] = useState(7);
-  const [friendlyRobber, setFriendlyRobber] = useState(false);
-  const [pace, setPace] = useState<Pace>('normal');
-  const [seedText, setSeedText] = useState('');
-  const [roomName, setRoomName] = useState('');
-  const [isPrivate, setIsPrivate] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-
-  const limit = MAPS.find((m) => m.key === mapKey)!.limit;
-  const visible = seats.slice(0, limit);
-  const occupants = seats.filter((s) => s.type !== 'open').length;
-
-  const colorByIndex = useMemo(() => {
-    const out: (PlayerColor | null)[] = [];
-    let ci = 0;
-    for (const s of visible) out.push(s.type === 'open' ? null : PLAYER_COLORS[ci++]!);
-    return out;
-  }, [visible]);
-
-  const filledCount = colorByIndex.filter(Boolean).length;
-  const canStart = filledCount >= 1;
-
-  function setSeat(i: number, s: Seat) {
-    setSeats((prev) => {
-      const next = [...prev];
-      next[i] = s;
-      return next;
-    });
-  }
-
-  function addBot(i: number) {
-    setSeats((prev) => {
-      const used = [hostName.trim(), ...prev.flatMap((s) => (s.type === 'bot' ? [s.name] : []))];
-      const next = [...prev];
-      next[i] = { type: 'bot', diff: 'medium', name: pickBotName(used).name };
-      return next;
-    });
-  }
-
-  function chooseMap(key: BoardLayout) {
-    const newLimit = MAPS.find((m) => m.key === key)!.limit;
-    if (occupants > newLimit) return;
-    if (key !== 'standard') setDesert('random');
-    setSeats((prev) => {
-      const taken = prev.filter((s) => s.type !== 'open');
-      const compact: Seat[] = [...taken];
-      while (compact.length < MAX_SEATS) compact.push({ type: 'open' });
-      return compact;
-    });
-    setMapKey(key);
-  }
-
-  function buildSetup(): GameSetup {
-    const seed = seedText.trim() === '' ? null : hashSeed(seedText.trim());
-    const players: { color: PlayerColor; name: string }[] = [];
-    const bots: PlayerColor[] = [];
-    const botDifficulty: Record<string, Difficulty> = {};
-    let ci = 0;
-    visible.forEach((s) => {
-      if (s.type === 'open') return;
-      const color = PLAYER_COLORS[ci++]!;
-      if (s.type === 'host') {
-        players.push({ color, name: hostName.trim() || 'Você' });
-      } else {
-        players.push({ color, name: s.name });
-        bots.push(color);
-        botDifficulty[color] = s.diff;
-      }
-    });
-    return {
-      players, bots, botDifficulty: botDifficulty as Record<PlayerColor, Difficulty>,
-      seed, boardLayout: mapKey, pace, numberLayout, desert, pointsToWin, discardLimit, friendlyRobber,
-    };
-  }
-
-  /** Cria a sala ONLINE (gera link único) sem sair desta tela. */
-  async function createOnline() {
-    if (!canStart || creating) return;
-    setCreating(true);
-    setCreateError(null);
-    const setup = buildSetup();
-    const res = await createRoomApi({
-      name: roomName.trim() || `Sala de ${hostName.trim() || 'anfitrião'}`,
-      isPrivate,
-      maxPlayers: limit,
-      boardLayout: mapKey,
-      config: setup as unknown as Record<string, unknown>,
-    });
-    setCreating(false);
-    if (!res.ok) {
-      setCreateError(res.error);
-      return;
-    }
-    onRoomCreated(res.room.code);
-  }
-
-  // Criar sala é rota protegida (só a Home é pública): sem login, redireciona.
-  if (isPending) {
-    return <div className="page"><p className="muted-note">Carregando…</p></div>;
-  }
-  if (!loggedIn) {
-    return (
-      <LoginGate
-        title="Entre para criar uma sala"
-        hint="Você precisa de uma conta para criar uma mesa (com bots ou com amigos)."
-        onNeedAuth={onNeedAuth}
-      />
-    );
-  }
-
-  return (
-    <div className="page setup-page">
-      <div className="page-head">
-        <div>
-          {onBack && <button className="back-link" onClick={onBack}><ArrowLeft size={15} /> Voltar ao lobby</button>}
-          <span className="eyebrow">CRIAR SALA</span>
-          <h1>Monte sua mesa.</h1>
-        </div>
-      </div>
-
-      <div className="setup-grid">
-        <div className="card su-players">
-          <h2 className="su-h"><Users size={18} className="ic-primary" /> Jogadores <span className="su-count">{filledCount}/{limit}</span></h2>
-
-          <div className="su-maps">
-            {MAPS.map((m) => {
-              const disabled = occupants > m.limit;
-              return (
-                <button
-                  key={m.key}
-                  className={`su-map${mapKey === m.key ? ' on' : ''}`}
-                  disabled={disabled}
-                  title={disabled ? `Remova jogadores para usar este mapa (máx. ${m.limit})` : undefined}
-                  onClick={() => chooseMap(m.key)}
-                >
-                  <b>{m.label}</b>
-                  <small>{m.hint}</small>
-                </button>
-              );
-            })}
-          </div>
-          <p className="su-note">Convide amigos pelo link ou preencha as vagas com bots — jogue de 1 até {limit}.</p>
-
-          {visible.map((s, i) => {
-            const color = colorByIndex[i];
-            if (s.type === 'open') {
-              return (
-                <div key={i} className="su-seat open">
-                  <span className="su-open-label"><UserPlus size={16} /> Vaga aberta <em>aguardando jogador</em></span>
-                  <button className="su-addbot" onClick={() => addBot(i)}><Bot size={15} /> Adicionar bot</button>
-                </div>
-              );
-            }
-            const c = color!;
-            if (s.type === 'host') {
-              return (
-                <div key={i} className="su-seat filled" style={{ borderLeftColor: PLAYER_FILL[c] }}>
-                  <span className="su-crest" style={{ background: PLAYER_FILL[c] }} title={PLAYER_LABEL[c]}>{CREST[c]}</span>
-                  <input className="su-name" value={hostName} maxLength={16} onChange={(e) => setHostName(e.target.value)} />
-                  <span className="su-tag host"><Crown size={12} /> Anfitrião</span>
-                </div>
-              );
-            }
-            return (
-              <div key={i} className="su-seat filled bot" style={{ borderLeftColor: PLAYER_FILL[c] }}>
-                <div className="su-seat-row">
-                  <span className="su-crest" style={{ background: PLAYER_FILL[c] }} title={PLAYER_LABEL[c]}>{CREST[c]}</span>
-                  <span className="su-name bot-name"><Bot size={14} /> {s.name}</span>
-                  <button className="su-remove" title="Remover da sala" onClick={() => setSeat(i, { type: 'open' })}><X size={15} /></button>
-                </div>
-                <div className="su-seg xs su-seat-diff">
-                  {(['easy', 'medium', 'hard'] as Difficulty[]).map((d) => (
-                    <button key={d} className={s.diff === d ? 'on' : ''} onClick={() => setSeat(i, { type: 'bot', diff: d, name: s.name })}>{DIFF_LABEL[d]}</button>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="card su-settings">
-          <h3 className="su-sub">Tabuleiro</h3>
-          <div className="su-tiles">
-            <SetupTile icon={<Dices size={20} />} label="Números equilibrados" hint="6 e 8 nunca vizinhos"
-              active={numberLayout === 'balanced'} onClick={() => setNumberLayout((v) => (v === 'balanced' ? 'random' : 'balanced'))} />
-            <SetupTile icon={<Target size={20} />} label="Deserto no centro"
-              hint={mapKey === 'standard' ? 'ladrão começa no meio' : 'só no mapa 3–4'}
-              disabled={mapKey !== 'standard'}
-              active={mapKey === 'standard' && desert === 'center'}
-              onClick={() => setDesert((v) => (v === 'center' ? 'random' : 'center'))} />
-            <SetupTile icon={<Shield size={20} />} label="Ladrão amigável" hint="não bloqueia quem tem < 3 PV"
-              active={friendlyRobber} onClick={() => setFriendlyRobber((v) => !v)} />
-          </div>
-
-          <h3 className="su-sub">Configurações avançadas</h3>
-          <div className="su-pace">
-            <label>Ritmo (limite de tempo das ações, no online)</label>
-            <div className="su-seg sm">
-              <button className={pace === 'normal' ? 'on' : ''} onClick={() => setPace('normal')}>Normal</button>
-              <button className={pace === 'fast' ? 'on' : ''} onClick={() => setPace('fast')}>Rápido</button>
-            </div>
-          </div>
-          <div className="su-slider">
-            <label>Pontos para vencer <b>{pointsToWin}</b></label>
-            <input type="range" min={3} max={15} value={pointsToWin} onChange={(e) => setPointsToWin(+e.target.value)} />
-          </div>
-          <div className="su-slider">
-            <label>Limite de cartas (descarte no 7) <b>{discardLimit}</b></label>
-            <input type="range" min={5} max={15} value={discardLimit} onChange={(e) => setDiscardLimit(+e.target.value)} />
-          </div>
-          <div className="su-slider">
-            <label>Seed (opcional)</label>
-            <div className="su-seed">
-              <input value={seedText} placeholder="aleatória" onChange={(e) => setSeedText(e.target.value)} />
-              <button onClick={() => setSeedText('')}><Shuffle size={14} /> Aleatória</button>
-            </div>
-          </div>
-
-          <div className="su-room-online">
-            <h3 className="su-sub">Sala online (link compartilhável)</h3>
-            <div className="su-slider">
-              <label>Nome da sala</label>
-              <input
-                className="su-roomname"
-                value={roomName}
-                maxLength={40}
-                placeholder={`Sala de ${hostName.trim() || 'anfitrião'}`}
-                onChange={(e) => setRoomName(e.target.value)}
-              />
-            </div>
-            <button
-              className={`su-tile su-private${isPrivate ? ' active' : ''}`}
-              onClick={() => setIsPrivate((v) => !v)}
-              type="button"
-            >
-              <span className="su-tile-icon"><Lock size={18} /></span>
-              <span className="su-tile-label">Sala privada</span>
-              <span className="su-tile-hint">{isPrivate ? 'só por link; fora da listagem' : 'aparece no lobby público'}</span>
-            </button>
-          </div>
-
-          {createError && <div className="auth-error">{createError}</div>}
-
-          <button className="cta big su-start" disabled={!canStart || creating} onClick={createOnline}>
-            <LinkIcon size={16} /> {creating ? 'Criando sala…' : 'Criar sala'}
-          </button>
-          <p className="su-note">
-            Jogue sozinho contra bots (preencha as vagas com "Adicionar bot") ou convide amigos pelo link — o servidor gerencia a partida.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SetupTile({ icon, label, hint, active, disabled, onClick }: { icon: ReactNode; label: string; hint: string; active: boolean; disabled?: boolean; onClick: () => void }) {
-  return (
-    <button className={`su-tile${active ? ' active' : ''}`} disabled={disabled} onClick={onClick}>
-      <span className="su-tile-icon">{icon}</span>
-      <span className="su-tile-label">{label}</span>
-      <span className="su-tile-hint">{hint}</span>
-    </button>
-  );
 }
 
 function hashSeed(s: string): number {
@@ -375,11 +53,114 @@ function hashSeed(s: string): number {
   return h >>> 0;
 }
 
+/**
+ * Tela ÚNICA de sala. A sala nasce no servidor assim que a página abre (link já
+ * disponível); o anfitrião edita regras/bots e convidados entram/saem AO VIVO,
+ * tudo aqui — não existe mais uma "sala de espera" separada. Quando o host clica
+ * "Começar partida", este mesmo componente passa a mostrar o jogo em tela cheia.
+ */
+export function RoomScreen({
+  code,
+  onRoomCreated,
+  onLeave,
+  onNeedAuth,
+  onFullscreenChange,
+}: {
+  code: string | null;
+  /** Sala criada — o App sincroniza a URL para /room/CODE. */
+  onRoomCreated: (code: string) => void;
+  onLeave: () => void;
+  onNeedAuth: () => void;
+  /** A partida em si ocupa a tela inteira (sem o header do site). */
+  onFullscreenChange: (fullscreen: boolean) => void;
+}) {
+  useEffect(() => {
+    if (!code) onFullscreenChange(false);
+  }, [code, onFullscreenChange]);
+
+  if (!code) {
+    return <CreateRoom onRoomCreated={onRoomCreated} onNeedAuth={onNeedAuth} onBack={onLeave} />;
+  }
+  return <Room code={code} onLeave={onLeave} onNeedAuth={onNeedAuth} onFullscreenChange={onFullscreenChange} />;
+}
+
 /* ------------------------------------------------------------------ */
-/* 2. Sala com código: link + jogadores (espera) + partida ao vivo      */
+/* Criação: a sala nasce no servidor ao abrir a página                  */
 /* ------------------------------------------------------------------ */
 
-/** Instantâneo online mantido pelo RoomLive a partir das mensagens do GameClient. */
+const DEFAULT_CONFIG = {
+  boardLayout: 'standard',
+  pace: 'normal',
+  numberLayout: 'balanced',
+  desert: 'random',
+  pointsToWin: 10,
+  discardLimit: 7,
+  friendlyRobber: false,
+  seed: null,
+  bots: [] as unknown[],
+};
+
+function CreateRoom({
+  onRoomCreated,
+  onNeedAuth,
+  onBack,
+}: {
+  onRoomCreated: (code: string) => void;
+  onNeedAuth: () => void;
+  onBack: () => void;
+}) {
+  const { data: session, isPending } = authClient.useSession();
+  const loggedIn = Boolean(session?.user);
+  const [error, setError] = useState<string | null>(null);
+  const startedRef = useRef(false);
+
+  useEffect(() => {
+    if (!loggedIn || startedRef.current) return;
+    startedRef.current = true;
+    const who = session?.user.name ?? 'você';
+    void createRoomApi({
+      name: `Sala de ${who}`.slice(0, 40),
+      isPrivate: false,
+      maxPlayers: 4,
+      boardLayout: 'standard',
+      config: { ...DEFAULT_CONFIG },
+    }).then((res) => {
+      if (res.ok) onRoomCreated(res.room.code);
+      else {
+        setError(res.error);
+        startedRef.current = false;
+      }
+    });
+  }, [loggedIn, session, onRoomCreated]);
+
+  if (isPending) return <div className="page"><p className="muted-note">Carregando…</p></div>;
+  if (!loggedIn) {
+    return (
+      <LoginGate
+        title="Entre para criar uma sala"
+        hint="Você precisa de uma conta para criar uma mesa (com bots ou com amigos)."
+        onNeedAuth={onNeedAuth}
+      />
+    );
+  }
+  if (error) {
+    return (
+      <div className="page">
+        <div className="card wr-gate">
+          <h2>{error}</h2>
+          <button className="ghost" onClick={onBack}><ArrowLeft size={15} /> Voltar ao lobby</button>
+        </div>
+      </div>
+    );
+  }
+  return <div className="page"><p className="muted-note">Criando sala…</p></div>;
+}
+
+/* ------------------------------------------------------------------ */
+/* Sala (código): espera editável ao vivo -> partida em tela cheia      */
+/* ------------------------------------------------------------------ */
+
+/** Instantâneo online mantido a partir das mensagens do GameClient. */
 interface LiveSnapshot {
   viewerColor: PlayerColor | null;
   bots: PlayerColor[];
@@ -392,7 +173,7 @@ interface LiveSnapshot {
   errorSeq: number;
 }
 
-function RoomLive({
+function Room({
   code,
   onLeave,
   onNeedAuth,
@@ -408,8 +189,6 @@ function RoomLive({
 
   const [room, setRoom] = useState<RoomView | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [starting, setStarting] = useState(false);
   const joinedRef = useRef(false);
 
   // Entrada (idempotente) ao montar, quando autenticado.
@@ -422,9 +201,8 @@ function RoomLive({
     });
   }, [user, code]);
 
-  // Reflete quem entrou pelo link em tempo (quase) real: enquanto a sala aguarda,
-  // todo cliente conectado consulta a sala em ciclo curto e também assim que a aba
-  // recupera o foco. Esse mesmo ciclo é o heartbeat que mantém a sala viva (item 6).
+  // Enquanto aguarda: consulta a sala em ciclo curto (roster ao vivo) e no foco.
+  // Esse mesmo ciclo é o heartbeat que mantém a sala viva (item 6).
   useEffect(() => {
     if (!user || error || room?.status !== 'waiting') return;
     const refresh = () => {
@@ -446,22 +224,7 @@ function RoomLive({
     };
   }, [user, code, error, room?.status]);
 
-  function copy() {
-    void navigator.clipboard?.writeText(roomLink(code)).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    });
-  }
-
-  async function start() {
-    setStarting(true);
-    const res = await startRoomApi(code);
-    setStarting(false);
-    if (res.ok) setRoom(res.room); // status agora 'in_progress' -> conecta o WS abaixo
-    else setError(res.error);
-  }
-
-  /* ---- WebSocket: liga quando a sala esta em andamento/finalizada ---- */
+  /* ---- WebSocket: liga quando a sala está em andamento/finalizada ---- */
   const live = room?.status === 'in_progress' || room?.status === 'finished';
   const [online, setOnline] = useState<LiveSnapshot | null>(null);
   const [wsDisconnected, setWsDisconnected] = useState(false);
@@ -503,9 +266,7 @@ function RoomLive({
     };
     client.onError = (err) => {
       errorSeq += 1;
-      setOnline((prev) =>
-        prev && { ...prev, error: err, errorSeq },
-      );
+      setOnline((prev) => prev && { ...prev, error: err, errorSeq });
     };
     client.onDisconnected = () => setWsDisconnected(true);
     client.onReconnected = () => setWsDisconnected(false);
@@ -529,20 +290,23 @@ function RoomLive({
     onLeave();
   }
 
+  /** Sair da espera: convidado libera a vaga, host encerra a sala; depois navega. */
+  function leaveWaiting() {
+    void leaveRoomApi(code);
+    onLeave();
+  }
+
   // --- estados de borda ---
   if (isPending) {
     return <div className="page"><p className="muted-note">Carregando…</p></div>;
   }
   if (!user) {
     return (
-      <div className="page">
-        <div className="card wr-gate">
-          <Lock size={26} className="ic-primary" />
-          <h2>Entre para acessar a sala</h2>
-          <p className="muted-note">Você precisa de uma conta para entrar em uma sala.</p>
-          <button className="cta" onClick={onNeedAuth}>Entrar / criar conta</button>
-        </div>
-      </div>
+      <LoginGate
+        title="Entre para acessar a sala"
+        hint="Você precisa de uma conta para entrar em uma sala."
+        onNeedAuth={onNeedAuth}
+      />
     );
   }
   if (error) {
@@ -559,7 +323,7 @@ function RoomLive({
     return <div className="page"><p className="muted-note">Entrando na sala…</p></div>;
   }
 
-  // Partida em andamento/finalizada: joga (ou assiste, se nao sou jogador) em tela cheia.
+  // Partida em andamento/finalizada: joga (ou assiste) em tela cheia.
   if (live) {
     if (!online?.state) {
       return <div className="page"><p className="muted-note">Conectando à partida…</p></div>;
@@ -586,27 +350,322 @@ function RoomLive({
     );
   }
 
-  const canStart = room.isHost;
+  // Espera: o anfitrião monta a mesa ao vivo; convidados veem e aguardam.
+  return room.isHost ? (
+    <HostRoom code={code} room={room} onRoom={setRoom} onError={setError} onLeave={leaveWaiting} />
+  ) : (
+    <GuestRoom code={code} room={room} onLeave={leaveWaiting} />
+  );
+}
 
+/* ------------------------------------------------------------------ */
+/* Cabeçalho + link (compartilhado entre host e convidado)              */
+/* ------------------------------------------------------------------ */
+
+function LinkCard({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+  function copy() {
+    void navigator.clipboard?.writeText(roomLink(code)).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    });
+  }
+  return (
+    <div className="card wr-link">
+      <label>Link da sala — compartilhe para convidar</label>
+      <div className="wr-link-row">
+        <input readOnly value={roomLink(code)} onFocus={(e) => e.target.select()} />
+        <button className="cta" onClick={copy}>
+          {copied ? <><Check size={15} /> Copiado!</> : <><Copy size={15} /> Copiar link</>}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Uma linha do roster (host / convidado / bot), com controles quando for host+bot. */
+function SeatRow({
+  seat,
+  onRemove,
+  onDifficulty,
+}: {
+  seat: RoomSeatView;
+  onRemove?: () => void;
+  onDifficulty?: (d: Difficulty) => void;
+}) {
+  const c = seat.color as PlayerColor;
+  return (
+    <div className={`su-seat filled${seat.isBot ? ' bot' : ''}`} style={{ borderLeftColor: PLAYER_FILL[c] }}>
+      <div className="su-seat-row">
+        <span className="su-crest" style={{ background: PLAYER_FILL[c] }} title={PLAYER_LABEL[c]}>{CREST[c]}</span>
+        <span className="su-name bot-name">
+          {seat.isBot ? <Bot size={14} /> : null} {seat.name}
+        </span>
+        {seat.isHost && <span className="su-tag host"><Crown size={12} /> Anfitrião</span>}
+        {onRemove && (
+          <button className="su-remove" title="Remover da sala" onClick={onRemove}><X size={15} /></button>
+        )}
+      </div>
+      {seat.isBot && onDifficulty && (
+        <div className="su-seg xs su-seat-diff">
+          {(['easy', 'medium', 'hard'] as Difficulty[]).map((d) => (
+            <button key={d} className={seat.difficulty === d ? 'on' : ''} onClick={() => onDifficulty(d)}>{DIFF_LABEL[d]}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OpenSeat({ onAddBot }: { onAddBot?: () => void }) {
+  return (
+    <div className="su-seat open">
+      <span className="su-open-label"><UserPlus size={16} /> Vaga aberta <em>aguardando jogador</em></span>
+      {onAddBot && <button className="su-addbot" onClick={onAddBot}><Bot size={15} /> Adicionar bot</button>}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Sala do ANFITRIÃO: monta a mesa ao vivo                              */
+/* ------------------------------------------------------------------ */
+
+function HostRoom({
+  code,
+  room,
+  onRoom,
+  onError,
+  onLeave,
+}: {
+  code: string;
+  room: RoomView;
+  onRoom: (r: RoomView) => void;
+  onError: (e: string | null) => void;
+  onLeave: () => void;
+}) {
+  // Regras editáveis: estado LOCAL (inicializado uma vez da sala), sincronizado
+  // ao servidor por PATCH a cada mudança. O polling só atualiza o ROSTER (não
+  // sobrescreve estes inputs enquanto o host mexe).
+  const s0 = room.settings;
+  const [mapKey, setMapKey] = useState<BoardLayout>((room.boardLayout as BoardLayout) ?? 'standard');
+  const [roomName, setRoomName] = useState(room.name);
+  const [isPrivate, setIsPrivate] = useState(room.isPrivate);
+  const [numberLayout, setNumberLayout] = useState(s0.numberLayout === 'random' ? 'random' : 'balanced');
+  const [desert, setDesert] = useState(s0.desert === 'center' ? 'center' : 'random');
+  const [friendlyRobber, setFriendlyRobber] = useState(s0.friendlyRobber);
+  const [pace, setPace] = useState<'fast' | 'normal'>(s0.pace === 'fast' ? 'fast' : 'normal');
+  const [pointsToWin, setPointsToWin] = useState(s0.pointsToWin);
+  const [discardLimit, setDiscardLimit] = useState(s0.discardLimit);
+  const [seedText, setSeedText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [starting, setStarting] = useState(false);
+
+  const limit = mapLimit(mapKey);
+  const occupants = room.players.length;
+  const openCount = Math.max(0, limit - occupants);
+  const canStart = occupants >= 2; // host + pelo menos 1 (bot ou humano)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Envia um patch de regras ao servidor e adota a sala devolvida. */
+  async function patch(fields: Record<string, unknown>) {
+    const res = await updateRoomApi(code, fields);
+    if (res.ok) onRoom(res.room);
+    else onError(res.error);
+  }
+  /** Igual, mas agrupa mudanças rápidas (sliders). */
+  function patchDebounced(fields: Record<string, unknown>) {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => void patch(fields), 400);
+  }
+
+  function chooseMap(key: BoardLayout) {
+    if (occupants > mapLimit(key)) return;
+    setMapKey(key);
+    if (key !== 'standard') setDesert('random');
+    void patch({ boardLayout: key });
+  }
+
+  async function addBot() {
+    if (busy || openCount <= 0) return;
+    setBusy(true);
+    const used = room.players.map((p) => p.name);
+    const res = await addBotApi(code, { name: pickBotName(used).name, difficulty: 'medium' });
+    setBusy(false);
+    if (res.ok) onRoom(res.room);
+    else onError(res.error);
+  }
+  async function removeBot(color: string) {
+    const res = await removeBotApi(code, color);
+    if (res.ok) onRoom(res.room);
+    else onError(res.error);
+  }
+  async function setBotDiff(color: string, d: Difficulty) {
+    const res = await setBotDifficultyApi(code, color, d);
+    if (res.ok) onRoom(res.room);
+    else onError(res.error);
+  }
+
+  async function start() {
+    if (!canStart) return;
+    setStarting(true);
+    const res = await startRoomApi(code);
+    setStarting(false);
+    if (res.ok) onRoom(res.room); // status -> in_progress: o Room conecta o WS
+    else onError(res.error);
+  }
+
+  return (
+    <div className="page setup-page">
+      <div className="page-head">
+        <div>
+          <button className="back-link" onClick={onLeave}><ArrowLeft size={15} /> Voltar ao lobby</button>
+          <span className="eyebrow">SUA SALA</span>
+          <h1>Monte sua mesa.</h1>
+        </div>
+      </div>
+
+      <LinkCard code={code} />
+
+      <div className="setup-grid">
+        <div className="card su-players">
+          <h2 className="su-h"><Users size={18} className="ic-primary" /> Jogadores <span className="su-count">{occupants}/{limit}</span></h2>
+
+          <div className="su-maps">
+            {MAPS.map((m) => {
+              const disabled = occupants > m.limit;
+              return (
+                <button
+                  key={m.key}
+                  className={`su-map${mapKey === m.key ? ' on' : ''}`}
+                  disabled={disabled}
+                  title={disabled ? `Remova jogadores para usar este mapa (máx. ${m.limit})` : undefined}
+                  onClick={() => chooseMap(m.key)}
+                >
+                  <b>{m.label}</b>
+                  <small>{m.hint}</small>
+                </button>
+              );
+            })}
+          </div>
+          <p className="su-note">Convide amigos pelo link ou preencha as vagas com bots — jogue de 2 até {limit}.</p>
+
+          {room.players.map((p) => (
+            <SeatRow
+              key={p.color}
+              seat={p}
+              onRemove={p.isBot ? () => void removeBot(p.color) : undefined}
+              onDifficulty={p.isBot ? (d) => void setBotDiff(p.color, d) : undefined}
+            />
+          ))}
+          {Array.from({ length: openCount }, (_, i) => (
+            <OpenSeat key={`open-${i}`} onAddBot={addBot} />
+          ))}
+        </div>
+
+        <div className="card su-settings">
+          <h3 className="su-sub">Tabuleiro</h3>
+          <div className="su-tiles">
+            <SetupTile icon={<Dices size={20} />} label="Números equilibrados" hint="6 e 8 nunca vizinhos"
+              active={numberLayout === 'balanced'}
+              onClick={() => {
+                const v = numberLayout === 'balanced' ? 'random' : 'balanced';
+                setNumberLayout(v);
+                void patch({ numberLayout: v });
+              }} />
+            <SetupTile icon={<Target size={20} />} label="Deserto no centro"
+              hint={mapKey === 'standard' ? 'ladrão começa no meio' : 'só no mapa 3–4'}
+              disabled={mapKey !== 'standard'}
+              active={mapKey === 'standard' && desert === 'center'}
+              onClick={() => {
+                const v = desert === 'center' ? 'random' : 'center';
+                setDesert(v);
+                void patch({ desert: v });
+              }} />
+            <SetupTile icon={<Shield size={20} />} label="Ladrão amigável" hint="não bloqueia quem tem < 3 PV"
+              active={friendlyRobber}
+              onClick={() => {
+                const v = !friendlyRobber;
+                setFriendlyRobber(v);
+                void patch({ friendlyRobber: v });
+              }} />
+          </div>
+
+          <h3 className="su-sub">Configurações avançadas</h3>
+          <div className="su-pace">
+            <label>Ritmo (limite de tempo das ações)</label>
+            <div className="su-seg sm">
+              <button className={pace === 'normal' ? 'on' : ''} onClick={() => { setPace('normal'); void patch({ pace: 'normal' }); }}>Normal</button>
+              <button className={pace === 'fast' ? 'on' : ''} onClick={() => { setPace('fast'); void patch({ pace: 'fast' }); }}>Rápido</button>
+            </div>
+          </div>
+          <div className="su-slider">
+            <label>Pontos para vencer <b>{pointsToWin}</b></label>
+            <input type="range" min={3} max={15} value={pointsToWin}
+              onChange={(e) => { const v = +e.target.value; setPointsToWin(v); patchDebounced({ pointsToWin: v }); }} />
+          </div>
+          <div className="su-slider">
+            <label>Limite de cartas (descarte no 7) <b>{discardLimit}</b></label>
+            <input type="range" min={5} max={15} value={discardLimit}
+              onChange={(e) => { const v = +e.target.value; setDiscardLimit(v); patchDebounced({ discardLimit: v }); }} />
+          </div>
+          <div className="su-slider">
+            <label>Seed (opcional)</label>
+            <div className="su-seed">
+              <input value={seedText} placeholder="aleatória"
+                onChange={(e) => { setSeedText(e.target.value); patchDebounced({ seed: e.target.value.trim() === '' ? null : hashSeed(e.target.value.trim()) }); }} />
+              <button onClick={() => { setSeedText(''); void patch({ seed: null }); }}><Shuffle size={14} /> Aleatória</button>
+            </div>
+          </div>
+
+          <div className="su-room-online">
+            <h3 className="su-sub">Sala</h3>
+            <div className="su-slider">
+              <label>Nome da sala</label>
+              <input
+                className="su-roomname"
+                value={roomName}
+                maxLength={40}
+                onChange={(e) => { setRoomName(e.target.value); patchDebounced({ name: e.target.value }); }}
+              />
+            </div>
+            <button
+              className={`su-tile su-private${isPrivate ? ' active' : ''}`}
+              onClick={() => { const v = !isPrivate; setIsPrivate(v); void patch({ isPrivate: v }); }}
+              type="button"
+            >
+              <span className="su-tile-icon"><Lock size={18} /></span>
+              <span className="su-tile-label">Sala privada</span>
+              <span className="su-tile-hint">{isPrivate ? 'só por link; fora da listagem' : 'aparece no lobby público'}</span>
+            </button>
+          </div>
+
+          <button className="cta big su-start" disabled={!canStart || starting} onClick={start}>
+            <Play size={16} /> {starting ? 'Iniciando…' : 'Começar partida'}
+          </button>
+          {!canStart && <p className="su-note">Adicione um bot ou espere um amigo entrar pelo link para começar.</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Sala do CONVIDADO: vê a mesa e aguarda o anfitrião                   */
+/* ------------------------------------------------------------------ */
+
+function GuestRoom({ code, room, onLeave }: { code: string; room: RoomView; onLeave: () => void }) {
+  const openCount = Math.max(0, room.maxPlayers - room.players.length);
   return (
     <div className="page">
       <div className="page-head">
         <div>
-          <button className="back-link" onClick={onLeave}><ArrowLeft size={15} /> Voltar ao lobby</button>
+          <button className="back-link" onClick={onLeave}><ArrowLeft size={15} /> Sair da sala</button>
           <span className="eyebrow">SALA DE ESPERA</span>
           <h1>{room.name} {room.isPrivate && <Lock size={18} className="ic-muted" />}</h1>
         </div>
       </div>
 
-      <div className="card wr-link">
-        <label>Link da sala — compartilhe para convidar</label>
-        <div className="wr-link-row">
-          <input readOnly value={roomLink(code)} onFocus={(e) => e.target.select()} />
-          <button className="cta" onClick={copy}>
-            {copied ? <><Check size={15} /> Copiado!</> : <><Copy size={15} /> Copiar link</>}
-          </button>
-        </div>
-      </div>
+      <LinkCard code={code} />
 
       <div className="card">
         <h2 className="su-h">
@@ -614,29 +673,26 @@ function RoomLive({
           <span className="su-count">{room.players.length}/{room.maxPlayers}</span>
         </h2>
         <p className="muted-note">Mapa: {MAP_LABEL[room.boardLayout] ?? room.boardLayout}</p>
-        <div className="wr-players">
+        <div className="su-players">
           {room.players.map((p) => (
-            <div key={p.username} className="wr-player">
-              <span className="wr-dot" style={{ background: PLAYER_FILL[p.color as PlayerColor] }} title={PLAYER_LABEL[p.color as PlayerColor]} />
-              <b>{p.username}</b>
-              {p.isHost && <span className="su-tag host"><Crown size={12} /> Anfitrião</span>}
-            </div>
+            <SeatRow key={p.color} seat={p} />
           ))}
-          {Array.from({ length: Math.max(0, room.maxPlayers - room.players.length) }, (_, i) => (
-            <div key={`open-${i}`} className="wr-player open">
-              <span className="wr-dot empty" /> <em>Vaga aberta</em>
-            </div>
+          {Array.from({ length: openCount }, (_, i) => (
+            <OpenSeat key={`open-${i}`} />
           ))}
         </div>
-
-        {canStart ? (
-          <button className="cta big" disabled={starting} onClick={start}>
-            <Play size={16} /> {starting ? 'Iniciando…' : 'Começar partida'}
-          </button>
-        ) : (
-          <p className="muted-note wr-wait">Aguardando o anfitrião iniciar a partida…</p>
-        )}
+        <p className="muted-note wr-wait">Aguardando o anfitrião iniciar a partida…</p>
       </div>
     </div>
+  );
+}
+
+function SetupTile({ icon, label, hint, active, disabled, onClick }: { icon: ReactNode; label: string; hint: string; active: boolean; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button className={`su-tile${active ? ' active' : ''}`} disabled={disabled} onClick={onClick}>
+      <span className="su-tile-icon">{icon}</span>
+      <span className="su-tile-label">{label}</span>
+      <span className="su-tile-hint">{hint}</span>
+    </button>
   );
 }

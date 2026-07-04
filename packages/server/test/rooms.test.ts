@@ -6,6 +6,8 @@ import {
   decideJoin,
   isStaleWaitingRoom,
   STALE_WAITING_ROOM_TTL_MS,
+  mapLimit,
+  botsOf,
 } from '../src/rooms.js';
 
 describe('makeRoomCode', () => {
@@ -101,5 +103,34 @@ describe('isStaleWaitingRoom (expiração de salas inativas — item 6)', () => 
     expect(isStaleWaitingRoom({ status: 'finished', ...old }, TTL, TTL + 1)).toBe(false);
     expect(isStaleWaitingRoom({ status: 'abandoned', ...old }, TTL, TTL + 1)).toBe(false);
     expect(isStaleWaitingRoom({ status: 'waiting', ...old }, TTL, TTL + 1)).toBe(true);
+  });
+});
+
+describe('mapLimit (mapa -> limite de jogadores)', () => {
+  it('mapeia cada mapa ao seu limite; desconhecido cai em 4', () => {
+    expect(mapLimit('standard')).toBe(4);
+    expect(mapLimit('large')).toBe(6);
+    expect(mapLimit('huge')).toBe(8);
+    expect(mapLimit('inexistente')).toBe(4);
+  });
+});
+
+describe('botsOf (bots vivos na config da sala)', () => {
+  it('lê a lista estruturada {color,name,difficulty}', () => {
+    const cfg = { bots: [{ color: 'blue', name: 'Rex', difficulty: 'hard' }] };
+    expect(botsOf(cfg)).toEqual([{ color: 'blue', name: 'Rex', difficulty: 'hard' }]);
+  });
+
+  it('tolera o formato antigo (só cores) e completa defaults', () => {
+    expect(botsOf({ bots: ['white', 'orange'] })).toEqual([
+      { color: 'white', name: 'Bot', difficulty: 'medium' },
+      { color: 'orange', name: 'Bot', difficulty: 'medium' },
+    ]);
+  });
+
+  it('descarta cores inválidas e configs sem bots', () => {
+    expect(botsOf({ bots: [{ color: 'roxo-neon', name: 'X', difficulty: 'easy' }] })).toEqual([]);
+    expect(botsOf({})).toEqual([]);
+    expect(botsOf(null)).toEqual([]);
   });
 });
