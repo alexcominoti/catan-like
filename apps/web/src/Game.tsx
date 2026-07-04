@@ -109,6 +109,9 @@ export function Game({
   const [tradeAny, setTradeAny] = useState(0); // carta coringa: nº de recursos "quaisquer" pedidos
   // Oferta coringa a resolver ao aceitar (o aceitante escolhe quais recursos dar).
   const [wildcard, setWildcard] = useState<NonNullable<GameState['activeTrade']> | null>(null);
+  // Troca RECUSADA por mim: escondida localmente (a oferta segue ativa no servidor
+  // até o proponente resolver/expirar) para o popup não reaparecer a cada estado.
+  const [dismissedTradeKey, setDismissedTradeKey] = useState<string | null>(null);
   const [help, setHelp] = useState(false);
   // Quando o ladrao pode roubar de 2+ jogadores, o humano escolhe a vitima.
   const [robberChoice, setRobberChoice] = useState<{ hexId: string; victims: PlayerColor[] } | null>(null);
@@ -127,6 +130,11 @@ export function Game({
     const id = setInterval(() => setElapsed((s) => s + 1), 1000);
     return () => clearInterval(id);
   }, [state.phase]);
+
+  // Quando a oferta ativa some, esquece a recusa (uma oferta futura reaparece).
+  useEffect(() => {
+    if (!state.activeTrade) setDismissedTradeKey(null);
+  }, [state.activeTrade]);
 
   function sendChat() {
     const t = chatInput.trim();
@@ -508,10 +516,11 @@ export function Game({
 
           <div className="board-wrap" style={{ borderColor: playerColor }}>
             <Board state={state} mode={effMode} hintVertex={setupHint} onBuild={onBuild} onHex={onHex} />
-            {state.activeTrade && (
+            {state.activeTrade && tradeKeyOf(state.activeTrade) !== dismissedTradeKey && (
               <ActiveTradePopup state={state} dispatch={dispatch} localColor={localColor}
                 botOffer={isBot(state.activeTrade.from)} onCounter={() => openCounter(state.activeTrade!)}
-                onWildcardAccept={() => setWildcard(state.activeTrade)} />
+                onWildcardAccept={() => setWildcard(state.activeTrade)}
+                onRefuse={() => { setDismissedTradeKey(tradeKeyOf(state.activeTrade!)); dispatch({ t: 'respondTrade', accept: false }); }} />
             )}
             <Dice dice={state.dice} />
             {myRoll && (
@@ -869,6 +878,11 @@ function WildcardPickModal({
   );
 }
 
+/** Assinatura estável de uma oferta (para lembrar qual eu recusei). */
+function tradeKeyOf(t: NonNullable<GameState['activeTrade']>): string {
+  return `${t.from}:${JSON.stringify(t.give)}:${JSON.stringify(t.want)}:${t.wantAny ?? 0}`;
+}
+
 /** Painel de troca no canto do mapa (sem escurecer a tela). */
 function ActiveTradePopup({
   state,
@@ -877,6 +891,7 @@ function ActiveTradePopup({
   botOffer,
   onCounter,
   onWildcardAccept,
+  onRefuse,
 }: {
   state: GameState;
   dispatch: (a: Action, by?: PlayerColor) => boolean;
@@ -884,6 +899,7 @@ function ActiveTradePopup({
   botOffer: boolean;
   onCounter: () => void;
   onWildcardAccept: () => void;
+  onRefuse: () => void;
 }) {
   const t = state.activeTrade!;
   const fmt = (m: Partial<Record<Resource, number>>) =>
@@ -922,7 +938,7 @@ function ActiveTradePopup({
         </>
       ) : iAmRecipient ? (
         <div className="modal-actions wrap">
-          <button onClick={() => dispatch({ t: 'cancelTrade' }, t.from)}>✗ Recusar</button>
+          <button onClick={onRefuse}>✗ Recusar</button>
           <button onClick={onCounter}>✎ Contraproposta</button>
           <button className="primary"
             onClick={() => (t.wantAny ? onWildcardAccept() : dispatch({ t: 'respondTrade', accept: true }, localColor))}>

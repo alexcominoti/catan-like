@@ -107,12 +107,11 @@ export class GameRoom {
     if (slot) slot.connected = false;
   }
 
-  /** Estourou a graca de reconexao: a vaga vira BOT MEDIO e assume na hora (o jogo nao trava). */
+  /** Estourou a graca de reconexao: a vaga vira BOT MEDIO. O servidor pilota (paced). */
   convertToBot(userId: string): void {
     const slot = this.humans.find((h) => h.userId === userId);
     if (!slot || slot.connected) return; // reconectou entretanto: nao converte
     this.botSet.add(slot.color);
-    this.runBots();
   }
 
   colorOf(userId: string): PlayerColor | null {
@@ -150,7 +149,8 @@ export class GameRoom {
       }
       this.turnBonusSeconds = Math.min(MAX_TURN_BONUS, this.turnBonusSeconds + BONUS_PER_ACTION);
     }
-    this.runBots();
+    // NÃO auto-joga os bots aqui: quem os pilota é o servidor, UMA jogada por vez
+    // com um intervalo entre elas (naturalidade). Ver server.ts (scheduleBotPump).
     return { ok: true };
   }
 
@@ -232,8 +232,7 @@ export class GameRoom {
     const streak = (this.timeoutStreak.get(who) ?? 0) + 1;
     this.timeoutStreak.set(who, streak);
     if (streak >= MAX_TURN_TIMEOUTS) {
-      this.botSet.add(who); // AFK demais -> vira bot medio
-      this.runBots();
+      this.botSet.add(who); // AFK demais -> vira bot medio (o servidor pilota, paced)
       return true;
     }
     return this.applyForced(who, { t: 'endTurn' });
@@ -251,20 +250,18 @@ export class GameRoom {
         this.state = r.state;
         this.pendingEvents.push(...r.events);
         this.pendingSelection.delete(who);
-        this.runBots();
         return true;
       }
     }
     return this.applyForced(who, fallback);
   }
 
-  /** Aplica uma acao "default" (timeout) e segue auto-jogando os bots. */
+  /** Aplica uma acao "default" (timeout). Os bots seguem sendo pilotados pelo servidor (paced). */
   private applyForced(by: PlayerColor, action: Action): boolean {
     const r = reduce(this.state, by, action);
     if (!r.ok) return false;
     this.state = r.state;
     this.pendingEvents.push(...r.events);
-    this.runBots();
     return true;
   }
 
@@ -298,17 +295,34 @@ export class GameRoom {
     return empty ?? s.board.hexOrder.find((h) => h !== cur)!;
   }
 
-  /** Drena as jogadas dos bots ate ser a vez de um humano (ou o fim do jogo). */
+  /** Há uma jogada de bot pendente agora? (vez de bot, ou bot aceitando uma troca). */
+  botHasMove(): boolean {
+    return planBotAction(this.state, this.isBot, this.difficultyOf) !== null;
+  }
+
+  /**
+   * Aplica UMA jogada de bot (a próxima). Retorna se algo foi aplicado. É o que o
+   * servidor chama, uma por vez com intervalo, para o bot não jogar "instantâneo".
+   */
+  stepBot(): boolean {
+    const move = planBotAction(this.state, this.isBot, this.difficultyOf);
+    if (!move) return false;
+    const r = reduce(this.state, move.by, move.action);
+    if (!r.ok) return false; // nao deveria ocorrer; evita laco infinito
+    this.state = r.state;
+    this.pendingEvents.push(...r.events);
+    return true;
+  }
+
+  /**
+   * Drena TODAS as jogadas dos bots de uma vez (sem pausa). Usado só na criação
+   * (setup inicial até o 1º humano, ou jogo só de bots até o fim); durante a
+   * partida o servidor pilota via stepBot (paced).
+   */
   private runBots(): void {
     let guard = 0;
-    while (guard++ < 100000) {
-      const move = planBotAction(this.state, this.isBot, this.difficultyOf);
-      if (!move) break; // nada de bot a fazer agora (vez de humano ou janela de troca)
-      const r = reduce(this.state, move.by, move.action);
-      if (!r.ok) break; // nao deveria ocorrer; evita laco infinito
-      this.state = r.state;
-      this.pendingEvents.push(...r.events);
-      if (this.state.phase === 'ended') break;
+    while (guard++ < 100000 && this.state.phase !== 'ended' && this.stepBot()) {
+      /* continua até a vez de um humano / janela de troca / fim */
     }
   }
 }
