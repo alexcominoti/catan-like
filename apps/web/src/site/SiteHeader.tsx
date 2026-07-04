@@ -1,7 +1,7 @@
 import { Hexagon } from 'lucide-react';
 import { authClient } from '../auth/client.js';
 
-export type Page = 'landing' | 'lobby' | 'room' | 'profile' | 'auth';
+export type Page = 'landing' | 'lobby' | 'room' | 'profile' | 'friends' | 'auth';
 
 export function SiteHeader({ page, onNav }: { page: Page; onNav: (p: Page, param?: string) => void }) {
   const { data: session } = authClient.useSession();
@@ -15,6 +15,9 @@ export function SiteHeader({ page, onNav }: { page: Page; onNav: (p: Page, param
       </button>
       <nav className="site-nav">
         <button className={page === 'lobby' ? 'on' : ''} onClick={() => onNav('lobby')}>Lobby</button>
+        {user && (
+          <button className={page === 'friends' ? 'on' : ''} onClick={() => onNav('friends')}>Amigos</button>
+        )}
         <button className={page === 'profile' ? 'on' : ''} onClick={() => onNav('profile', ownUsername)}>Perfil</button>
       </nav>
       <div className="site-actions">

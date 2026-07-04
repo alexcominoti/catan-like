@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Zap, Users, Trophy, Hexagon, ShieldCheck, Sparkles, Map } from 'lucide-react';
+import { getOnlineCount } from './social.js';
 
 const RESOURCE_PILLS: { label: string; color: string }[] = [
   { label: 'Tijolo', color: '#c0563a' },
@@ -29,6 +30,20 @@ const HEX = [
 ];
 
 export function Landing({ onPlay, onWatch }: { onPlay: () => void; onWatch: () => void }) {
+  // Contador REAL de jogadores online (serviço de presença; item da landing no
+  // backlog). Atualiza a cada 30s. Só aparece quando há alguém online.
+  const [online, setOnline] = useState<number | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const tick = () => void getOnlineCount().then((n) => alive && setOnline(n));
+    tick();
+    const id = setInterval(tick, 30_000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+
   return (
     <div className="landing">
       <section className="hero">
@@ -45,11 +60,16 @@ export function Landing({ onPlay, onWatch }: { onPlay: () => void; onWatch: () =
             <button className="ghost big" onClick={onWatch}>Ver uma partida</button>
           </div>
           {/*
-            Removidos daqui: "12,4k jogadores online" (mockado — precisa de serviço de
-            presença/contagem real) e "Anticheat ativo" (sem implementação). Ver
-            docs/backlog.md → Landing. Reexibir só com dados/feature reais.
+            "Anticheat ativo" segue removido (sem implementação). O contador de
+            jogadores online agora é REAL (serviço de presença — GET /api/presence).
+            Ver docs/backlog.md → Landing.
           */}
           <div className="hero-stats">
+            {online != null && online > 0 && (
+              <span className="online-stat">
+                <i className="presence-pulse" /> {online.toLocaleString('pt-BR')} {online === 1 ? 'jogador online' : 'jogadores online'}
+              </span>
+            )}
             <span><Zap size={15} /> Servidor BR</span>
           </div>
         </div>

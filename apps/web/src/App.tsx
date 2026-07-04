@@ -3,8 +3,11 @@ import { SiteHeader, type Page } from './site/SiteHeader.js';
 import { Landing } from './site/Landing.js';
 import { RoomBrowser } from './site/RoomBrowser.js';
 import { Profile } from './site/Profile.js';
+import { Friends } from './site/Friends.js';
 import { Auth } from './site/Auth.js';
 import { RoomScreen } from './site/RoomScreen.js';
+import { authClient } from './auth/client.js';
+import { pingPresence } from './site/social.js';
 
 /** Código da sala em `/room/<code>` (ou null se não é um link de sala). */
 function roomCodeFromPath(): string | null {
@@ -26,12 +29,19 @@ function isLobbyPath(): boolean {
   return /^\/lobby\/?$/.test(window.location.pathname);
 }
 
-/** Deep-link inicial: link de redefinicao de senha, link de sala, link de perfil, lobby, ou landing. */
+/** É a rota de amigos (`/friends`)? */
+function isFriendsPath(): boolean {
+  if (typeof window === 'undefined') return false;
+  return /^\/friends\/?$/.test(window.location.pathname);
+}
+
+/** Deep-link inicial: link de redefinicao de senha, link de sala, link de perfil, lobby, amigos, ou landing. */
 function initialPage(): Page {
   if (typeof window === 'undefined') return 'landing';
   if (window.location.pathname.startsWith('/reset-password')) return 'auth';
   if (roomCodeFromPath()) return 'room';
   if (profileUsernameFromPath()) return 'profile';
+  if (isFriendsPath()) return 'friends';
   if (isLobbyPath()) return 'lobby';
   return 'landing';
 }
@@ -42,6 +52,7 @@ function syncUrl(page: Page, roomCode: string | null, profileUsername: string | 
   let target = '/';
   if (page === 'room' && roomCode) target = `/room/${roomCode}`;
   else if (page === 'profile' && profileUsername) target = `/profile/${encodeURIComponent(profileUsername)}`;
+  else if (page === 'friends') target = '/friends';
   else if (page === 'lobby') target = '/lobby';
   if (window.location.pathname !== target) {
     window.history.pushState({}, '', target);
@@ -56,6 +67,18 @@ export function App() {
   const [pendingRoom, setPendingRoom] = useState<string | null>(roomCodeFromPath);
   // A partida ao vivo (online) ocupa a tela inteira, sem o header do site.
   const [roomFullscreen, setRoomFullscreen] = useState(false);
+  const { data: session } = authClient.useSession();
+
+  // Heartbeat de presença: enquanto logado, avisa o servidor a cada 30s que está
+  // online (com a sala atual, se houver) — alimenta o contador da landing e o
+  // status online dos amigos. Ver apps/web/src/site/social.ts.
+  useEffect(() => {
+    if (!session?.user) return;
+    const currentRoom = () => (page === 'room' ? roomCode : null);
+    void pingPresence(currentRoom());
+    const id = setInterval(() => void pingPresence(currentRoom()), 30_000);
+    return () => clearInterval(id);
+  }, [session?.user?.id, page, roomCode]);
 
   // Botões voltar/avançar do navegador: relê a URL.
   useEffect(() => {
@@ -70,6 +93,9 @@ export function App() {
         setPage('profile');
       } else if (window.location.pathname.startsWith('/reset-password')) {
         setPage('auth');
+      } else if (isFriendsPath()) {
+        setRoomCode(null);
+        setPage('friends');
       } else if (isLobbyPath()) {
         setRoomCode(null);
         setPage('lobby');
@@ -126,6 +152,9 @@ export function App() {
           onOwnUsername={(u) => setProfileUsername(u)}
           onNeedAuth={() => nav('auth')}
         />
+      )}
+      {page === 'friends' && (
+        <Friends onEnterRoom={enterRoom} onNeedAuth={() => nav('auth')} />
       )}
       {page === 'auth' && (
         <Auth onAuthed={() => (pendingRoom ? enterRoom(pendingRoom) : nav('lobby'))} />

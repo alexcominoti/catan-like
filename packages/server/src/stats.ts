@@ -12,6 +12,7 @@ import {
   playerStats as playerStatsTable,
   user as userTable,
 } from '@trevalis/db';
+import { karmaPercent } from './karma.js';
 
 /**
  * Perfil PUBLICO (compartilhavel via `/profile/:username`, sem exigir login).
@@ -44,6 +45,10 @@ export interface ProfileStats {
   gamesWon: number;
   currentStreak: number;
   longestStreak: number;
+  /** Karma (anti-abandono): % de partidas levadas até o fim conectado. */
+  karma: number;
+  /** Partidas abandonadas (a vaga virou bot antes do fim). */
+  gamesAbandoned: number;
   matches: ProfileMatch[];
 }
 
@@ -57,6 +62,8 @@ export async function getProfileStats(userId: string): Promise<ProfileStats> {
       gamesWon: playerStatsTable.gamesWon,
       currentStreak: playerStatsTable.currentStreak,
       longestStreak: playerStatsTable.longestStreak,
+      gamesCompleted: playerStatsTable.gamesCompleted,
+      gamesAbandoned: playerStatsTable.gamesAbandoned,
     })
     .from(playerStatsTable)
     .where(eq(playerStatsTable.userId, userId))
@@ -101,6 +108,8 @@ export async function getProfileStats(userId: string): Promise<ProfileStats> {
     gamesWon: stats?.gamesWon ?? 0,
     currentStreak: stats?.currentStreak ?? 0,
     longestStreak: stats?.longestStreak ?? 0,
+    karma: karmaPercent(stats?.gamesCompleted ?? 0, stats?.gamesAbandoned ?? 0),
+    gamesAbandoned: stats?.gamesAbandoned ?? 0,
     matches,
   };
 }

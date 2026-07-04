@@ -28,6 +28,13 @@ import {
   updateRoomSettings,
 } from './rooms.js';
 import { getProfileStats, getPublicProfileByUsername } from './stats.js';
+import { presence } from './presence.js';
+import {
+  acceptFriendRequest,
+  listFriends,
+  removeFriend,
+  sendFriendRequest,
+} from './friends.js';
 import type { RoomManager } from './room.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -238,6 +245,90 @@ async function handleRequest(
       return;
     }
     sendJson(res, 200, profile);
+    return;
+  }
+
+  // --- presença: contador público de jogadores online (landing) ---
+  if (path === '/api/presence' && req.method === 'GET') {
+    sendJson(res, 200, { online: presence.count() });
+    return;
+  }
+
+  // --- presença: heartbeat do cliente logado (marca online + sala atual) ---
+  if (path === '/api/presence/ping' && req.method === 'POST') {
+    const u = await authedUser(req, res);
+    if (!u) return;
+    let body: unknown;
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      body = {};
+    }
+    const rawRoom = (body as { room?: unknown }).room;
+    const room = typeof rawRoom === 'string' && /^[A-Za-z0-9]{4,12}$/.test(rawRoom) ? rawRoom.toUpperCase() : null;
+    presence.touch(u.id, room);
+    sendJson(res, 200, { online: presence.count() });
+    return;
+  }
+
+  // --- amigos: lista (aceitos + pendentes) com presença online ---
+  if (path === '/api/friends' && req.method === 'GET') {
+    const u = await authedUser(req, res);
+    if (!u) return;
+    sendJson(res, 200, await listFriends(u.id));
+    return;
+  }
+
+  // --- amigos: enviar pedido por username ---
+  if (path === '/api/friends/request' && req.method === 'POST') {
+    const u = await authedUser(req, res);
+    if (!u) return;
+    let body: unknown;
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      sendJson(res, 400, { error: 'Corpo inválido.' });
+      return;
+    }
+    const username = typeof (body as { username?: unknown }).username === 'string' ? (body as { username: string }).username : '';
+    if (!username.trim()) {
+      sendJson(res, 400, { error: 'Informe um nome de usuário.' });
+      return;
+    }
+    const result = await sendFriendRequest(u.id, username);
+    if (!result.ok) {
+      sendJson(res, result.httpStatus, { error: result.error });
+      return;
+    }
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  // --- amigos: aceitar / remover (recusar/cancelar) por userId ---
+  if ((path === '/api/friends/accept' || path === '/api/friends/remove') && req.method === 'POST') {
+    const u = await authedUser(req, res);
+    if (!u) return;
+    let body: unknown;
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      sendJson(res, 400, { error: 'Corpo inválido.' });
+      return;
+    }
+    const otherId = typeof (body as { userId?: unknown }).userId === 'string' ? (body as { userId: string }).userId : '';
+    if (!otherId) {
+      sendJson(res, 400, { error: 'Usuário inválido.' });
+      return;
+    }
+    const result =
+      path === '/api/friends/accept'
+        ? await acceptFriendRequest(u.id, otherId)
+        : await removeFriend(u.id, otherId);
+    if (!result.ok) {
+      sendJson(res, result.httpStatus, { error: result.error });
+      return;
+    }
+    sendJson(res, 200, { ok: true });
     return;
   }
 

@@ -1262,7 +1262,7 @@ button.link {
 .avatar { width: 64px; height: 64px; border-radius: 14px; background: linear-gradient(150deg, #e08a5e, #c0563a); color: #fff; font-family: var(--serif); font-size: 28px; display: flex; align-items: center; justify-content: center; }
 .profile-id { flex: 1; }
 .profile-id h1 { margin: 2px 0; font-size: 30px; }
-.stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 16px; margin-bottom: 20px; }
 .stat-box { display: flex; flex-direction: column; gap: 3px; }
 .stat-value { font-family: var(--serif); font-size: 30px; }
 .profile-cols { display: grid; grid-template-columns: 1.3fr 1fr; gap: 20px; }
@@ -1574,3 +1574,28 @@ button.link {
 .fly-el { position: absolute; top: 0; left: 0; will-change: transform, opacity; }
 .fly-card { border-radius: 5px; border: 2px solid #fdfbf6; object-fit: cover; box-shadow: 2px 4px 9px rgba(0, 0, 0, 0.35); }
 .fly-robber { border-radius: 50% 50% 45% 45%; background: #2b2b2b; box-shadow: 0 0 0 2px #111, 0 4px 8px rgba(0, 0, 0, 0.45); }
+
+/* ---- Social: presença (online) + amigos (Tier 1) ---- */
+.online-stat { font-weight: 600; color: var(--good); }
+.presence-pulse { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 0 rgba(90,170,70,.6); animation: presence-pulse 1.8s infinite; }
+@keyframes presence-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(90,170,70,.55); }
+  70% { box-shadow: 0 0 0 6px rgba(90,170,70,0); }
+  100% { box-shadow: 0 0 0 0 rgba(90,170,70,0); }
+}
+.presence-dot.on { color: var(--good); }
+.presence-dot.off { color: var(--muted); opacity: .5; }
+
+.friend-add { margin-bottom: 18px; }
+.friend-add-row { display: flex; gap: 10px; margin-top: 4px; }
+.friend-add-row input { flex: 1; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: #fff; font-size: 15px; }
+.friend-add-row .cta { white-space: nowrap; }
+.friend-notice { margin-top: 10px; font-size: 13px; color: var(--good); font-weight: 600; }
+
+.friend-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 0; border-top: 1px solid var(--border); }
+.friend-row:first-of-type { border-top: none; }
+.friend-name { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; }
+.friend-name small { font-weight: 400; }
+.friend-actions { display: inline-flex; align-items: center; gap: 8px; }
+.ghost.sm.danger { color: var(--accent); }
+.ghost.sm.danger:hover { background: #fbe6d8; }
