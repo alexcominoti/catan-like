@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   publicScoreOf,
+  scoreOf,
   handTotal,
   longestRoadLength,
   maritimeRate,
@@ -456,7 +457,9 @@ export function Game({
                 style={{ ['--pc' as string]: PLAYER_FILL[p.color] }}>
                 <div className="noble-left">
                   <span className="noble-crest" data-noble={p.color} style={{ background: PLAYER_FILL[p.color] }}>{CREST[p.color]}</span>
-                  <div className="noble-pts"><b>{publicScoreOf(state, p.color)}</b><span>pts</span></div>
+                  {/* Durante o jogo mostra o placar PÚBLICO (esconde cartas de PV);
+                      no fim, o estado é revelado e mostramos a pontuação real. */}
+                  <div className="noble-pts"><b>{state.phase === 'ended' ? scoreOf(state, p.color) : publicScoreOf(state, p.color)}</b><span>pts</span></div>
                 </div>
                 <div className="noble-main">
                   <div className="noble-name">
@@ -486,8 +489,10 @@ export function Game({
                     })()}
                   </div>
                   <div className="noble-stats">
-                    <Stat icon={<Layers size={12} />} label={`${handTotal(p)} recursos`} />
-                    <Stat icon={<Sparkles size={12} />} label={`${p.progressCards.length} desenv.`} />
+                    {/* Oponentes vêm com mão/cartas OCULTAS na projeção; mostramos a
+                        CONTAGEM (hiddenHand/hiddenDevCount), não 0. */}
+                    <Stat icon={<Layers size={12} />} label={`${p.hiddenHand ?? handTotal(p)} recursos`} />
+                    <Stat icon={<Sparkles size={12} />} label={`${p.hiddenDevCount ?? p.progressCards.length} desenv.`} />
                     <Stat icon={<Scroll size={12} />} label={`${longestRoadLength(state, p.color)} estradas`} hl={hasRoad} />
                     <Stat icon={<Swords size={12} />} label={`${p.knightsPlayed} cav.`} hl={hasArmy} />
                   </div>
@@ -1052,9 +1057,11 @@ function getPlayer(state: GameState, color: PlayerColor) {
 }
 
 /** Placar final (pontos públicos, maior primeiro) — usado na tela de fim e na imagem. */
+/** Placar final: no fim de jogo o estado é revelado, então usamos a pontuação
+ *  REAL (scoreOf, com as cartas de Ponto de Vitória contadas). */
 function standingsOf(state: GameState): { color: PlayerColor; name: string; pts: number }[] {
   return state.players
-    .map((p) => ({ color: p.color, name: p.name, pts: publicScoreOf(state, p.color) }))
+    .map((p) => ({ color: p.color, name: p.name, pts: scoreOf(state, p.color) }))
     .sort((a, b) => b.pts - a.pts);
 }
 
