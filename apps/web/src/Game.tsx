@@ -28,6 +28,7 @@ import { RES_IMG, DEV_IMG } from './game/cards.js';
 import { Toasts, useToasts, type ToastTone } from './ui/Toasts.js';
 import { play as playSound, setMuted, unlockAudio, nudgeVolume, type SoundKind } from './ui/sound.js';
 import type { GameClient } from './net/client.js';
+import { PlayerMenu, useRelationships } from './site/PlayerMenu.js';
 import { PLAYER_FILL, PLAYER_LABEL, RESOURCE_ICON, RESOURCE_LABEL } from './game/theme.js';
 
 /**
@@ -121,6 +122,10 @@ export function Game({
   const [turnCount, setTurnCount] = useState(1); // contador de turno
   const [chatInput, setChatInput] = useState('');
   const [chat, setChat] = useState<ChatMsg[]>([]);
+  // Menu de jogador (clicar no nome): perfil / amigo / bloquear. + minhas relações
+  // (para o estado do botão de amizade e para esconder mensagens de bloqueados).
+  const { data: relations, refresh: refreshRelations, blockedNames } = useRelationships();
+  const [playerMenu, setPlayerMenu] = useState<{ username: string; x: number; y: number } | null>(null);
   const { toasts, push } = useToasts();
   const { items: flyItems, fly } = useFlyer();
 
@@ -455,7 +460,12 @@ export function Game({
                 </div>
                 <div className="noble-main">
                   <div className="noble-name">
-                    <span className="noble-nick">{p.name}</span>
+                    {(!online.bots.includes(p.color) && p.color !== online.viewerColor) ? (
+                      <button className="noble-nick as-link" title="Opções do jogador"
+                        onClick={(e) => setPlayerMenu({ username: p.name, x: e.clientX, y: e.clientY })}>{p.name}</button>
+                    ) : (
+                      <span className="noble-nick">{p.name}</span>
+                    )}
                     {!isSpectator && p.color === localColor && <span className="you-tag">você</span>}
                     {online && online.awayColors.includes(p.color) ? (
                       <span className="bot-tag" title="Desconectado: um bot médio assumiu temporariamente">🤖 assumiu</span>
@@ -581,7 +591,8 @@ export function Game({
             <h3 className="chat-head"><MessageSquare size={14} className="ic-primary" /> Chat</h3>
             <div className="chat-log">
               {chat.length === 0 && <p className="muted-note">Sem mensagens ainda</p>}
-              {[...chat].reverse().map((m, i) => (
+              {/* Bloquear esconde as mensagens do jogador bloqueado. */}
+              {[...chat].reverse().filter((m) => !blockedNames.has(m.name.toLowerCase())).map((m, i) => (
                 <div key={i} className="log-chat"><b style={{ color: PLAYER_FILL[m.color] }}>{m.name}:</b> {m.text}</div>
               ))}
             </div>
@@ -671,7 +682,13 @@ export function Game({
         );
       })()}
       {state.phase === 'ended' && state.winner && (
-        <EndGameOverlay state={state} localColor={localColor} elapsed={elapsed} turns={turnCount} onExit={onExit} />
+        <EndGameOverlay state={state} localColor={localColor} elapsed={elapsed} turns={turnCount} onExit={onExit}
+          botColors={online.bots} viewerColor={online.viewerColor}
+          onPlayer={(username, x, y) => setPlayerMenu({ username, x, y })} />
+      )}
+      {playerMenu && (
+        <PlayerMenu username={playerMenu.username} data={relations} x={playerMenu.x} y={playerMenu.y}
+          onAction={refreshRelations} onClose={() => setPlayerMenu(null)} />
       )}
     </div>
   );
@@ -1043,13 +1060,16 @@ function standingsOf(state: GameState): { color: PlayerColor; name: string; pts:
  * quando disponível (celular), senão baixa o PNG.
  */
 function EndGameOverlay({
-  state, localColor, elapsed, turns, onExit,
+  state, localColor, elapsed, turns, onExit, botColors, viewerColor, onPlayer,
 }: {
   state: GameState;
   localColor: PlayerColor;
   elapsed: number;
   turns: number;
   onExit: () => void;
+  botColors: PlayerColor[];
+  viewerColor: PlayerColor | null;
+  onPlayer: (username: string, x: number, y: number) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const winner = state.winner!;
@@ -1086,14 +1106,22 @@ function EndGameOverlay({
         <h3 className="endgame-title">{iWon ? 'Você venceu!' : `${winnerName} venceu!`}</h3>
         <p className="muted-note endgame-sub">{fmtTime(elapsed)} · {turns} turnos</p>
         <div className="endgame-standings">
-          {standings.map((s, i) => (
-            <div key={s.color} className={`endgame-row${s.color === winner ? ' win' : ''}`}>
-              <span className="endgame-rank">{i + 1}º</span>
-              <span className="swatch" style={{ background: PLAYER_FILL[s.color] }} />
-              <span className="endgame-nm">{s.name}{s.color === localColor && <small className="you-tag"> você</small>}</span>
-              <b className="endgame-pts">{s.pts} pts</b>
-            </div>
-          ))}
+          {standings.map((s, i) => {
+            const human = !botColors.includes(s.color) && s.color !== viewerColor;
+            return (
+              <div key={s.color} className={`endgame-row${s.color === winner ? ' win' : ''}`}>
+                <span className="endgame-rank">{i + 1}º</span>
+                <span className="swatch" style={{ background: PLAYER_FILL[s.color] }} />
+                {human ? (
+                  <button className="endgame-nm as-link" title="Opções do jogador"
+                    onClick={(e) => onPlayer(s.name, e.clientX, e.clientY)}>{s.name}</button>
+                ) : (
+                  <span className="endgame-nm">{s.name}{s.color === localColor && <small className="you-tag"> você</small>}</span>
+                )}
+                <b className="endgame-pts">{s.pts} pts</b>
+              </div>
+            );
+          })}
         </div>
         <div className="modal-actions endgame-actions">
           <button className="primary" onClick={share} disabled={busy}>

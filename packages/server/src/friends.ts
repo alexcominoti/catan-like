@@ -71,6 +71,8 @@ export interface FriendsPayload {
   friends: FriendView[];
   incoming: PendingView[];
   outgoing: PendingView[];
+  /** Usuários que EU bloqueei (não vejo mensagens deles). */
+  blocked: PendingView[];
 }
 
 const USERNAME = sql<string>`coalesce(${userTable.username}, ${userTable.name})`;
@@ -158,6 +160,41 @@ export async function removeFriend(userId: string, otherUserId: string): Promise
   return { ok: true };
 }
 
+/**
+ * Bloqueia um usuário (por username): apaga qualquer relação existente e grava uma
+ * aresta 'blocked' de mim para ele. Bloquear impede que ele me adicione (o
+ * `decideFriendRequest` trata 'blocked' como noop) e esconde as mensagens dele.
+ */
+export async function blockUser(userId: string, targetUsername: string): Promise<FriendActionResult> {
+  const target = await resolveUsername(targetUsername.trim());
+  if (!target) return { ok: false, error: 'Usuário não encontrado.', httpStatus: 404 };
+  if (target.id === userId) return { ok: false, error: 'Você não pode se bloquear.', httpStatus: 409 };
+  const db = getDb();
+  await db.delete(friendshipTable).where(
+    or(
+      and(eq(friendshipTable.requesterId, userId), eq(friendshipTable.addresseeId, target.id)),
+      and(eq(friendshipTable.requesterId, target.id), eq(friendshipTable.addresseeId, userId)),
+    ),
+  );
+  await db.insert(friendshipTable).values({ requesterId: userId, addresseeId: target.id, status: 'blocked' });
+  return { ok: true };
+}
+
+/** Desbloqueia um usuário (remove a aresta 'blocked' que eu criei). */
+export async function unblockUser(userId: string, otherUserId: string): Promise<FriendActionResult> {
+  const db = getDb();
+  await db
+    .delete(friendshipTable)
+    .where(
+      and(
+        eq(friendshipTable.requesterId, userId),
+        eq(friendshipTable.addresseeId, otherUserId),
+        eq(friendshipTable.status, 'blocked'),
+      ),
+    );
+  return { ok: true };
+}
+
 /** Amigos (aceitos) + pedidos pendentes recebidos/enviados, com presença online. */
 export async function listFriends(userId: string): Promise<FriendsPayload> {
   const db = getDb();
@@ -187,6 +224,13 @@ export async function listFriends(userId: string): Promise<FriendsPayload> {
     .innerJoin(userTable, eq(userTable.id, friendshipTable.addresseeId))
     .where(and(eq(friendshipTable.requesterId, userId), eq(friendshipTable.status, 'pending')));
 
+  // Usuários que EU bloqueei (aresta 'blocked' de mim para eles).
+  const blocked = await db
+    .select({ userId: friendshipTable.addresseeId, username: USERNAME })
+    .from(friendshipTable)
+    .innerJoin(userTable, eq(userTable.id, friendshipTable.addresseeId))
+    .where(and(eq(friendshipTable.requesterId, userId), eq(friendshipTable.status, 'blocked')));
+
   const friends: FriendView[] = accepted
     .map((f) => ({
       userId: f.userId,
@@ -197,5 +241,5 @@ export async function listFriends(userId: string): Promise<FriendsPayload> {
     // Online primeiro, depois alfabético.
     .sort((a, b) => Number(b.online) - Number(a.online) || a.username.localeCompare(b.username));
 
-  return { friends, incoming, outgoing };
+  return { friends, incoming, outgoing, blocked };
 }

@@ -31,9 +31,11 @@ import { getProfileStats, getPublicProfileByUsername } from './stats.js';
 import { presence } from './presence.js';
 import {
   acceptFriendRequest,
+  blockUser,
   listFriends,
   removeFriend,
   sendFriendRequest,
+  unblockUser,
 } from './friends.js';
 import { joinQuickMatch, leaveQuickMatch, matchmakingStatus } from './matchmaking.js';
 import { invites } from './invites.js';
@@ -326,6 +328,30 @@ async function handleRequest(
       path === '/api/friends/accept'
         ? await acceptFriendRequest(u.id, otherId)
         : await removeFriend(u.id, otherId);
+    if (!result.ok) {
+      sendJson(res, result.httpStatus, { error: result.error });
+      return;
+    }
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  // --- amigos: bloquear (por username) / desbloquear (por userId) ---
+  if ((path === '/api/friends/block' || path === '/api/friends/unblock') && req.method === 'POST') {
+    const u = await authedUser(req, res);
+    if (!u) return;
+    let body: unknown;
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      sendJson(res, 400, { error: 'Corpo inválido.' });
+      return;
+    }
+    const b = body as { username?: unknown; userId?: unknown };
+    const result =
+      path === '/api/friends/block'
+        ? await blockUser(u.id, typeof b.username === 'string' ? b.username : '')
+        : await unblockUser(u.id, typeof b.userId === 'string' ? b.userId : '');
     if (!result.ok) {
       sendJson(res, result.httpStatus, { error: result.error });
       return;
