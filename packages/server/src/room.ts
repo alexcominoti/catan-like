@@ -10,7 +10,7 @@ import {
   type PlayerColor,
   type Resource,
 } from '@trevalis/engine';
-import { planBotAction, type Difficulty } from '@trevalis/bot';
+import { planBotAction, resolveBotProposal, type Difficulty } from '@trevalis/bot';
 import type { Pace, RoomConfig } from './protocol.js';
 
 /** Limites de tempo (segundos) por ritmo, inspirados nos timers do Colonist. */
@@ -31,6 +31,9 @@ const MAX_TURN_BONUS = 60;
 
 /** Segundos de "graca" apos uma desconexao antes de a vaga virar bot medio. */
 export const RECONNECT_GRACE_MS = 15_000;
+
+/** Janela (s) para responder a uma proposta de BOT antes de ele resolver sozinho. */
+const BOT_TRADE_WINDOW_S = 8;
 
 /** Tempo (ms) de sala vazia (sem nenhum humano conectado) ate ser limpa. */
 export const EMPTY_ROOM_TTL_MS = 5 * 60 * 1000;
@@ -179,7 +182,9 @@ export class GameRoom {
     const s = this.state;
     if (s.phase === 'ended') return null;
     const t = PACE_TIMERS[this.config.pace];
-    if (s.activeTrade) return t.trade; // qualquer oferta ativa tem janela de resposta
+    // Oferta de um BOT: janela curta (ele resolve sozinho ao esgotar); oferta de
+    // humano: a janela normal de resposta.
+    if (s.activeTrade) return this.isBot(s.activeTrade.from) ? Math.min(t.trade, BOT_TRADE_WINDOW_S) : t.trade;
     if (!this.awaitedHuman()) return null; // quem age e bot -> sem timer
     if (s.phase === 'discard') return t.discard;
     if (s.phase === 'setup1' || s.phase === 'setup2') return s.setupLastVertex ? t.road : t.settlement;
@@ -204,8 +209,13 @@ export class GameRoom {
     const s = this.state;
     if (s.phase === 'ended') return false;
 
-    // Oferta de troca pendente: cancela (pelo proponente).
-    if (s.activeTrade) return this.applyForced(s.activeTrade.from, { t: 'cancelTrade' });
+    // Oferta de troca pendente ao esgotar o tempo: se é de um BOT, ele resolve
+    // (fecha com quem aceitou ou cancela); se é de um humano, cancela.
+    if (s.activeTrade) {
+      return this.isBot(s.activeTrade.from)
+        ? this.resolveBotTrade()
+        : this.applyForced(s.activeTrade.from, { t: 'cancelTrade' });
+    }
 
     const who = this.awaitedHuman();
     if (!who) return false;
@@ -309,6 +319,23 @@ export class GameRoom {
     if (!move) return false;
     const r = reduce(this.state, move.by, move.action);
     if (!r.ok) return false; // nao deveria ocorrer; evita laco infinito
+    this.state = r.state;
+    this.pendingEvents.push(...r.events);
+    return true;
+  }
+
+  /**
+   * Resolve a proposta de troca de um BOT: fecha com quem aceitou (confirma) ou
+   * cancela se ninguém aceitou. Chamado assim que um humano responde (sem esperar
+   * o tempo esgotar) e também no timeout. No-op se a oferta ativa não é de um bot.
+   */
+  resolveBotTrade(): boolean {
+    const t = this.state.activeTrade;
+    if (!t || !this.isBot(t.from)) return false;
+    const mv = resolveBotProposal(this.state);
+    if (!mv) return false;
+    const r = reduce(this.state, mv.by, mv.action);
+    if (!r.ok) return false;
     this.state = r.state;
     this.pendingEvents.push(...r.events);
     return true;

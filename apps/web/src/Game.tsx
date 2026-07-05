@@ -460,7 +460,9 @@ export function Game({
                 </div>
                 <div className="noble-main">
                   <div className="noble-name">
-                    {(!online.bots.includes(p.color) && p.color !== online.viewerColor) ? (
+                    {/* Opções de jogador (perfil/amizade/bloquear) só para HUMANOS —
+                        nunca para bots nem assentos controlados por bot ("🤖 assumiu"). */}
+                    {(!isBot(p.color) && p.color !== online.viewerColor) ? (
                       <button className="noble-nick as-link" title="Opções do jogador"
                         onClick={(e) => setPlayerMenu({ username: p.name, x: e.clientX, y: e.clientY })}>{p.name}</button>
                     ) : (
@@ -559,7 +561,7 @@ export function Game({
                 <BuildButton label="Cidade" cost={COSTS.city} active={mode === 'buildCity'} hand={localPlayer.hand}
                   enabled={myMain && canAffordUI(localPlayer.hand, COSTS.city)} onClick={() => toggle('buildCity')} />
                 <BuildButton label="Carta" cost={COSTS.progressCard} hand={localPlayer.hand}
-                  enabled={myMain && canAffordUI(localPlayer.hand, COSTS.progressCard) && state.devDeck.length > 0}
+                  enabled={myMain && canAffordUI(localPlayer.hand, COSTS.progressCard) && (state.devDeckCount ?? state.devDeck.length) > 0}
                   onClick={() => dispatch({ t: 'buyProgressCard' })} />
                 <span className="trade-bank">
                   <select value={give} onChange={(e) => setGive(e.target.value as Resource)} disabled={!myMain}>
@@ -615,7 +617,7 @@ export function Game({
               ))}
               <div className="bank-pile" title="Cartas de desenvolvimento no baralho">
                 <img src={DEV_IMG.victoryPoint} alt="Desenvolvimento" />
-                <span className="card-count">{state.devDeck.length}</span>
+                <span className="card-count">{state.devDeckCount ?? state.devDeck.length}</span>
               </div>
             </div>
           </div>
@@ -683,7 +685,7 @@ export function Game({
       })()}
       {state.phase === 'ended' && state.winner && (
         <EndGameOverlay state={state} localColor={localColor} elapsed={elapsed} turns={turnCount} onExit={onExit}
-          botColors={online.bots} viewerColor={online.viewerColor}
+          botColors={online.bots} awayColors={online.awayColors} viewerColor={online.viewerColor}
           onPlayer={(username, x, y) => setPlayerMenu({ username, x, y })} />
       )}
       {playerMenu && (
@@ -881,7 +883,7 @@ function WildcardPickModal({
             {RESOURCES.map((r) => (
               <div key={r} className="trade-row">
                 <span>{RESOURCE_ICON[r]} {RESOURCE_LABEL[r]} ({hand[r]})</span>
-                <Stepper value={picks[r]} max={hand[r]} onChange={(v) => setPicks((p) => ({ ...p, [r]: v }))} />
+                <Stepper value={picks[r]} max={Math.min(hand[r], picks[r] + Math.max(0, count - total))} onChange={(v) => setPicks((p) => ({ ...p, [r]: v }))} />
               </div>
             ))}
           </div>
@@ -1029,7 +1031,9 @@ function DiscardModal({
             {RESOURCES.map((r) => (
               <div key={r} className="trade-row">
                 <span>{RESOURCE_ICON[r]} {RESOURCE_LABEL[r]} ({hand[r]})</span>
-                <Stepper value={picks[r]} max={hand[r]} onChange={(v) => setPicks((p) => ({ ...p, [r]: v }))} />
+                {/* Não deixa passar do necessário: o + trava ao atingir `count`
+                    (diminua um recurso para liberar outro). */}
+                <Stepper value={picks[r]} max={Math.min(hand[r], picks[r] + Math.max(0, count - total))} onChange={(v) => setPicks((p) => ({ ...p, [r]: v }))} />
               </div>
             ))}
           </div>
@@ -1060,7 +1064,7 @@ function standingsOf(state: GameState): { color: PlayerColor; name: string; pts:
  * quando disponível (celular), senão baixa o PNG.
  */
 function EndGameOverlay({
-  state, localColor, elapsed, turns, onExit, botColors, viewerColor, onPlayer,
+  state, localColor, elapsed, turns, onExit, botColors, awayColors, viewerColor, onPlayer,
 }: {
   state: GameState;
   localColor: PlayerColor;
@@ -1068,6 +1072,7 @@ function EndGameOverlay({
   turns: number;
   onExit: () => void;
   botColors: PlayerColor[];
+  awayColors: PlayerColor[];
   viewerColor: PlayerColor | null;
   onPlayer: (username: string, x: number, y: number) => void;
 }) {
@@ -1107,7 +1112,7 @@ function EndGameOverlay({
         <p className="muted-note endgame-sub">{fmtTime(elapsed)} · {turns} turnos</p>
         <div className="endgame-standings">
           {standings.map((s, i) => {
-            const human = !botColors.includes(s.color) && s.color !== viewerColor;
+            const human = !botColors.includes(s.color) && !awayColors.includes(s.color) && s.color !== viewerColor;
             return (
               <div key={s.color} className={`endgame-row${s.color === winner ? ' win' : ''}`}>
                 <span className="endgame-rank">{i + 1}º</span>

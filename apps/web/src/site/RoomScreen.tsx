@@ -252,11 +252,11 @@ function Room({
         errorSeq: prev?.errorSeq ?? 0,
       }));
     };
-    client.onState = (state, awayColors, deadlineSeconds, events) => {
+    client.onState = (state, bots, awayColors, deadlineSeconds, events) => {
       seq += 1;
       setOnline((prev) => ({
         viewerColor: prev?.viewerColor ?? null,
-        bots: prev?.bots ?? [],
+        bots, // vem em TODO estado (não depende mais do 'joined' — evita ficar vazio)
         awayColors,
         deadlineSeconds,
         state,
