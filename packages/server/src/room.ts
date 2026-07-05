@@ -159,6 +159,9 @@ export class GameRoom {
 
   /** Estado projetado (fog of war) para a visao de uma cor, ou de um espectador (sem cor). */
   projectedFor(color: PlayerColor | null): GameState {
+    // Fim de jogo: revela TUDO (mãos e cartas de Ponto de Vitória) para o placar
+    // final mostrar a pontuação real de cada um (como o Catan revela ao vencer).
+    if (this.state.phase === 'ended') return this.state;
     return color ? projectFor(this.state, color) : projectForSpectator(this.state);
   }
 

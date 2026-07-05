@@ -143,14 +143,27 @@ describe('GameRoom (servidor autoritativo)', () => {
 
   it('projeta o estado escondendo a mao dos adversarios (ou de todos, p/ espectador)', () => {
     const room = new GameRoom('R5', makeConfig());
+    // makeConfig() é só bots -> a partida termina na construção; forço um estado
+    // em ANDAMENTO com recursos p/ testar o fog (no fim, o estado é revelado).
+    room.state.phase = 'main';
+    room.state.players.find((p) => p.color === 'blue')!.hand = { wood: 3, brick: 0, wool: 0, grain: 0, ore: 0 };
     const view = room.projectedFor('red');
-    const opp = view.players.find((p) => p.color !== 'red')!;
-    expect(RESOURCES.every((r) => opp.hand[r] === 0)).toBe(true);
-    expect(typeof opp.hiddenHand).toBe('number');
+    const opp = view.players.find((p) => p.color === 'blue')!;
+    expect(opp.hand.wood).toBe(0); // composição escondida
+    expect(opp.hiddenHand).toBe(3); // mas a CONTAGEM fica visível
     expect(view.rng.seed).toBe(0);
 
     const spectatorView = room.projectedFor(null);
     expect(spectatorView.players.every((p) => RESOURCES.every((r) => p.hand[r] === 0))).toBe(true);
+  });
+
+  it('no fim de jogo, o estado é revelado (mãos e cartas visíveis para o placar real)', () => {
+    const room = new GameRoom('R5b', makeConfig()); // só bots -> termina
+    expect(room.state.phase).toBe('ended');
+    const view = room.projectedFor('red');
+    // Revelado: nada de hiddenHand, e o rng não é mascarado.
+    expect(view.players.every((p) => p.hiddenHand === undefined)).toBe(true);
+    expect(view.rng.seed).toBe(room.state.rng.seed);
   });
 
   it('expoe o limite de tempo da acao humana conforme o ritmo', () => {
