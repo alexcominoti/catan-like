@@ -11,9 +11,10 @@
  *     listabilidade. Coberto por test/rooms.test.ts.
  *  2. I/O no banco (Drizzle) — usa o núcleo puro.
  */
-import { and, asc, eq, lt, sql } from 'drizzle-orm';
+import { and, asc, eq, lt, or, sql } from 'drizzle-orm';
 import {
   getDb,
+  friendship as friendshipTable,
   room as roomTable,
   roomPlayer as roomPlayerTable,
   user as userTable,
@@ -159,6 +160,7 @@ export interface RoomListItem {
   boardLayout: string;
   cur: number;
   max: number;
+  isPrivate: boolean;
 }
 
 function genId(): string {
@@ -259,6 +261,56 @@ export async function listOpenRooms(): Promise<RoomListItem[]> {
     boardLayout: r.boardLayout,
     cur: Number(r.cur),
     max: r.max,
+    isPrivate: false, // esta listagem só traz salas públicas
+  }));
+}
+
+/**
+ * Salas de AMIGOS visíveis no lobby (Tier social): mesas 'waiting' cujo anfitrião
+ * é um amigo aceito meu — INCLUINDO as privadas (o amigo não precisa de link).
+ * Exclui mesas de matchmaking e a minha própria. Uma sala pública de amigo também
+ * aparece aqui (o chamador tira a duplicata da lista pública).
+ */
+export async function listFriendRooms(userId: string): Promise<RoomListItem[]> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      code: roomTable.code,
+      name: roomTable.name,
+      host: sql<string>`coalesce(${userTable.username}, ${userTable.name})`,
+      boardLayout: roomTable.boardLayout,
+      max: roomTable.maxPlayers,
+      isPrivate: roomTable.isPrivate,
+      cur: sql<number>`((select count(*)::int from ${roomPlayerTable} where ${roomPlayerTable.roomId} = ${roomTable.id}) + coalesce(jsonb_array_length(${roomTable.config} -> 'bots'), 0))`,
+    })
+    .from(roomTable)
+    .innerJoin(userTable, eq(userTable.id, roomTable.hostUserId))
+    .innerJoin(
+      friendshipTable,
+      and(
+        eq(friendshipTable.status, 'accepted'),
+        or(
+          and(eq(friendshipTable.requesterId, userId), eq(friendshipTable.addresseeId, roomTable.hostUserId)),
+          and(eq(friendshipTable.addresseeId, userId), eq(friendshipTable.requesterId, roomTable.hostUserId)),
+        ),
+      ),
+    )
+    .where(
+      and(
+        eq(roomTable.status, 'waiting'),
+        sql`${roomTable.hostUserId} <> ${userId}`,
+        sql`not (${roomTable.config} @> '{"matchmade":true}'::jsonb)`,
+      ),
+    )
+    .orderBy(asc(roomTable.createdAt));
+  return rows.map((r) => ({
+    code: r.code,
+    name: r.name,
+    host: r.host,
+    boardLayout: r.boardLayout,
+    cur: Number(r.cur),
+    max: r.max,
+    isPrivate: r.isPrivate,
   }));
 }
 

@@ -11,6 +11,13 @@ export interface RoomListItem {
   boardLayout: string;
   cur: number;
   max: number;
+  isPrivate: boolean;
+}
+
+/** Resposta do lobby: salas públicas + salas de amigos (incluindo privadas). */
+export interface LobbyRooms {
+  rooms: RoomListItem[];
+  friendRooms: RoomListItem[];
 }
 
 export type BotDifficulty = 'easy' | 'medium' | 'hard';
@@ -70,12 +77,12 @@ async function roomCall(url: string, init?: RequestInit): Promise<RoomResult> {
 
 const JSON_HEADERS = { 'content-type': 'application/json' };
 
-/** Lista as salas públicas abertas (waiting + não privadas). */
-export async function listRooms(): Promise<RoomListItem[]> {
+/** Lista as salas do lobby: públicas + de amigos (waiting; amigos incluem privadas). */
+export async function listRooms(): Promise<LobbyRooms> {
   const res = await fetch('/api/rooms');
-  if (!res.ok) return [];
-  const data = (await res.json().catch(() => ({}))) as { rooms?: RoomListItem[] };
-  return data.rooms ?? [];
+  if (!res.ok) return { rooms: [], friendRooms: [] };
+  const data = (await res.json().catch(() => ({}))) as Partial<LobbyRooms>;
+  return { rooms: data.rooms ?? [], friendRooms: data.friendRooms ?? [] };
 }
 
 export interface CreateRoomPayload {

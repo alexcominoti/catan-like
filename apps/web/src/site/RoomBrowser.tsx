@@ -24,6 +24,7 @@ export function RoomBrowser({
   const loggedIn = Boolean(session?.user);
 
   const [rooms, setRooms] = useState<RoomListItem[]>([]);
+  const [friendRooms, setFriendRooms] = useState<RoomListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [joining, setJoining] = useState<string | null>(null);
@@ -82,7 +83,8 @@ export function RoomBrowser({
   function refresh() {
     setLoading(true);
     void listRooms().then((r) => {
-      setRooms(r);
+      setRooms(r.rooms);
+      setFriendRooms(r.friendRooms);
       setLoading(false);
     });
   }
@@ -121,6 +123,28 @@ export function RoomBrowser({
       setError(res.error);
       refresh(); // a sala pode ter enchido/iniciado — atualiza a listagem
     }
+  }
+
+  /** Uma linha de sala (reaproveitada nas listas de amigos e pública). */
+  function roomRow(r: RoomListItem) {
+    return (
+      <div key={r.code} className="room-row">
+        <span className="room-name">
+          <b>{r.isPrivate ? <Lock size={13} className="room-online" /> : <Globe size={13} className="room-online" />} {r.name}</b>
+          <small>por @{r.host}</small>
+        </span>
+        <span>{MAP_LABEL[r.boardLayout] ?? r.boardLayout}</span>
+        <span className="seats">
+          {Array.from({ length: r.max }, (_, i) => <i key={i} className={i < r.cur ? 'on' : ''} />)}
+          <small> {r.cur}/{r.max}</small>
+        </span>
+        <span>
+          <button className="cta sm" disabled={joining === r.code || r.cur >= r.max} onClick={() => enter(r.code)}>
+            {r.cur >= r.max ? 'Cheia' : joining === r.code ? 'Entrando…' : 'Entrar'}
+          </button>
+        </span>
+      </div>
+    );
   }
 
   return (
@@ -168,6 +192,20 @@ export function RoomBrowser({
         sobre a listagem real (GET /api/rooms) com query params no backend.
       */}
 
+      {friendRooms.length > 0 && (
+        <>
+          <div className="room-bar">
+            <span className="eyebrow"><Users size={13} /> Salas de amigos</span>
+          </div>
+          <div className="room-table live">
+            <div className="room-row head">
+              <span>SALÃO</span><span>MAPA</span><span>JOGADORES</span><span></span>
+            </div>
+            {friendRooms.map(roomRow)}
+          </div>
+        </>
+      )}
+
       <div className="room-bar">
         <span className="eyebrow">Salas abertas</span>
         <button className="ghost sm" onClick={refresh}><RefreshCw size={14} /> Atualizar</button>
@@ -183,31 +221,10 @@ export function RoomBrowser({
           <div className="room-empty">Carregando salas…</div>
         ) : rooms.length === 0 ? (
           <div className="room-empty">
-            Nenhuma sala aberta agora. <button className="link" onClick={onCreate}>Crie a primeira!</button>
+            Nenhuma sala pública agora. <button className="link" onClick={onCreate}>Crie a primeira!</button>
           </div>
         ) : (
-          rooms.map((r) => (
-            <div key={r.code} className="room-row">
-              <span className="room-name">
-                <b><Globe size={13} className="room-online" /> {r.name}</b>
-                <small>por @{r.host}</small>
-              </span>
-              <span>{MAP_LABEL[r.boardLayout] ?? r.boardLayout}</span>
-              <span className="seats">
-                {Array.from({ length: r.max }, (_, i) => <i key={i} className={i < r.cur ? 'on' : ''} />)}
-                <small> {r.cur}/{r.max}</small>
-              </span>
-              <span>
-                <button
-                  className="cta sm"
-                  disabled={joining === r.code || r.cur >= r.max}
-                  onClick={() => enter(r.code)}
-                >
-                  {r.cur >= r.max ? 'Cheia' : joining === r.code ? 'Entrando…' : 'Entrar'}
-                </button>
-              </span>
-            </div>
-          ))
+          rooms.map(roomRow)
         )}
       </div>
 

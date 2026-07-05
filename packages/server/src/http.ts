@@ -20,6 +20,7 @@ import {
   getRoom,
   joinRoom,
   leaveRoom,
+  listFriendRooms,
   listOpenRooms,
   removeBot,
   startRoom,
@@ -447,10 +448,13 @@ async function handleRequest(
   }
 
   // --- salas: listagem do lobby (exige login — só a Home é pública) ---
+  // Devolve as salas públicas + as salas de AMIGOS (incluindo privadas), sem duplicar.
   if (path === '/api/rooms' && req.method === 'GET') {
     const u = await authedUser(req, res);
     if (!u) return;
-    sendJson(res, 200, { rooms: await listOpenRooms() });
+    const [publicRooms, friendRooms] = await Promise.all([listOpenRooms(), listFriendRooms(u.id)]);
+    const friendCodes = new Set(friendRooms.map((r) => r.code));
+    sendJson(res, 200, { rooms: publicRooms.filter((r) => !friendCodes.has(r.code)), friendRooms });
     return;
   }
 
