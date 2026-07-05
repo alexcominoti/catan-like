@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { createInitialState } from '../src/setup.js';
 import { robberAllowed } from '../src/rules.js';
+import type { PlayerColor } from '../src/types.js';
 
-const twoPlayers = { players: [{ color: 'red', name: 'R' }, { color: 'blue', name: 'B' }] as const };
+const twoPlayers = { players: [{ color: 'red', name: 'R' }, { color: 'blue', name: 'B' }] as { color: PlayerColor; name: string }[] };
 
 describe('robberAllowed com ladrão amigável', () => {
   it('o deserto é sempre permitido — não produz, bloqueá-lo é inofensivo', () => {

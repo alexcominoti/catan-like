@@ -51,6 +51,7 @@ export type ServerMessage =
   | {
       t: 'state';
       state: GameState; // ja projetado (fog of war, ou tudo oculto p/ espectador)
+      bots: PlayerColor[]; // cores que sao BOT (nunca tiveram conta) — em todo estado, p/ o cliente nao depender do 'joined'
       awayColors: PlayerColor[]; // assentos originalmente humanos hoje pilotados por bot
       deadlineSeconds: number | null; // prazo da janela atual (autoridade e sempre o servidor)
       events: GameEvent[]; // eventos ocorridos desde a ultima mensagem (log/toast/som no cliente)

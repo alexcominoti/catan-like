@@ -14,7 +14,7 @@ import type { Action, GameEvent, GameState, PlayerColor } from '@trevalis/engine
  */
 export type ServerMessage =
   | { t: 'joined'; code: string; color: PlayerColor | null; bots: PlayerColor[] } // color null = espectador
-  | { t: 'state'; state: GameState; awayColors: PlayerColor[]; deadlineSeconds: number | null; events: GameEvent[] }
+  | { t: 'state'; state: GameState; bots: PlayerColor[]; awayColors: PlayerColor[]; deadlineSeconds: number | null; events: GameEvent[] }
   | { t: 'error'; error: string };
 
 const MAX_RECONNECT_DELAY_MS = 8000;
@@ -31,7 +31,7 @@ export class GameClient {
   color: PlayerColor | null = null;
   connected = false;
 
-  onState?: (state: GameState, awayColors: PlayerColor[], deadlineSeconds: number | null, events: GameEvent[]) => void;
+  onState?: (state: GameState, bots: PlayerColor[], awayColors: PlayerColor[], deadlineSeconds: number | null, events: GameEvent[]) => void;
   onJoined?: (code: string, color: PlayerColor | null, bots: PlayerColor[]) => void;
   onError?: (error: string) => void;
   /** A conexao caiu (a UI pode mostrar "reconectando…"; uma nova tentativa ja foi agendada). */
@@ -108,7 +108,7 @@ export class GameClient {
         this.color = msg.color;
         this.onJoined?.(msg.code, msg.color, msg.bots);
       } else if (msg.t === 'state') {
-        this.onState?.(msg.state, msg.awayColors, msg.deadlineSeconds, msg.events);
+        this.onState?.(msg.state, msg.bots, msg.awayColors, msg.deadlineSeconds, msg.events);
       } else if (msg.t === 'error') {
         this.onError?.(msg.error);
       }

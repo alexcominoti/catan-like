@@ -185,7 +185,7 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
       const ws = connId ? sockets.get(connId) : undefined;
       if (!ws) continue;
       const color = room.colorOf(userId);
-      send(ws, { t: 'state', state: room.projectedFor(color), awayColors, deadlineSeconds, events });
+      send(ws, { t: 'state', state: room.projectedFor(color), bots: room.config.bots, awayColors, deadlineSeconds, events });
     }
     if (room.state.phase === 'ended' && !live.finishNotified) {
       live.finishNotified = true;
@@ -285,6 +285,7 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
           send(ws, {
             t: 'state',
             state: room.projectedFor(color),
+            bots: room.config.bots,
             awayColors: room.awayColors(),
             deadlineSeconds: room.deadlineSeconds(),
             events: [], // instantaneo inicial: sem "delta" para tocar som/log
