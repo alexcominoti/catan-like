@@ -1655,3 +1655,7 @@ button.as-link:hover:not(:disabled) { text-decoration: underline; text-underline
 .pmenu-item .pmenu-hint { margin-left: auto; font-size: 11px; color: var(--muted); }
 .pmenu-item.danger { color: var(--destructive); }
 .pmenu-item.danger:hover:not(:disabled) { background: #fbe6d8; }
+
+/* Reconectar (notificações): seção em destaque. */
+.notif-rejoin { background: #fbe6d8; border-radius: 10px; margin: 2px; }
+.notif-rejoin .notif-label { color: var(--accent); }

@@ -22,6 +22,7 @@ import {
   leaveRoom,
   listFriendRooms,
   listOpenRooms,
+  listRejoinableRooms,
   removeBot,
   startRoom,
   touchRoomActivity,
@@ -368,11 +369,16 @@ async function handleRequest(
     const f = await listFriends(u.id);
     const inv = invites.listFor(u.id);
     const onlineFriends = f.friends.filter((x) => x.online);
+    // Reconexão: partidas em andamento das quais sou membro, MENOS a que estou
+    // jogando agora (presença) — é para voltar a uma sala da qual caí/saí.
+    const rejoinAll = await listRejoinableRooms(u.id);
+    const rejoin = rejoinAll.filter((r) => presence.roomOf(u.id) !== r.code);
     sendJson(res, 200, {
       friendRequests: f.incoming,
       invites: inv,
       onlineFriends,
-      count: f.incoming.length + inv.length,
+      rejoin,
+      count: f.incoming.length + inv.length + rejoin.length,
     });
     return;
   }

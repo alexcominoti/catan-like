@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Bell, Check, X, Play, Circle, UserPlus } from 'lucide-react';
+import { Bell, Check, X, Play, Circle, UserPlus, LogIn } from 'lucide-react';
 import {
   acceptFriend,
   dismissInvite,
@@ -16,7 +16,7 @@ const POLL_MS = 20_000;
  * a sala (aceitar convite / entrar no jogo de um amigo).
  */
 export function NotificationsBell({ onEnterRoom }: { onEnterRoom: (code: string) => void }) {
-  const [data, setData] = useState<Notifications>({ friendRequests: [], invites: [], onlineFriends: [], count: 0 });
+  const [data, setData] = useState<Notifications>({ friendRequests: [], invites: [], onlineFriends: [], rejoin: [], count: 0 });
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -46,7 +46,7 @@ export function NotificationsBell({ onEnterRoom }: { onEnterRoom: (code: string)
     onEnterRoom(code);
   };
 
-  const hasAny = data.friendRequests.length > 0 || data.invites.length > 0 || data.onlineFriends.length > 0;
+  const hasAny = data.rejoin.length > 0 || data.friendRequests.length > 0 || data.invites.length > 0 || data.onlineFriends.length > 0;
 
   return (
     <div className="notif" ref={ref}>
@@ -58,6 +58,18 @@ export function NotificationsBell({ onEnterRoom }: { onEnterRoom: (code: string)
       {open && (
         <div className="notif-panel">
           <div className="notif-head">Notificações</div>
+
+          {data.rejoin.length > 0 && (
+            <div className="notif-section notif-rejoin">
+              <span className="notif-label"><LogIn size={12} /> Reconectar</span>
+              {data.rejoin.map((r) => (
+                <div key={r.code} className="notif-row">
+                  <span className="notif-name">🎮 {r.name} <small className="muted-note">em andamento</small></span>
+                  <button className="cta sm" onClick={() => { setOpen(false); onEnterRoom(r.code); }}><LogIn size={13} /> Voltar</button>
+                </div>
+              ))}
+            </div>
+          )}
 
           {data.friendRequests.length > 0 && (
             <div className="notif-section">

@@ -654,6 +654,21 @@ export async function leaveRoom(code: string, userId: string): Promise<{ ok: tru
   return { ok: true };
 }
 
+/**
+ * Salas EM ANDAMENTO das quais eu sou membro (assento por userId): posso
+ * reconectar pelo link a qualquer momento enquanto a partida vive. O chamador
+ * filtra por presença (esconde a que eu já estou jogando agora).
+ */
+export async function listRejoinableRooms(userId: string): Promise<{ code: string; name: string }[]> {
+  const db = getDb();
+  return db
+    .select({ code: roomTable.code, name: roomTable.name })
+    .from(roomTable)
+    .innerJoin(roomPlayerTable, eq(roomPlayerTable.roomId, roomTable.id))
+    .where(and(eq(roomPlayerTable.userId, userId), eq(roomTable.status, 'in_progress')))
+    .orderBy(asc(roomTable.startedAt));
+}
+
 /** Assentos humanos de uma sala (userId + cor), em ordem de assento — usado ao montar o RoomConfig final. */
 export async function getSeatedPlayers(
   code: string,

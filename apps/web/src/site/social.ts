@@ -94,14 +94,21 @@ export interface RoomInvite {
   at: number;
 }
 
+/** Uma partida em andamento à qual posso reconectar. */
+export interface RejoinRoom {
+  code: string;
+  name: string;
+}
+
 export interface Notifications {
   friendRequests: PendingView[];
   invites: RoomInvite[];
   onlineFriends: FriendView[];
+  rejoin: RejoinRoom[];
   count: number;
 }
 
-const EMPTY_NOTIFS: Notifications = { friendRequests: [], invites: [], onlineFriends: [], count: 0 };
+const EMPTY_NOTIFS: Notifications = { friendRequests: [], invites: [], onlineFriends: [], rejoin: [], count: 0 };
 
 /** Agregado do sino: pedidos de amizade + convites de sala + amigos online. */
 export async function getNotifications(): Promise<Notifications> {
