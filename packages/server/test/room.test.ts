@@ -102,6 +102,37 @@ describe('GameRoom (servidor autoritativo)', () => {
     expect(room.state.dice).not.toBeNull(); // blue rolou — exatamente uma ação
   });
 
+  it('proposta de troca de bot: humano ACEITA → resolve na hora (executa a troca)', () => {
+    const room = new GameRoom('BT', makeConfig({ humans: ['red'] })); // blue = bot
+    room.state.phase = 'main';
+    room.state.currentPlayer = 'blue';
+    const red = room.state.players.find((p) => p.color === 'red')!;
+    const blue = room.state.players.find((p) => p.color === 'blue')!;
+    red.hand = { wood: 0, brick: 1, wool: 0, grain: 0, ore: 0 };
+    blue.hand = { wood: 1, brick: 0, wool: 0, grain: 0, ore: 0 };
+    room.state.activeTrade = { from: 'blue', give: { wood: 1 }, want: { brick: 1 }, to: ['red'], accepted: [] };
+
+    expect(room.apply('red', { t: 'respondTrade', accept: true }).ok).toBe(true);
+    expect(room.resolveBotTrade()).toBe(true); // fecha imediatamente
+
+    const red2 = room.state.players.find((p) => p.color === 'red')!;
+    const blue2 = room.state.players.find((p) => p.color === 'blue')!;
+    expect(red2.hand.wood).toBe(1);
+    expect(red2.hand.brick).toBe(0);
+    expect(blue2.hand.brick).toBe(1);
+    expect(room.state.activeTrade).toBeNull();
+  });
+
+  it('proposta de troca de bot: humano RECUSA → cancela na hora (não espera o tempo)', () => {
+    const room = new GameRoom('BT2', makeConfig({ humans: ['red'] }));
+    room.state.phase = 'main';
+    room.state.currentPlayer = 'blue';
+    room.state.activeTrade = { from: 'blue', give: { wood: 1 }, want: { brick: 1 }, to: ['red'], accepted: [] };
+    expect(room.apply('red', { t: 'respondTrade', accept: false }).ok).toBe(true);
+    expect(room.resolveBotTrade()).toBe(true);
+    expect(room.state.activeTrade).toBeNull();
+  });
+
   it('rejeita acao ilegal sem mudar o estado', () => {
     const room = new GameRoom('R4', makeConfig({ humans: ['red'] }));
     const before = JSON.stringify(room.state);

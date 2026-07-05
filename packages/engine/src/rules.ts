@@ -83,11 +83,14 @@ export function publicScoreOf(state: GameState, color: PlayerColor): number {
  * Sob o LADRAO AMIGAVEL, um hex so e alvo valido se NAO toca construcao de um
  * adversario com menos de 3 PV publicos (cartas +1PV nao contam). Sem a regra
  * ligada, qualquer hex vale. `by` move o bloqueador (a si mesmo nunca conta).
+ * O DESERTO e sempre permitido: nao produz nada, entao bloquea-lo nunca prejudica
+ * ninguem (e o destino "inofensivo" classico para o ladrao).
  */
 export function robberAllowed(state: GameState, hexId: string, by: PlayerColor): boolean {
   if (!state.friendlyRobber) return true;
   const hex = state.board.hexes[hexId];
   if (!hex) return false;
+  if (hex.terrain === 'desert') return true;
   return !hex.corners.some((vid) => {
     const b = state.buildings[vid];
     return b && b.owner !== by && publicScoreOf(state, b.owner) < 3;

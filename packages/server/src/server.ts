@@ -311,6 +311,9 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
           send(ws, { t: 'error', error: res.error ?? 'Ação inválida.' });
           return;
         }
+        // Respondeu a uma proposta de BOT? Ele resolve na hora (fecha com quem
+        // aceitou ou cancela) — sem esperar o tempo esgotar (Colonist: bot ágil).
+        if (msg.action.t === 'respondTrade') room.resolveBotTrade();
         broadcastAndSchedule(conn.code, live!);
         break;
       }

@@ -559,7 +559,7 @@ export function Game({
                 <BuildButton label="Cidade" cost={COSTS.city} active={mode === 'buildCity'} hand={localPlayer.hand}
                   enabled={myMain && canAffordUI(localPlayer.hand, COSTS.city)} onClick={() => toggle('buildCity')} />
                 <BuildButton label="Carta" cost={COSTS.progressCard} hand={localPlayer.hand}
-                  enabled={myMain && canAffordUI(localPlayer.hand, COSTS.progressCard) && state.devDeck.length > 0}
+                  enabled={myMain && canAffordUI(localPlayer.hand, COSTS.progressCard) && (state.devDeckCount ?? state.devDeck.length) > 0}
                   onClick={() => dispatch({ t: 'buyProgressCard' })} />
                 <span className="trade-bank">
                   <select value={give} onChange={(e) => setGive(e.target.value as Resource)} disabled={!myMain}>
@@ -615,7 +615,7 @@ export function Game({
               ))}
               <div className="bank-pile" title="Cartas de desenvolvimento no baralho">
                 <img src={DEV_IMG.victoryPoint} alt="Desenvolvimento" />
-                <span className="card-count">{state.devDeck.length}</span>
+                <span className="card-count">{state.devDeckCount ?? state.devDeck.length}</span>
               </div>
             </div>
           </div>
@@ -881,7 +881,7 @@ function WildcardPickModal({
             {RESOURCES.map((r) => (
               <div key={r} className="trade-row">
                 <span>{RESOURCE_ICON[r]} {RESOURCE_LABEL[r]} ({hand[r]})</span>
-                <Stepper value={picks[r]} max={hand[r]} onChange={(v) => setPicks((p) => ({ ...p, [r]: v }))} />
+                <Stepper value={picks[r]} max={Math.min(hand[r], picks[r] + Math.max(0, count - total))} onChange={(v) => setPicks((p) => ({ ...p, [r]: v }))} />
               </div>
             ))}
           </div>
@@ -1029,7 +1029,9 @@ function DiscardModal({
             {RESOURCES.map((r) => (
               <div key={r} className="trade-row">
                 <span>{RESOURCE_ICON[r]} {RESOURCE_LABEL[r]} ({hand[r]})</span>
-                <Stepper value={picks[r]} max={hand[r]} onChange={(v) => setPicks((p) => ({ ...p, [r]: v }))} />
+                {/* Não deixa passar do necessário: o + trava ao atingir `count`
+                    (diminua um recurso para liberar outro). */}
+                <Stepper value={picks[r]} max={Math.min(hand[r], picks[r] + Math.max(0, count - total))} onChange={(v) => setPicks((p) => ({ ...p, [r]: v }))} />
               </div>
             ))}
           </div>
