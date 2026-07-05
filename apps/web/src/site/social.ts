@@ -21,15 +21,17 @@ export interface FriendsPayload {
   friends: FriendView[];
   incoming: PendingView[];
   outgoing: PendingView[];
+  blocked: PendingView[];
 }
 
 const JSON_HEADERS = { 'content-type': 'application/json' };
 
 /** Lista amigos (aceitos) + pedidos pendentes recebidos/enviados. */
 export async function getFriends(): Promise<FriendsPayload> {
+  const empty: FriendsPayload = { friends: [], incoming: [], outgoing: [], blocked: [] };
   const res = await fetch('/api/friends');
-  if (!res.ok) return { friends: [], incoming: [], outgoing: [] };
-  return (await res.json().catch(() => ({ friends: [], incoming: [], outgoing: [] }))) as FriendsPayload;
+  if (!res.ok) return empty;
+  return (await res.json().catch(() => empty)) as FriendsPayload;
 }
 
 export type SocialResult = { ok: true } | { ok: false; error: string };
@@ -59,6 +61,16 @@ export function acceptFriend(userId: string): Promise<SocialResult> {
 /** Remove/recusa/cancela a relação com um usuário. */
 export function removeFriend(userId: string): Promise<SocialResult> {
   return post('/api/friends/remove', { userId });
+}
+
+/** Bloqueia um usuário (por username) — esconde mensagens dele e impede que te adicione. */
+export function blockUser(username: string): Promise<SocialResult> {
+  return post('/api/friends/block', { username });
+}
+
+/** Desbloqueia um usuário (por userId). */
+export function unblockUser(userId: string): Promise<SocialResult> {
+  return post('/api/friends/unblock', { userId });
 }
 
 /** Contador público de jogadores online (landing) — 0 em caso de erro. */

@@ -28,7 +28,7 @@ export function Friends({
   const { data: session, isPending } = authClient.useSession();
   const loggedIn = Boolean(session?.user);
 
-  const [data, setData] = useState<FriendsPayload>({ friends: [], incoming: [], outgoing: [] });
+  const [data, setData] = useState<FriendsPayload>({ friends: [], incoming: [], outgoing: [], blocked: [] });
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
