@@ -233,6 +233,14 @@ describe('GameRoom (servidor autoritativo)', () => {
     room.convertToBot(uid('blue'));
     expect(room.awayColors()).toEqual(['blue']);
   });
+
+  it('LiveRoom.pushChat guarda só as últimas 50 mensagens (histórico)', () => {
+    const live = new LiveRoom('CH');
+    for (let i = 0; i < 60; i++) live.pushChat({ from: 'red', name: 'R', text: `m${i}`, at: i });
+    expect(live.chatHistory).toHaveLength(50);
+    expect(live.chatHistory[0]!.text).toBe('m10'); // as 10 primeiras caíram
+    expect(live.chatHistory.at(-1)!.text).toBe('m59');
+  });
 });
 
 describe('LiveRoom (presenca, graca de reconexao, sala vazia)', () => {

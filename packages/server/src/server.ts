@@ -295,6 +295,8 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
           scheduleTimer(code, live);
           scheduleBotPump(code, live); // caso entre durante a vez de um bot
         }
+        // Histórico do chat (em memória): quem entra/reconecta recebe o recente.
+        if (live.chatHistory.length > 0) send(ws, { t: 'chatHistory', messages: live.chatHistory });
         break;
       }
       case 'action': {
@@ -343,6 +345,7 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
         lastChatAt.set(userId, now);
         const name = room.humans.find((h) => h.color === color)?.name ?? color;
         const out: ServerMessage = { t: 'chat', message: { from: color, name, text, at: now } };
+        live.pushChat(out.message); // histórico (reenviado ao entrar/reconectar)
         for (const uid of live.connectedUserIds()) {
           const cid = live.connIdOf(uid);
           const sock = cid ? sockets.get(cid) : undefined;

@@ -67,4 +67,5 @@ export type ServerMessage =
       events: GameEvent[]; // eventos ocorridos desde a ultima mensagem (log/toast/som no cliente)
     }
   | { t: 'chat'; message: ChatMessage } // mensagem de chat de um jogador
+  | { t: 'chatHistory'; messages: ChatMessage[] } // histórico recente (ao entrar/reconectar)
   | { t: 'error'; error: string };

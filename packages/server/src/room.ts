@@ -11,7 +11,10 @@ import {
   type Resource,
 } from '@trevalis/engine';
 import { planBotAction, resolveBotProposal, type Difficulty } from '@trevalis/bot';
-import type { Pace, RoomConfig } from './protocol.js';
+import type { ChatMessage, Pace, RoomConfig } from './protocol.js';
+
+/** Máximo de mensagens de chat guardadas por sala (histórico ao reconectar). */
+const CHAT_HISTORY_MAX = 50;
 
 /** Limites de tempo (segundos) por ritmo, inspirados nos timers do Colonist. */
 const PACE_TIMERS: Record<Pace, {
@@ -373,9 +376,19 @@ export class LiveRoom {
   emptySince: number | null = Date.now();
   /** Evita notificar o fim de partida mais de uma vez (persistencia externa). */
   finishNotified = false;
+  /** Histórico recente do chat (em memória): reenviado a quem entra/reconecta. */
+  chatHistory: ChatMessage[] = [];
 
   constructor(code: string) {
     this.code = code;
+  }
+
+  /** Guarda uma mensagem no histórico (mantém só as últimas CHAT_HISTORY_MAX). */
+  pushChat(message: ChatMessage): void {
+    this.chatHistory.push(message);
+    if (this.chatHistory.length > CHAT_HISTORY_MAX) {
+      this.chatHistory.splice(0, this.chatHistory.length - CHAT_HISTORY_MAX);
+    }
   }
 
   hasHuman(): boolean {
