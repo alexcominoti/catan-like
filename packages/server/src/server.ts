@@ -6,6 +6,7 @@ import { getRoom, finishRoom } from './rooms.js';
 import { EMPTY_ROOM_TTL_MS, RECONNECT_GRACE_MS, RoomManager, type LiveRoom } from './room.js';
 import { presence } from './presence.js';
 import { summarizeMatch, type MatchSummary } from './match.js';
+import { sanitizeChatText } from './chat.js';
 import { hasDatabase } from '@trevalis/db';
 import type { ClientMessage, ServerMessage } from './protocol.js';
 
@@ -87,6 +88,7 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
   const sockets = new Map<string, WebSocket>(); // connId -> socket
   const timers = new Map<string, ReturnType<typeof setTimeout>>(); // code -> timer de acao da partida
   const botTimers = new Map<string, ReturnType<typeof setTimeout>>(); // code -> timer da PRÓXIMA jogada de bot
+  const lastChatAt = new Map<string, number>(); // userId -> ultimo chat (rate limit anti-spam)
 
   interface Conn {
     connId: string;
@@ -325,6 +327,27 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
         const room = manager.get(conn.code)?.gameRoom;
         const color = room?.colorOf(userId) ?? null;
         if (room && color) room.setPendingSelection(color, msg.action);
+        break;
+      }
+      case 'chat': {
+        // Chat da partida: só JOGADORES (têm cor) mandam; espectadores só leem.
+        if (!conn.code) return;
+        const live = manager.get(conn.code);
+        const room = live?.gameRoom;
+        const color = room?.colorOf(userId) ?? null;
+        if (!live || !room || !color) return;
+        const text = sanitizeChatText(msg.text);
+        if (!text) return;
+        const now = Date.now();
+        if (now - (lastChatAt.get(userId) ?? 0) < 500) return; // anti-spam simples
+        lastChatAt.set(userId, now);
+        const name = room.humans.find((h) => h.color === color)?.name ?? color;
+        const out: ServerMessage = { t: 'chat', message: { from: color, name, text, at: now } };
+        for (const uid of live.connectedUserIds()) {
+          const cid = live.connIdOf(uid);
+          const sock = cid ? sockets.get(cid) : undefined;
+          if (sock) send(sock, out);
+        }
         break;
       }
     }

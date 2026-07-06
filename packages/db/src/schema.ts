@@ -300,6 +300,29 @@ export const roomPlayer = pgTable(
   }),
 );
 
+/** Denúncia de um jogador (abuso no chat) — moderação. Sem UI de admin ainda:
+ *  fica gravada para revisão. */
+export const report = pgTable(
+  'report',
+  {
+    id: text('id').primaryKey(),
+    reporterId: text('reporter_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    targetId: text('target_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    roomCode: text('room_code'),
+    reason: text('reason'),
+    createdAt: timestamp('created_at')
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (t) => ({
+    targetIdx: index('report_target_idx').on(t.targetId),
+  }),
+);
+
 /** Conjunto completo do schema — passado ao drizzleAdapter do Better Auth. */
 export const schema = {
   user,
@@ -314,4 +337,5 @@ export const schema = {
   achievement,
   room,
   roomPlayer,
+  report,
 };

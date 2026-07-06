@@ -12,9 +12,18 @@ import type { Action, GameEvent, GameState, PlayerColor } from '@trevalis/engine
  * como a sala identifica o dono da vaga pela conta (userId, via cookie), o
  * servidor reassenta automaticamente.
  */
+/** Uma mensagem de chat da partida. */
+export interface ChatMessage {
+  from: PlayerColor | null;
+  name: string;
+  text: string;
+  at: number;
+}
+
 export type ServerMessage =
   | { t: 'joined'; code: string; color: PlayerColor | null; bots: PlayerColor[] } // color null = espectador
   | { t: 'state'; state: GameState; bots: PlayerColor[]; awayColors: PlayerColor[]; deadlineSeconds: number | null; events: GameEvent[] }
+  | { t: 'chat'; message: ChatMessage }
   | { t: 'error'; error: string };
 
 const MAX_RECONNECT_DELAY_MS = 8000;
@@ -33,6 +42,7 @@ export class GameClient {
 
   onState?: (state: GameState, bots: PlayerColor[], awayColors: PlayerColor[], deadlineSeconds: number | null, events: GameEvent[]) => void;
   onJoined?: (code: string, color: PlayerColor | null, bots: PlayerColor[]) => void;
+  onChat?: (message: ChatMessage) => void;
   onError?: (error: string) => void;
   /** A conexao caiu (a UI pode mostrar "reconectando…"; uma nova tentativa ja foi agendada). */
   onDisconnected?: () => void;
@@ -66,6 +76,11 @@ export class GameClient {
    */
   sendSelect(action: Action): void {
     this.sendRaw({ t: 'select', action });
+  }
+
+  /** Envia uma mensagem de chat da partida. */
+  sendChat(text: string): void {
+    this.sendRaw({ t: 'chat', text });
   }
 
   /** Fecha definitivamente (nao tenta reconectar). */
@@ -109,6 +124,8 @@ export class GameClient {
         this.onJoined?.(msg.code, msg.color, msg.bots);
       } else if (msg.t === 'state') {
         this.onState?.(msg.state, msg.bots, msg.awayColors, msg.deadlineSeconds, msg.events);
+      } else if (msg.t === 'chat') {
+        this.onChat?.(msg.message);
       } else if (msg.t === 'error') {
         this.onError?.(msg.error);
       }

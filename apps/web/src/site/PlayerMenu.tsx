@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { UserPlus, UserCheck, Clock, Ban, ExternalLink, Check } from 'lucide-react';
+import { UserPlus, UserCheck, Clock, Ban, ExternalLink, Check, VolumeX, Volume2, Flag } from 'lucide-react';
 import {
   acceptFriend,
   blockUser,
   getFriends,
   removeFriend,
+  reportUser,
   sendFriendRequest,
   unblockUser,
   type FriendsPayload,
@@ -43,7 +44,7 @@ export function relationOf(data: FriendsPayload, username: string): { state: Rel
  * adicionar/pendente/remover amigo e bloquear/desbloquear. Posicionado em (x,y).
  */
 export function PlayerMenu({
-  username, data, x, y, onAction, onClose,
+  username, data, x, y, onAction, onClose, roomCode, muted, onToggleMute,
 }: {
   username: string;
   data: FriendsPayload;
@@ -52,8 +53,14 @@ export function PlayerMenu({
   /** Chamado após uma ação de rede bem-sucedida (o pai deve dar refresh). */
   onAction: () => void;
   onClose: () => void;
+  /** Sala atual (para dar contexto à denúncia). */
+  roomCode?: string;
+  /** Silenciar (mute) no jogo — só quando fornecido (em partida). */
+  muted?: boolean;
+  onToggleMute?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [reported, setReported] = useState(false);
   const rel = relationOf(data, username);
 
   useEffect(() => {
@@ -123,6 +130,19 @@ export function PlayerMenu({
           <Ban size={14} /> Bloquear
         </button>
       )}
+
+      {/* Silenciar (mute) no jogo — client-side, só durante a partida. */}
+      {onToggleMute && (
+        <button className="pmenu-item" onClick={() => { onToggleMute(); onClose(); }}>
+          {muted ? <><Volume2 size={14} /> Reativar no chat</> : <><VolumeX size={14} /> Silenciar no chat</>}
+        </button>
+      )}
+
+      {/* Denunciar — persiste para moderação. */}
+      <button className="pmenu-item danger" disabled={busy || reported}
+        onClick={async () => { setReported(true); await reportUser(username, roomCode); }}>
+        <Flag size={14} /> {reported ? 'Denunciado' : 'Denunciar'}
+      </button>
     </div>
   );
 }
