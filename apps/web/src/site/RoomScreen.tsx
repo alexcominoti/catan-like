@@ -272,6 +272,8 @@ function Room({
       setOnline((prev) => prev && { ...prev, error: err, errorSeq });
     };
     client.onChat = (m) => setChat((prev) => [...prev, m].slice(-200));
+    // Histórico ao entrar/reconectar: substitui pela lista autoritativa (sem duplicar).
+    client.onChatHistory = (msgs) => setChat(msgs.slice(-200));
     client.onDisconnected = () => setWsDisconnected(true);
     client.onReconnected = () => setWsDisconnected(false);
 

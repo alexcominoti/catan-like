@@ -24,6 +24,7 @@ export type ServerMessage =
   | { t: 'joined'; code: string; color: PlayerColor | null; bots: PlayerColor[] } // color null = espectador
   | { t: 'state'; state: GameState; bots: PlayerColor[]; awayColors: PlayerColor[]; deadlineSeconds: number | null; events: GameEvent[] }
   | { t: 'chat'; message: ChatMessage }
+  | { t: 'chatHistory'; messages: ChatMessage[] }
   | { t: 'error'; error: string };
 
 const MAX_RECONNECT_DELAY_MS = 8000;
@@ -43,6 +44,7 @@ export class GameClient {
   onState?: (state: GameState, bots: PlayerColor[], awayColors: PlayerColor[], deadlineSeconds: number | null, events: GameEvent[]) => void;
   onJoined?: (code: string, color: PlayerColor | null, bots: PlayerColor[]) => void;
   onChat?: (message: ChatMessage) => void;
+  onChatHistory?: (messages: ChatMessage[]) => void;
   onError?: (error: string) => void;
   /** A conexao caiu (a UI pode mostrar "reconectando…"; uma nova tentativa ja foi agendada). */
   onDisconnected?: () => void;
@@ -126,6 +128,8 @@ export class GameClient {
         this.onState?.(msg.state, msg.bots, msg.awayColors, msg.deadlineSeconds, msg.events);
       } else if (msg.t === 'chat') {
         this.onChat?.(msg.message);
+      } else if (msg.t === 'chatHistory') {
+        this.onChatHistory?.(msg.messages);
       } else if (msg.t === 'error') {
         this.onError?.(msg.error);
       }
