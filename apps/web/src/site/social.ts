@@ -73,6 +73,11 @@ export function unblockUser(userId: string): Promise<SocialResult> {
   return post('/api/friends/unblock', { userId });
 }
 
+/** Denuncia um jogador (por username), opcionalmente com a sala e um motivo. */
+export function reportUser(username: string, code?: string, reason?: string): Promise<SocialResult> {
+  return post('/api/reports', { username, code, reason });
+}
+
 /** Contador público de jogadores online (landing) — 0 em caso de erro. */
 export async function getOnlineCount(): Promise<number> {
   try {

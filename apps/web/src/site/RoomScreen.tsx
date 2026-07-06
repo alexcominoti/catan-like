@@ -9,7 +9,7 @@ import { authClient } from '../auth/client.js';
 import { PLAYER_FILL, PLAYER_LABEL } from '../game/theme.js';
 import { pickBotName } from '../game/botNames.js';
 import { Game } from '../Game.js';
-import { GameClient } from '../net/client.js';
+import { GameClient, type ChatMessage } from '../net/client.js';
 import {
   addBotApi, createRoomApi, getRoomApi, joinRoomApi, leaveRoomApi, removeBotApi,
   roomLink, setBotDifficultyApi, startRoomApi, updateRoomApi,
@@ -229,6 +229,7 @@ function Room({
   /* ---- WebSocket: liga quando a sala está em andamento/finalizada ---- */
   const live = room?.status === 'in_progress' || room?.status === 'finished';
   const [online, setOnline] = useState<LiveSnapshot | null>(null);
+  const [chat, setChat] = useState<ChatMessage[]>([]);
   const [wsDisconnected, setWsDisconnected] = useState(false);
   const clientRef = useRef<GameClient | null>(null);
 
@@ -270,6 +271,7 @@ function Room({
       errorSeq += 1;
       setOnline((prev) => prev && { ...prev, error: err, errorSeq });
     };
+    client.onChat = (m) => setChat((prev) => [...prev, m].slice(-200));
     client.onDisconnected = () => setWsDisconnected(true);
     client.onReconnected = () => setWsDisconnected(false);
 
@@ -279,6 +281,7 @@ function Room({
       client.close();
       clientRef.current = null;
       setOnline(null);
+      setChat([]);
     };
   }, [live, code]);
 
@@ -346,6 +349,7 @@ function Room({
             seq: online.seq,
             error: online.error,
             errorSeq: online.errorSeq,
+            chat,
           }}
         />
       </>

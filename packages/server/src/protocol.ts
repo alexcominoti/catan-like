@@ -43,7 +43,17 @@ export type ClientMessage =
   | { t: 'action'; action: Action }
   /** Seleção TENTATIVA (ex.: cartas de descarte já escolhidas): o servidor a usa
    *  se o tempo acabar, em vez de um default aleatório (Colonist v196). */
-  | { t: 'select'; action: Action };
+  | { t: 'select'; action: Action }
+  /** Mensagem de chat da partida. */
+  | { t: 'chat'; text: string };
+
+/** Uma mensagem de chat (broadcast a todos na sala). */
+export interface ChatMessage {
+  from: PlayerColor | null; // cor do autor (null = sistema/espectador — v1: só jogadores)
+  name: string;
+  text: string;
+  at: number; // timestamp (ms)
+}
 
 /** Mensagens do SERVIDOR para o cliente. */
 export type ServerMessage =
@@ -56,4 +66,5 @@ export type ServerMessage =
       deadlineSeconds: number | null; // prazo da janela atual (autoridade e sempre o servidor)
       events: GameEvent[]; // eventos ocorridos desde a ultima mensagem (log/toast/som no cliente)
     }
+  | { t: 'chat'; message: ChatMessage } // mensagem de chat de um jogador
   | { t: 'error'; error: string };

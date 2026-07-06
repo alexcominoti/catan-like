@@ -28,7 +28,7 @@ import { useFlyer, FlyLayer, type Pt, type FlyOpts } from './ui/FlyLayer.js';
 import { RES_IMG, DEV_IMG } from './game/cards.js';
 import { Toasts, useToasts, type ToastTone } from './ui/Toasts.js';
 import { play as playSound, setMuted, unlockAudio, nudgeVolume, type SoundKind } from './ui/sound.js';
-import type { GameClient } from './net/client.js';
+import type { GameClient, ChatMessage } from './net/client.js';
 import { PlayerMenu, useRelationships } from './site/PlayerMenu.js';
 import { PLAYER_FILL, PLAYER_LABEL, RESOURCE_ICON, RESOURCE_LABEL } from './game/theme.js';
 
@@ -52,6 +52,8 @@ export interface OnlineGameProps {
   seq: number;
   error: string | null;
   errorSeq: number;
+  /** Mensagens de chat da partida (networked; acumuladas pelo RoomScreen). */
+  chat: ChatMessage[];
 }
 
 function fmtSecs(s: number): string {
@@ -61,12 +63,6 @@ function fmtSecs(s: number): string {
 type LogEntry =
   | { kind: 'event'; text: string }
   | { kind: 'sep' };
-
-interface ChatMsg {
-  color: PlayerColor;
-  name: string;
-  text: string;
-}
 
 function zeroRes(): Record<Resource, number> {
   return { wood: 0, brick: 0, wool: 0, grain: 0, ore: 0 };
@@ -122,11 +118,12 @@ export function Game({
   const [elapsed, setElapsed] = useState(0); // cronometro da partida (segundos)
   const [turnCount, setTurnCount] = useState(1); // contador de turno
   const [chatInput, setChatInput] = useState('');
-  const [chat, setChat] = useState<ChatMsg[]>([]);
   // Menu de jogador (clicar no nome): perfil / amigo / bloquear. + minhas relações
   // (para o estado do botão de amizade e para esconder mensagens de bloqueados).
   const { data: relations, refresh: refreshRelations, blockedNames } = useRelationships();
   const [playerMenu, setPlayerMenu] = useState<{ username: string; x: number; y: number } | null>(null);
+  // Silenciados (mute) no jogo: client-side, por nome (esconde o chat deles).
+  const [mutedNames, setMutedNames] = useState<Set<string>>(new Set());
   const { toasts, push } = useToasts();
   const { items: flyItems, fly } = useFlyer();
 
@@ -144,8 +141,8 @@ export function Game({
 
   function sendChat() {
     const t = chatInput.trim();
-    if (!t) return;
-    setChat((prev) => [...prev, { color: localColor, name: localPlayer.name, text: t }].slice(-200));
+    if (!t || isSpectator) return; // só jogadores enviam; o servidor faz o broadcast
+    online.client.sendChat(t);
     setChatInput('');
   }
 
@@ -597,17 +594,23 @@ export function Game({
           <div className="card chat-card">
             <h3 className="chat-head"><MessageSquare size={14} className="ic-primary" /> Chat</h3>
             <div className="chat-log">
-              {chat.length === 0 && <p className="muted-note">Sem mensagens ainda</p>}
-              {/* Bloquear esconde as mensagens do jogador bloqueado. */}
-              {[...chat].reverse().filter((m) => !blockedNames.has(m.name.toLowerCase())).map((m, i) => (
-                <div key={i} className="log-chat"><b style={{ color: PLAYER_FILL[m.color] }}>{m.name}:</b> {m.text}</div>
-              ))}
+              {(() => {
+                // Esconde mensagens de quem eu BLOQUEEI (persistente) ou SILENCIEI (no jogo).
+                const visible = online.chat.filter(
+                  (m) => !blockedNames.has(m.name.toLowerCase()) && !mutedNames.has(m.name.toLowerCase()),
+                );
+                if (visible.length === 0) return <p className="muted-note">Sem mensagens ainda</p>;
+                return [...visible].reverse().map((m, i) => (
+                  <div key={i} className="log-chat"><b style={{ color: m.from ? PLAYER_FILL[m.from] : 'var(--muted)' }}>{m.name}:</b> {m.text}</div>
+                ));
+              })()}
             </div>
             <div className="chat-row">
-              <input value={chatInput} placeholder="Mensagem ou /comando"
+              <input value={chatInput} maxLength={200} disabled={isSpectator}
+                placeholder={isSpectator ? 'Espectadores não enviam mensagens' : 'Mensagem…'}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') sendChat(); }} />
-              <button onClick={sendChat} aria-label="Enviar"><Send size={15} /></button>
+              <button onClick={sendChat} disabled={isSpectator} aria-label="Enviar"><Send size={15} /></button>
             </div>
           </div>
 
@@ -695,7 +698,14 @@ export function Game({
       )}
       {playerMenu && (
         <PlayerMenu username={playerMenu.username} data={relations} x={playerMenu.x} y={playerMenu.y}
-          onAction={refreshRelations} onClose={() => setPlayerMenu(null)} />
+          onAction={refreshRelations} onClose={() => setPlayerMenu(null)}
+          muted={mutedNames.has(playerMenu.username.toLowerCase())}
+          onToggleMute={() => setMutedNames((prev) => {
+            const next = new Set(prev);
+            const key = playerMenu.username.toLowerCase();
+            next.has(key) ? next.delete(key) : next.add(key);
+            return next;
+          })} />
       )}
     </div>
   );

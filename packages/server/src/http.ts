@@ -41,6 +41,7 @@ import {
 } from './friends.js';
 import { joinQuickMatch, leaveQuickMatch, matchmakingStatus } from './matchmaking.js';
 import { invites } from './invites.js';
+import { reportUser } from './reports.js';
 import type { RoomManager } from './room.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -330,6 +331,37 @@ async function handleRequest(
       path === '/api/friends/accept'
         ? await acceptFriendRequest(u.id, otherId)
         : await removeFriend(u.id, otherId);
+    if (!result.ok) {
+      sendJson(res, result.httpStatus, { error: result.error });
+      return;
+    }
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  // --- moderação: denunciar um jogador (por username) ---
+  if (path === '/api/reports' && req.method === 'POST') {
+    const u = await authedUser(req, res);
+    if (!u) return;
+    let body: unknown;
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      sendJson(res, 400, { error: 'Corpo inválido.' });
+      return;
+    }
+    const b = body as { username?: unknown; code?: unknown; reason?: unknown };
+    const username = typeof b.username === 'string' ? b.username : '';
+    if (!username.trim()) {
+      sendJson(res, 400, { error: 'Informe um jogador.' });
+      return;
+    }
+    const result = await reportUser(
+      u.id,
+      username,
+      typeof b.code === 'string' ? b.code.toUpperCase() : null,
+      typeof b.reason === 'string' ? b.reason : null,
+    );
     if (!result.ok) {
       sendJson(res, result.httpStatus, { error: result.error });
       return;
