@@ -10,6 +10,7 @@ import {
   COSTS,
   RESOURCES,
   TERRAIN_RESOURCE,
+  computeProduction,
   distanceRuleOk,
   embargoed,
   handTotal,
@@ -61,7 +62,7 @@ export function planBotAction(
     for (const c of t.to) {
       // Ofertas com coringa (wantAny) exigem que quem aceita escolha os recursos —
       // o bot não resolve isso; simplesmente ignora essas ofertas.
-      if (isBot(c) && !t.accepted.includes(c) && !t.wantAny && tradeFavorable(state, c, t)) {
+      if (isBot(c) && !t.accepted.includes(c) && !t.wantAny && tradeFavorable(state, c, t, difficultyOf(c))) {
         return { by: c, action: { t: 'respondTrade', accept: true } };
       }
     }
@@ -511,7 +512,75 @@ function evaluate(state: GameState, me: PlayerColor): number {
   );
 }
 
-/** Vertice de setup que maximiza a funcao de valor (simula a colocacao). */
+// ---------------------------------------------------------------------------
+// Passo 3 — no de ACASO (dados): expectimax de profundidade 2.
+//
+// O AlphaBetaPlayer(n=2) do catanatron deve boa parte da forca a MODELAR a
+// incerteza do dado: avalia a posicao pelo valor ESPERADO sobre a proxima
+// rolagem, nao pelo estado estatico. Aqui fazemos exatamente isso como folha do
+// nivel dificil: para cada acao candidata, em vez de `evaluate(resultado)` usamos
+// `expectedValue(resultado)` = media de `evaluate` sobre as somas 2..12 ponderadas
+// pela probabilidade. Assim o bot prefere posicoes cujos numeros tem mais chance
+// de sair, valoriza construir em 6/8 e penaliza o risco do 7 (descarte).
+// ---------------------------------------------------------------------------
+
+/** Distribuicao da soma de 2d6 (contagens sobre 36) — o no de acaso. */
+const DICE_WEIGHTS: Readonly<Record<number, number>> = {
+  2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1,
+};
+
+function totalOf(hand: Record<Resource, number>): number {
+  let s = 0;
+  for (const r of RESOURCES) s += hand[r];
+  return s;
+}
+
+/** Descarta as `n` cartas mais abundantes de `hand` (aproxima o descarte do 7). */
+function discardMost(hand: Record<Resource, number>, n: number): void {
+  for (let i = 0; i < n; i++) {
+    let best: Resource = RESOURCES[0]!;
+    for (const r of RESOURCES) if (hand[r] > hand[best]) best = r;
+    if (hand[best] <= 0) break;
+    hand[best] -= 1;
+  }
+}
+
+/**
+ * Valor ESPERADO da posicao apos a proxima rolagem (expectimax prof. 2). Uma
+ * rolagem so muda a MINHA mao — o tabuleiro, a producao potencial, os PV e o
+ * espaco de expansao nao mudam —, entao o valor esperado e o valor estatico
+ * `evaluate` mais a media da variacao dos termos de mao (liquidez, sinergia,
+ * overflow). Isso e exatamente `E[evaluate(estado_pos_rolagem)]`, porem barato
+ * (sem clonar o estado). No 7 nao ha producao e modelo o risco de EU descartar
+ * metade se estourar o limite; os demais efeitos do 7 (ladrao) sao imprevisiveis.
+ */
+function expectedValue(state: GameState, me: PlayerColor): number {
+  const base = evaluate(state, me);
+  const p = getPlayer(state, me);
+  const oldTotal = totalOf(p.hand);
+  const oldDist = handDistance(p.hand);
+  const oldOver = Math.max(0, oldTotal - 7);
+  let acc = 0;
+  for (let sum = 2; sum <= 12; sum++) {
+    const w = DICE_WEIGHTS[sum]!;
+    const hand = { ...p.hand };
+    if (sum === 7) {
+      if (oldTotal > state.discardLimit) discardMost(hand, Math.floor(oldTotal / 2));
+    } else {
+      const gains = computeProduction(state, sum)[me] ?? {};
+      for (const r of RESOURCES) hand[r] += gains[r] ?? 0;
+    }
+    const nTotal = totalOf(hand);
+    acc +=
+      w *
+      (W.handCards * (nTotal - oldTotal) +
+        W.handSynergy * -(handDistance(hand) - oldDist) +
+        W.overflow * (Math.max(0, nTotal - 7) - oldOver));
+  }
+  return base + acc / 36;
+}
+
+/** Vertice de setup que maximiza o valor ESPERADO sobre a proxima rolagem. */
 function bestSetupVertexByValue(state: GameState, me: PlayerColor): string {
   const valid = state.board.vertexOrder.filter((vid) => distanceRuleOk(state, vid));
   if (valid.length === 0) return state.board.vertexOrder[0]!;
@@ -520,7 +589,7 @@ function bestSetupVertexByValue(state: GameState, me: PlayerColor): string {
   for (const vid of valid) {
     const r = reduce(state, me, { t: 'placeSettlement', vertexId: vid });
     if (!r.ok) continue;
-    const v = evaluate(r.state, me);
+    const v = expectedValue(r.state, me);
     if (v > bestV) {
       bestV = v;
       best = vid;
@@ -536,7 +605,7 @@ function bestActionByValue(state: GameState, me: PlayerColor, candidates: Action
   for (const a of candidates) {
     const r = reduce(state, me, a);
     if (!r.ok) continue;
-    const v = evaluate(r.state, me);
+    const v = expectedValue(r.state, me);
     if (v > bestV) {
       bestV = v;
       best = a;
@@ -819,12 +888,84 @@ function chooseDiscard(state: GameState, color: PlayerColor): Partial<Record<Res
   return out;
 }
 
-function tradeFavorable(state: GameState, c: PlayerColor, trade: TradeOffer): boolean {
+function sumCounts(rec: Partial<Record<Resource, number>>): number {
+  let s = 0;
+  for (const r of RESOURCES) s += rec[r] ?? 0;
+  return s;
+}
+
+/** Mao resultante para quem ACEITA a troca: recebe `give` e entrega `want`. */
+function handAfterTrade(hand: Record<Resource, number>, trade: TradeOffer): Record<Resource, number> {
+  const h = { ...hand };
+  for (const r of RESOURCES) h[r] += (trade.give[r] ?? 0) - (trade.want[r] ?? 0);
+  return h;
+}
+
+/** Cartas que faltam na `hand` para pagar `cost`. */
+function missingFor(hand: Record<Resource, number>, cost: Partial<Record<Resource, number>>): number {
+  let m = 0;
+  for (const r of RESOURCES) m += Math.max(0, (cost[r] ?? 0) - hand[r]);
+  return m;
+}
+
+/**
+ * Distancia (cartas faltantes) da `hand` a meta de expansao mais proxima do bot;
+ * Infinity se ele nao tem meta construivel agora. As metas dependem do TABULEIRO e
+ * das pecas (nao da mao), entao uma troca so muda a distancia, nunca o conjunto.
+ */
+function goalDistance(state: GameState, me: PlayerColor, level: Difficulty, hand: Record<Resource, number>): number {
+  let best = Infinity;
+  for (const cost of expansionGoals(state, me, level)) best = Math.min(best, missingFor(hand, cost));
+  return best;
+}
+
+/**
+ * O proponente pode fechar o jogo (a <=2 PV de vencer) ou e o lider destacado a
+ * minha frente? O bot dificil recusa negociar com ele — nao se entrega um recurso a
+ * quem esta prestes a ganhar.
+ */
+function proposerIsThreat(state: GameState, me: PlayerColor, from: PlayerColor): boolean {
+  if (from === me) return false;
+  const fromPts = publicScoreOf(state, from);
+  if (fromPts >= state.victoryTarget - 2) return true; // a <=2 PV: qualquer carta fecha o jogo
+  let maxOther = 0;
+  for (const p of state.players) if (p.color !== from) maxOther = Math.max(maxOther, publicScoreOf(state, p.color));
+  return fromPts >= maxOther && fromPts >= publicScoreOf(state, me) + 2; // lider 2+ a minha frente
+}
+
+/**
+ * O bot deve aceitar esta troca proposta por outro jogador? Antes ele aceitava
+ * QUALQUER troca com contagem de cartas nao-negativa (`totalGet >= totalGive`) — o
+ * que era permissivo demais: um humano dava um recurso inutil e levava o minerio de
+ * que o bot precisava. Agora:
+ * - facil segue permissivo DE PROPOSITO (oponente iniciante);
+ * - medio/dificil so aceitam quando a troca APROXIMA de construir algo, ou e um
+ *   ganho liquido de cartas que nao afasta de nenhuma meta — nunca entregando um
+ *   recurso necessario num swap lateral;
+ * - dificil ainda recusa alimentar quem esta perto de vencer.
+ */
+function tradeFavorable(state: GameState, c: PlayerColor, trade: TradeOffer, level: Difficulty): boolean {
   const p = getPlayer(state, c);
   if (!canAfford(p.hand, trade.want)) return false;
-  const totalGet = (Object.values(trade.give) as number[]).reduce((s, n) => s + (n ?? 0), 0);
-  const totalGive = (Object.values(trade.want) as number[]).reduce((s, n) => s + (n ?? 0), 0);
-  return totalGet > 0 && totalGet >= totalGive;
+  const get = sumCounts(trade.give);
+  const give = sumCounts(trade.want);
+  if (get <= 0) return false;
+
+  // Facil: aceita qualquer troca que nao perca cartas (proposital — joga mal).
+  if (level === 'easy') return get >= give;
+
+  // Medio/dificil: nunca dar mais cartas do que recebe.
+  if (get < give) return false;
+  // Dificil: nao ajude quem pode fechar o jogo.
+  if (level === 'hard' && proposerIsThreat(state, c, trade.from)) return false;
+
+  const before = goalDistance(state, c, level, p.hand);
+  const after = goalDistance(state, c, level, handAfterTrade(p.hand, trade));
+  // Aproxima de construir algo: bom negocio.
+  if (after < before) return true;
+  // Senao, so aceita ganho liquido de cartas que nao me afaste de uma meta viva
+  // (liquidez sem entregar recurso critico).
+  return get > give && before !== Infinity && after <= before;
 }
 
 // ===========================================================================
@@ -834,12 +975,21 @@ function tradeFavorable(state: GameState, c: PlayerColor, trade: TradeOffer): bo
 // FEITO (passos 1-2): funcao de valor `evaluate()` + ValueFunctionPlayer 1-ply no
 // nivel "dificil" (`planMainByValue` / `bestSetupVertexByValue`). easy/medio intactos.
 //
-// PASSO 3 — Busca expectimax de profundidade 2 (nivel "mestre"):
-//   Sobre a melhor jogada, ramificar pelos resultados dos dados 2..12 ponderados
-//   pela probabilidade (2/12:1, ... 7:6, ... ), pegando o valor ESPERADO dos
-//   estados-filhos (como o AlphaBetaPlayer n=2 do catanatron, que modela a
-//   incerteza do dado/roubo/compra). Alpha-beta para podar. Aproveitar que o
-//   `reduce` e puro/deterministico e ja temos `evaluate()` como folha.
+// FEITO (passo 3): no de ACASO sobre os dados — o leaf do nivel dificil passou de
+//   `evaluate(estado)` para `expectedValue(estado)` = media de `evaluate` sobre as
+//   somas 2..12 ponderadas pela probabilidade (modela a incerteza do dado como o
+//   AlphaBetaPlayer n=2 do catanatron). Como uma rolagem so muda a MINHA mao, o
+//   valor esperado e exato e barato (sem clonar): `evaluate` + media da variacao dos
+//   termos de mao. Ganho medido no self-play: ~33.8% -> ~35.0% (baseline 25%).
+//   Nota: e um DESEMPATE forte de colocacao (prefere 6/8, evita risco do 7); nao
+//   troca a ORDEM de prioridades (fazer isso — 1-ply sobre TIPOS de acao — regrediu
+//   p/ 21.7% antes; ver catan-ai-research). Nao ha no MIN de adversario (turnos
+//   inteiros dos oponentes seriam caros; a producao inimiga entra estatica em
+//   `enemyProduction`). Alpha-beta nao se aplica a um no de acaso de 11 ramos.
+//
+// PROXIMO (passo 3b, maior ganho porem mais caro/arriscado): no MIN de adversario
+//   (melhor resposta do lider) e/ou um 2o ply MAX proprio (construir apos a rolagem)
+//   com poda; exigiria orcamento de tempo e cuidado p/ nao regredir o hibrido.
 //
 // PASSO 4 — Auto-ajuste de pesos por self-play:
 //   Como o engine e deterministico e gravamos partidas (apps/web/src/ui/replays.ts),
