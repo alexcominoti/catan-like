@@ -33,6 +33,8 @@ export function Friends({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /** userId do amigo cuja remoção aguarda confirmação inline (null = nenhum). */
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     void getFriends().then(setData);
@@ -146,15 +148,37 @@ export function Friends({
                 <small className="muted-note">{f.online ? (f.room ? 'em partida' : 'online') : 'offline'}</small>
               </span>
               <div className="friend-actions">
-                {f.online && f.room && (
-                  <button className="cta sm" onClick={() => onEnterRoom(f.room!)}>
-                    <Play size={14} /> Entrar
-                  </button>
+                {confirmRemove === f.userId ? (
+                  <>
+                    <span className="muted-note">Desfazer amizade?</span>
+                    <button
+                      className="cta sm danger"
+                      onClick={() => { setConfirmRemove(null); void act(removeFriend(f.userId)); }}
+                    >
+                      <Check size={14} /> Remover
+                    </button>
+                    <button className="ghost sm" onClick={() => setConfirmRemove(null)}>Cancelar</button>
+                  </>
+                ) : (
+                  <>
+                    {f.online && f.room && (
+                      <button className="cta sm" onClick={() => onEnterRoom(f.room!)}>
+                        <Play size={14} /> Entrar
+                      </button>
+                    )}
+                    {f.online && !f.room && (
+                      <button className="ghost sm" disabled title="Online, fora de uma sala"><Eye size={14} /> Online</button>
+                    )}
+                    <button
+                      className="ghost sm danger"
+                      onClick={() => setConfirmRemove(f.userId)}
+                      title="Desfazer amizade"
+                      aria-label={`Desfazer amizade com @${f.username}`}
+                    >
+                      <X size={14} />
+                    </button>
+                  </>
                 )}
-                {f.online && !f.room && (
-                  <button className="ghost sm" disabled title="Online, fora de uma sala"><Eye size={14} /> Online</button>
-                )}
-                <button className="ghost sm danger" onClick={() => act(removeFriend(f.userId))}><X size={14} /></button>
               </div>
             </div>
           ))
