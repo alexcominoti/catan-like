@@ -313,7 +313,7 @@ export function Game({
       hex.corners
         .map((vid) => state.buildings[vid]?.owner)
         .filter((o): o is PlayerColor =>
-          !!o && o !== me && handTotal(getPlayer(state, o)) > 0 &&
+          !!o && o !== me && visibleHandTotal(state, o) > 0 &&
           // Ladrao amigavel: nao oferece roubar de quem tem <3 PV.
           (!state.friendlyRobber || publicScoreOf(state, o) >= 3),
         ),
@@ -1003,7 +1003,7 @@ function RobberVictimModal({
         <div className="dev-cards">
           {victims.map((c) => (
             <button key={c} onClick={() => onPick(c)}>
-              <span className="swatch" style={{ background: PLAYER_FILL[c] }} /> {PLAYER_LABEL[c]} · {handTotal(getPlayer(state, c))} cartas
+              <span className="swatch" style={{ background: PLAYER_FILL[c] }} /> {PLAYER_LABEL[c]} · {visibleHandTotal(state, c)} cartas
             </button>
           ))}
         </div>
@@ -1064,6 +1064,13 @@ function DiscardModal({
 
 function getPlayer(state: GameState, color: PlayerColor) {
   return state.players.find((p) => p.color === color)!;
+}
+
+/** Total de cartas na mão respeitando o fog of war: para um adversário o estado
+ *  projetado zera `hand` e guarda o total em `hiddenHand`. */
+function visibleHandTotal(state: GameState, color: PlayerColor): number {
+  const p = getPlayer(state, color);
+  return p.hiddenHand ?? handTotal(p);
 }
 
 /** Placar final (pontos públicos, maior primeiro) — usado na tela de fim e na imagem. */
