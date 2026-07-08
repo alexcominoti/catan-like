@@ -8,7 +8,8 @@ import { presence } from './presence.js';
 import { summarizeMatch, type MatchSummary } from './match.js';
 import { sanitizeChatText } from './chat.js';
 import { hasDatabase } from '@trevalis/db';
-import type { ClientMessage, ServerMessage } from './protocol.js';
+import type { GameState } from '@trevalis/engine';
+import type { ClientMessage, RoomConfig, ServerMessage } from './protocol.js';
 
 /** Caminho do WebSocket quando anexado ao servidor HTTP unico (producao). */
 export const WS_PATH = '/ws';
@@ -35,6 +36,12 @@ export interface GameServerDeps {
   onSweepStaleRooms?: () => Promise<string[]>;
   /** Tick do matchmaking (forma/inicia mesas de "Jogo rápido"). */
   onMatchmakingTick?: () => Promise<void>;
+  /** Grava o snapshot do GameState (persistência restart-safe; debounce no server). */
+  saveGameSnapshot?: (code: string, state: GameState) => Promise<void>;
+  /** Apaga o snapshot da sala (partida encerrada/abandonada). */
+  deleteGameSnapshot?: (code: string) => Promise<void>;
+  /** No WS enter: config + estado salvo para recriar o GameRoom após um restart. */
+  loadGameForEnter?: (code: string) => Promise<{ config: RoomConfig; state?: GameState } | null>;
 }
 
 async function defaultResolveUserId(req: IncomingMessage): Promise<string | null> {
@@ -58,6 +65,23 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
   const manager = deps.manager ?? new RoomManager();
   const resolveUserId = deps.resolveUserId ?? defaultResolveUserId;
   const roomExists = deps.roomExists ?? defaultRoomExists;
+  // Persistência restart-safe do GameState (snapshot no banco). Sem banco (ex.:
+  // testes) vira no-op — o jogo em memória segue funcionando normalmente.
+  const saveGameSnapshot = deps.saveGameSnapshot ?? (async (code: string, state: GameState) => {
+    if (!hasDatabase()) return;
+    const { saveGameSnapshot: save } = await import('./snapshots.js');
+    await save(code, state);
+  });
+  const deleteGameSnapshot = deps.deleteGameSnapshot ?? (async (code: string) => {
+    if (!hasDatabase()) return;
+    const { deleteGameSnapshot: del } = await import('./snapshots.js');
+    await del(code);
+  });
+  const loadGameForEnter = deps.loadGameForEnter ?? (async (code: string) => {
+    if (!hasDatabase()) return null;
+    const { loadGameForEnter: load } = await import('./snapshots.js');
+    return load(code);
+  });
   // Fim de partida (padrão): marca a sala 'finished' E grava o histórico/stats
   // (match/match_player/player_stats). Best-effort — uma falha de persistência
   // (ex.: sem banco) não pode derrubar a partida em memória.
@@ -66,6 +90,7 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
       await finishRoom(code);
       const { persistMatch } = await import('./match.js');
       await persistMatch(code, summary);
+      await deleteGameSnapshot(code); // partida encerrada: não precisa mais do snapshot vivo
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('[trevalis][match] falha ao gravar a partida encerrada:', err);
@@ -74,6 +99,7 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
   const onRoomExpired = deps.onRoomExpired ?? (async (code: string) => {
     const { abandonIfNotFinished } = await import('./rooms.js');
     await abandonIfNotFinished(code);
+    await deleteGameSnapshot(code); // sala abandonada: descarta o snapshot vivo
   });
   const onSweepStaleRooms = deps.onSweepStaleRooms ?? (async () => {
     const { sweepStaleWaitingRooms } = await import('./rooms.js');
@@ -88,7 +114,38 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
   const sockets = new Map<string, WebSocket>(); // connId -> socket
   const timers = new Map<string, ReturnType<typeof setTimeout>>(); // code -> timer de acao da partida
   const botTimers = new Map<string, ReturnType<typeof setTimeout>>(); // code -> timer da PRÓXIMA jogada de bot
+  const saveTimers = new Map<string, ReturnType<typeof setTimeout>>(); // code -> debounce do snapshot
   const lastChatAt = new Map<string, number>(); // userId -> ultimo chat (rate limit anti-spam)
+
+  /** Intervalo do debounce do snapshot: coalesce rajadas de ações num único write. */
+  const SNAPSHOT_DEBOUNCE_MS = 1_000;
+
+  /**
+   * Agenda (com debounce) a gravação do snapshot da sala. Persiste o estado ATUAL
+   * no flush (captura as ações que chegarem durante a janela). No fim de jogo,
+   * cancela qualquer save pendente — o `onGameEnded` já apaga o snapshot.
+   */
+  function scheduleSnapshotSave(code: string, live: LiveRoom): void {
+    const room = live.gameRoom;
+    if (!room || room.state.phase === 'ended') {
+      const pending = saveTimers.get(code);
+      if (pending) { clearTimeout(pending); saveTimers.delete(code); }
+      return;
+    }
+    if (saveTimers.has(code)) return; // já agendado: salva o estado do momento do flush
+    saveTimers.set(
+      code,
+      setTimeout(() => {
+        saveTimers.delete(code);
+        const cur = manager.get(code)?.gameRoom;
+        if (!cur || cur.state.phase === 'ended') return;
+        void saveGameSnapshot(code, cur.state).catch((err) => {
+          // eslint-disable-next-line no-console
+          console.error('[trevalis][snapshot] falha ao salvar o estado da sala:', err);
+        });
+      }, SNAPSHOT_DEBOUNCE_MS),
+    );
+  }
 
   interface Conn {
     connId: string;
@@ -148,6 +205,8 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
     manager.sweep(EMPTY_ROOM_TTL_MS, (code) => {
       const bt = botTimers.get(code);
       if (bt) { clearTimeout(bt); botTimers.delete(code); }
+      const st = saveTimers.get(code);
+      if (st) { clearTimeout(st); saveTimers.delete(code); }
       manager.remove(code);
       void onRoomExpired(code);
     });
@@ -169,6 +228,8 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
   wss.on('close', () => {
     for (const t of botTimers.values()) clearTimeout(t);
     botTimers.clear();
+    for (const t of saveTimers.values()) clearTimeout(t);
+    saveTimers.clear();
   });
 
   function send(ws: WebSocket, m: ServerMessage): void {
@@ -200,6 +261,9 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
       });
       void onGameEnded(code, summary);
     }
+    // Persistência restart-safe: agenda a gravação do estado (debounce). No fim de
+    // jogo, apenas cancela o save pendente (o snapshot é apagado no onGameEnded).
+    scheduleSnapshotSave(code, live);
   }
 
   /** Reprograma o timer de acao da sala: ao estourar, auto-resolve e re-emite. */
@@ -280,6 +344,17 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
         }
         conn.code = code;
         const live = manager.getOrCreate(code);
+        // Persistência restart-safe: se a partida está em andamento mas não há motor
+        // vivo (servidor reiniciado por deploy/queda), recria o GameRoom a partir do
+        // snapshot salvo — ou, na falta dele (recém-iniciada), do config. Feito ANTES
+        // do connect(), pois é o gameRoom que resolve o assento (cor) por userId.
+        if (!live.gameRoom) {
+          const loaded = await loadGameForEnter(code);
+          if (loaded && !live.gameRoom) {
+            if (loaded.state) manager.restoreGame(code, loaded.config, loaded.state);
+            else manager.startGame(code, loaded.config);
+          }
+        }
         const color = live.connect(userId, conn.connId);
         send(ws, { t: 'joined', code, color, bots: live.gameRoom?.config.bots ?? [] });
         if (live.gameRoom) {

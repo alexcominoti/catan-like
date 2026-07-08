@@ -300,6 +300,21 @@ export const roomPlayer = pgTable(
   }),
 );
 
+/**
+ * Snapshot do GameState VIVO de uma partida em andamento (persistência restart-safe).
+ * O motor autoritativo (GameRoom) vive na memória do servidor; sem isto, um deploy
+ * ou queda de máquina derruba as partidas ativas. Aqui gravamos o estado completo
+ * (JSON serializável) por `room_code`, com debounce, e restauramos o GameRoom no
+ * boot/reconexão. Uma linha por sala em andamento (apagada ao terminar/abandonar).
+ */
+export const gameSnapshot = pgTable('game_snapshot', {
+  roomCode: text('room_code').primaryKey(), // 1:1 com a sala (id curto do link)
+  state: jsonb('state').$type<Record<string, unknown>>().notNull(),
+  updatedAt: timestamp('updated_at')
+    .$defaultFn(() => new Date())
+    .notNull(),
+});
+
 /** Denúncia de um jogador (abuso no chat) — moderação. Sem UI de admin ainda:
  *  fica gravada para revisão. */
 export const report = pgTable(
@@ -337,5 +352,6 @@ export const schema = {
   achievement,
   room,
   roomPlayer,
+  gameSnapshot,
   report,
 };
