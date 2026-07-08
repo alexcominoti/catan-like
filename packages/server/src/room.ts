@@ -68,25 +68,33 @@ export class GameRoom {
   /** Eventos acumulados desde o ultimo `drainEvents()` (log/toast/som no cliente). */
   private pendingEvents: GameEvent[] = [];
 
-  constructor(code: string, config: RoomConfig) {
+  /**
+   * `restoreState` (opcional): reidrata uma partida a partir de um snapshot salvo
+   * (persistência restart-safe) em vez de criar um jogo novo. Nesse caso NÃO se
+   * roda o setup inicial (`runBots`) — o estado já está em andamento; os bots serão
+   * pilotados pelo servidor (scheduleBotPump) na reconexão.
+   */
+  constructor(code: string, config: RoomConfig, restoreState?: GameState) {
     this.code = code;
     this.config = config;
     this.botSet = new Set(config.bots);
-    this.state = createInitialState({
-      seed: config.seed,
-      boardLayout: config.boardLayout,
-      players: config.players,
-      numberLayout: config.numberLayout,
-      desert: config.desert,
-      pointsToWin: config.pointsToWin,
-      discardLimit: config.discardLimit,
-      friendlyRobber: config.friendlyRobber,
-      balancedDice: config.balancedDice,
-    });
+    this.state =
+      restoreState ??
+      createInitialState({
+        seed: config.seed,
+        boardLayout: config.boardLayout,
+        players: config.players,
+        numberLayout: config.numberLayout,
+        desert: config.desert,
+        pointsToWin: config.pointsToWin,
+        discardLimit: config.discardLimit,
+        friendlyRobber: config.friendlyRobber,
+        balancedDice: config.balancedDice,
+      });
     this.humans = config.players
       .filter((p) => !this.botSet.has(p.color))
       .map((p) => ({ color: p.color, name: p.name, userId: p.userId!, connected: false }));
-    this.runBots();
+    if (!restoreState) this.runBots();
   }
 
   private isBot = (c: PlayerColor): boolean => this.botSet.has(c);
@@ -471,6 +479,17 @@ export class RoomManager {
   startGame(code: string, config: RoomConfig): GameRoom {
     const live = this.getOrCreate(code);
     live.gameRoom = new GameRoom(code, config);
+    return live.gameRoom;
+  }
+
+  /**
+   * Reidrata o GameRoom a partir de um snapshot salvo (persistência restart-safe):
+   * após um restart do servidor, a primeira reconexão à sala recria o motor no
+   * ponto onde a partida parou, em vez de a partida ficar inacessível.
+   */
+  restoreGame(code: string, config: RoomConfig, state: GameState): GameRoom {
+    const live = this.getOrCreate(code);
+    live.gameRoom = new GameRoom(code, config, state);
     return live.gameRoom;
   }
 
