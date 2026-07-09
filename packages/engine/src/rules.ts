@@ -97,6 +97,37 @@ export function robberAllowed(state: GameState, hexId: string, by: PlayerColor):
   });
 }
 
+/**
+ * Quantas cartas o jogador tem na mao, respeitando o fog of war. No estado
+ * autoritativo (servidor) `hiddenHand` e undefined e conta-se a mao real; num
+ * estado projetado a mao do adversario vem zerada e o total fica em `hiddenHand`.
+ * Assim a mesma funcao da o valor certo tanto no servidor quanto no cliente.
+ */
+export function handSize(p: Player): number {
+  return p.hiddenHand ?? handTotal(p);
+}
+
+/**
+ * Adversarios de quem `by` pode roubar ao mover o bloqueador para `hexId`: os que
+ * tem construcao adjacente ao hex e ao menos uma carta na mao (e, sob o ladrao
+ * amigavel, >= 3 PV publicos). O proprio `by` nunca e alvo. Fonte UNICA da regra:
+ * o servidor decide o roubo com ela (autoridade), o cliente so a usa para saber
+ * se precisa perguntar de quem roubar (quando ha 2+ alvos).
+ */
+export function robberVictims(state: GameState, hexId: string, by: PlayerColor): PlayerColor[] {
+  const hex = state.board.hexes[hexId];
+  if (!hex) return [];
+  const victims = new Set<PlayerColor>();
+  for (const vid of hex.corners) {
+    const b = state.buildings[vid];
+    if (!b || b.owner === by) continue;
+    if (state.friendlyRobber && publicScoreOf(state, b.owner) < 3) continue;
+    if (handSize(getPlayer(state, b.owner)) <= 0) continue;
+    victims.add(b.owner);
+  }
+  return [...victims];
+}
+
 /** Regra de distancia: o vertice e seus vizinhos imediatos devem estar livres. */
 export function distanceRuleOk(state: GameState, vertexId: string): boolean {
   if (state.buildings[vertexId]) return false;

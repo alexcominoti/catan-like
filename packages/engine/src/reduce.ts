@@ -15,6 +15,7 @@ import {
   publicScoreOf,
   roadConnects,
   robberAllowed,
+  robberVictims,
   scoreOf,
   vertexTouchesPlayerRoad,
 } from './rules.js';
@@ -289,8 +290,8 @@ function moveBlocker(
   if (!state.board.hexes[hexId]) return err('Hex inexistente.');
   if (state.blocker.hexId === hexId) return err('O bloqueador precisa mudar de lugar.');
 
-  // Ladrao amigavel: nao pode bloquear um hex que toca quem tem <3 PV (se houver
-  // alternativa) nem roubar de quem tem <3 PV.
+  // Ladrao amigavel: nao pode bloquear um hex que toca quem tem <3 PV se houver
+  // alternativa. (A protecao ao roubo de quem tem <3 PV ja vem em robberVictims.)
   if (state.friendlyRobber) {
     const anyAllowed = state.board.hexOrder.some(
       (h) => h !== state.blocker.hexId && robberAllowed(state, h, by),
@@ -298,32 +299,37 @@ function moveBlocker(
     if (anyAllowed && !robberAllowed(state, hexId, by)) {
       return err('Ladrão amigável: não pode bloquear quem tem menos de 3 pontos.');
     }
-    if (stealFrom && stealFrom !== by && publicScoreOf(state, stealFrom) < 3) {
-      return err('Ladrão amigável: não pode roubar de quem tem menos de 3 pontos.');
-    }
   }
+
+  // O SERVIDOR e a autoridade sobre o roubo: as vitimas elegiveis saem do estado
+  // completo, nao de um flag do cliente. `stealFrom` do cliente so serve para
+  // DESAMBIGUAR quando ha 2+ alvos; com um unico alvo, rouba-se automaticamente.
+  const victims = robberVictims(state, hexId, by);
+  let target: PlayerColor | undefined;
+  if (victims.length === 1) {
+    target = victims[0];
+  } else if (victims.length >= 2) {
+    if (!stealFrom || !victims.includes(stealFrom)) {
+      return err('Escolha de quem roubar.');
+    }
+    target = stealFrom;
+  }
+  // victims.length === 0 -> hex sem alvo valido: move o bloqueador sem roubar.
 
   const next = clone(state);
   next.blocker = { hexId };
   const events: GameEvent[] = [];
 
-  if (stealFrom && stealFrom !== by) {
-    // O alvo precisa ter construcao adjacente ao hex e cartas na mao.
-    const hex = next.board.hexes[hexId]!;
-    const touches = hex.corners.some((vid) => next.buildings[vid]?.owner === stealFrom);
-    const victim = getPlayer(next, stealFrom);
-    if (touches && handTotal(victim) > 0) {
-      const pool: Resource[] = [];
-      for (const res of RESOURCES) for (let i = 0; i < victim.hand[res]; i++) pool.push(res);
-      const r = nextInt(next.rng, pool.length);
-      next.rng = r.rng;
-      const stolen = pool[r.value]!;
-      victim.hand[stolen] -= 1;
-      getPlayer(next, by).hand[stolen] += 1;
-      events.push({ t: 'blockerMoved', hexId, by, stoleFrom: stealFrom, resource: stolen });
-    } else {
-      events.push({ t: 'blockerMoved', hexId, by });
-    }
+  if (target) {
+    const victim = getPlayer(next, target);
+    const pool: Resource[] = [];
+    for (const res of RESOURCES) for (let i = 0; i < victim.hand[res]; i++) pool.push(res);
+    const r = nextInt(next.rng, pool.length);
+    next.rng = r.rng;
+    const stolen = pool[r.value]!;
+    victim.hand[stolen] -= 1;
+    getPlayer(next, by).hand[stolen] += 1;
+    events.push({ t: 'blockerMoved', hexId, by, stoleFrom: target, resource: stolen });
   } else {
     events.push({ t: 'blockerMoved', hexId, by });
   }

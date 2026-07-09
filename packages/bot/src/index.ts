@@ -19,6 +19,7 @@ import {
   publicScoreOf,
   reduce,
   robberAllowed,
+  robberVictims,
   roadConnects,
   scoreOf,
   vertexTouchesPlayerRoad,
@@ -849,20 +850,17 @@ function planBlocker(state: GameState, me: PlayerColor, level: Difficulty): Acti
     }
   }
 
-  // Rouba do alvo: lider (dificil) senao o de mais cartas adjacente ao hex.
-  // Com ladrao amigavel, nao rouba de quem tem <3 PV.
-  const hex = state.board.hexes[bestHex]!;
+  // Rouba do alvo: lider (dificil) senao o de mais cartas. As vitimas elegiveis
+  // (adjacentes, com cartas, e >=3 PV sob ladrao amigavel) saem de robberVictims —
+  // a mesma regra que o servidor aplica.
   let victim: PlayerColor | undefined;
   let mostCards = -1;
-  for (const vid of hex.corners) {
-    const b = state.buildings[vid];
-    if (!b || b.owner === me) continue;
-    if (state.friendlyRobber && publicScoreOf(state, b.owner) < 3) continue;
-    const total = RESOURCES.reduce((s, r) => s + getPlayer(state, b.owner).hand[r], 0);
-    const pref = level === 'hard' && b.owner === leader ? total + 100 : total;
-    if (total > 0 && pref > mostCards) {
+  for (const owner of robberVictims(state, bestHex, me)) {
+    const total = RESOURCES.reduce((s, r) => s + getPlayer(state, owner).hand[r], 0);
+    const pref = level === 'hard' && owner === leader ? total + 100 : total;
+    if (pref > mostCards) {
       mostCards = pref;
-      victim = b.owner;
+      victim = owner;
     }
   }
   return { t: 'moveBlocker', hexId: bestHex, ...(victim ? { stealFrom: victim } : {}) };

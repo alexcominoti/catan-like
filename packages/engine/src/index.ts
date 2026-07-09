@@ -22,11 +22,13 @@ export {
   scoreOf,
   publicScoreOf,
   handTotal,
+  handSize,
   longestRoadLength,
   maritimeRate,
   computeProduction,
   distanceRuleOk,
   robberAllowed,
+  robberVictims,
   roadConnects,
   vertexTouchesPlayerRoad,
 } from './rules.js';

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   publicScoreOf,
   scoreOf,
-  handTotal,
+  handSize,
+  robberVictims,
   longestRoadLength,
   maritimeRate,
   COSTS,
@@ -307,17 +308,9 @@ export function Game({
   }
   function onHex(hid: string) {
     if (effMode !== 'moveBlocker') return;
-    const hex = state.board.hexes[hid]!;
-    const me = state.currentPlayer;
-    const victims = [...new Set(
-      hex.corners
-        .map((vid) => state.buildings[vid]?.owner)
-        .filter((o): o is PlayerColor =>
-          !!o && o !== me && visibleHandTotal(state, o) > 0 &&
-          // Ladrao amigavel: nao oferece roubar de quem tem <3 PV.
-          (!state.friendlyRobber || publicScoreOf(state, o) >= 3),
-        ),
-    )];
+    // Mesma regra do servidor (robberVictims respeita o fog of war via hiddenHand).
+    // O servidor rouba sozinho quando ha 1 alvo; aqui so perguntamos se ha 2+.
+    const victims = robberVictims(state, hid, state.currentPlayer);
     if (victims.length >= 2) {
       setRobberChoice({ hexId: hid, victims }); // humano escolhe de quem roubar
     } else {
@@ -487,8 +480,8 @@ export function Game({
                   </div>
                   <div className="noble-stats">
                     {/* Oponentes vêm com mão/cartas OCULTAS na projeção; mostramos a
-                        CONTAGEM (hiddenHand/hiddenDevCount), não 0. */}
-                    <Stat icon={<Layers size={12} />} label={`${p.hiddenHand ?? handTotal(p)} recursos`} />
+                        CONTAGEM (handSize usa hiddenHand; hiddenDevCount), não 0. */}
+                    <Stat icon={<Layers size={12} />} label={`${handSize(p)} recursos`} />
                     <Stat icon={<Sparkles size={12} />} label={`${p.hiddenDevCount ?? p.progressCards.length} desenv.`} />
                     <Stat icon={<Scroll size={12} />} label={`${longestRoadLength(state, p.color)} estradas`} hl={hasRoad} />
                     <Stat icon={<Swords size={12} />} label={`${p.knightsPlayed} cav.`} hl={hasArmy} />
@@ -1003,7 +996,7 @@ function RobberVictimModal({
         <div className="dev-cards">
           {victims.map((c) => (
             <button key={c} onClick={() => onPick(c)}>
-              <span className="swatch" style={{ background: PLAYER_FILL[c] }} /> {PLAYER_LABEL[c]} · {visibleHandTotal(state, c)} cartas
+              <span className="swatch" style={{ background: PLAYER_FILL[c] }} /> {PLAYER_LABEL[c]} · {handSize(getPlayer(state, c))} cartas
             </button>
           ))}
         </div>
@@ -1064,13 +1057,6 @@ function DiscardModal({
 
 function getPlayer(state: GameState, color: PlayerColor) {
   return state.players.find((p) => p.color === color)!;
-}
-
-/** Total de cartas na mão respeitando o fog of war: para um adversário o estado
- *  projetado zera `hand` e guarda o total em `hiddenHand`. */
-function visibleHandTotal(state: GameState, color: PlayerColor): number {
-  const p = getPlayer(state, color);
-  return p.hiddenHand ?? handTotal(p);
 }
 
 /** Placar final (pontos públicos, maior primeiro) — usado na tela de fim e na imagem. */
