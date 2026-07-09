@@ -1,22 +1,40 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Bell, Check, X, Play, Circle, UserPlus, LogIn } from 'lucide-react';
+import { Bell, Check, CheckCheck, X, Play, Circle, UserPlus, LogIn } from 'lucide-react';
 import {
   acceptFriend,
-  dismissInvite,
   getNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
   removeFriend,
+  type AppNotification,
   type Notifications,
 } from './social.js';
 
 const POLL_MS = 20_000;
 
+const EMPTY: Notifications = { notifications: [], onlineFriends: [], rejoin: [], unreadCount: 0 };
+
+const RTF = new Intl.RelativeTimeFormat('pt-BR', { numeric: 'auto' });
+/** Tempo relativo curto ("há 5 min", "ontem") a partir de um ISO. */
+function timeAgo(iso: string): string {
+  const s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 45) return 'agora';
+  const m = Math.round(s / 60);
+  if (m < 60) return RTF.format(-m, 'minute');
+  const h = Math.round(m / 60);
+  if (h < 24) return RTF.format(-h, 'hour');
+  return RTF.format(-Math.round(h / 24), 'day');
+}
+
 /**
- * Sino de notificações (Tier 2, Colonist v215): pedidos de amizade, convites de
- * sala e amigos online — num painel suspenso no header. `onEnterRoom` navega para
- * a sala (aceitar convite / entrar no jogo de um amigo).
+ * Sino de notificações (Tier 2): feed PERSISTIDO (convites de sala, pedidos de
+ * amizade e "fulano aceitou") com estado lido/não-lido, data e expiração de 30
+ * dias — servido por `/api/notifications`. As seções "Reconectar" e "Amigos
+ * online" continuam sendo estados AO VIVO (derivados, não persistidos).
+ * `onEnterRoom` navega para a sala.
  */
 export function NotificationsBell({ onEnterRoom }: { onEnterRoom: (code: string) => void }) {
-  const [data, setData] = useState<Notifications>({ friendRequests: [], invites: [], onlineFriends: [], rejoin: [], count: 0 });
+  const [data, setData] = useState<Notifications>(EMPTY);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -40,25 +58,34 @@ export function NotificationsBell({ onEnterRoom }: { onEnterRoom: (code: string)
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open]);
 
-  const enterInvite = (code: string) => {
-    void dismissInvite(code);
+  const readOne = (id: string) => void markNotificationRead(id).then(refresh);
+  const readAll = () => void markAllNotificationsRead().then(refresh);
+
+  const enterInvite = (n: AppNotification) => {
+    void markNotificationRead(n.id);
     setOpen(false);
-    onEnterRoom(code);
+    if (n.data?.code) onEnterRoom(n.data.code);
   };
 
-  const hasAny = data.rejoin.length > 0 || data.friendRequests.length > 0 || data.invites.length > 0 || data.onlineFriends.length > 0;
+  const hasAny = data.notifications.length > 0 || data.rejoin.length > 0 || data.onlineFriends.length > 0;
 
   return (
     <div className="notif" ref={ref}>
       <button className="notif-bell" aria-label="Notificações" onClick={() => { setOpen((o) => !o); refresh(); }}>
         <Bell size={17} />
-        {data.count > 0 && <span className="notif-badge">{data.count > 9 ? '9+' : data.count}</span>}
+        {data.unreadCount > 0 && <span className="notif-badge">{data.unreadCount > 9 ? '9+' : data.unreadCount}</span>}
       </button>
 
       {open && (
         <div className="notif-panel">
-          <div className="notif-head">Notificações</div>
+          <div className="notif-head">
+            <span>Notificações</span>
+            {data.unreadCount > 0 && (
+              <button className="notif-readall" onClick={readAll}><CheckCheck size={12} /> Marcar todas como lidas</button>
+            )}
+          </div>
 
+          {/* Reconectar (ao vivo — vale enquanto a sala existir e der para voltar). */}
           {data.rejoin.length > 0 && (
             <div className="notif-section notif-rejoin">
               <span className="notif-label"><LogIn size={12} /> Reconectar</span>
@@ -71,32 +98,18 @@ export function NotificationsBell({ onEnterRoom }: { onEnterRoom: (code: string)
             </div>
           )}
 
-          {data.friendRequests.length > 0 && (
+          {/* Feed persistido (lida/não-lida, datado). */}
+          {data.notifications.length > 0 && (
             <div className="notif-section">
-              <span className="notif-label"><UserPlus size={12} /> Pedidos de amizade</span>
-              {data.friendRequests.map((p) => (
-                <div key={p.userId} className="notif-row">
-                  <span className="notif-name">@{p.username}</span>
-                  <div className="notif-actions">
-                    <button className="cta sm" onClick={() => void acceptFriend(p.userId).then(refresh)}><Check size={13} /></button>
-                    <button className="ghost sm" onClick={() => void removeFriend(p.userId).then(refresh)}><X size={13} /></button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {data.invites.length > 0 && (
-            <div className="notif-section">
-              <span className="notif-label"><Play size={12} /> Convites de sala</span>
-              {data.invites.map((inv) => (
-                <div key={`${inv.fromUserId}:${inv.code}`} className="notif-row">
-                  <span className="notif-name">@{inv.fromUsername} te chamou</span>
-                  <div className="notif-actions">
-                    <button className="cta sm" onClick={() => enterInvite(inv.code)}>Entrar</button>
-                    <button className="ghost sm" onClick={() => void dismissInvite(inv.code).then(refresh)}><X size={13} /></button>
-                  </div>
-                </div>
+              {data.notifications.map((n) => (
+                <NotifRow
+                  key={n.id}
+                  n={n}
+                  onRead={readOne}
+                  onEnter={enterInvite}
+                  onAccept={(x) => x.actorId && void acceptFriend(x.actorId).then(refresh)}
+                  onReject={(x) => x.actorId && void removeFriend(x.actorId).then(refresh)}
+                />
               ))}
             </div>
           )}
@@ -117,5 +130,56 @@ export function NotificationsBell({ onEnterRoom }: { onEnterRoom: (code: string)
         </div>
       )}
     </div>
+  );
+}
+
+/** Uma linha do feed persistido. Aparência muda por tipo; `unread` deixa em destaque. */
+function NotifRow({
+  n,
+  onRead,
+  onEnter,
+  onAccept,
+  onReject,
+}: {
+  n: AppNotification;
+  onRead: (id: string) => void;
+  onEnter: (n: AppNotification) => void;
+  onAccept: (n: AppNotification) => void;
+  onReject: (n: AppNotification) => void;
+}) {
+  const who = n.actorUsername ? `@${n.actorUsername}` : 'Alguém';
+  const cls = `notif-row notif-item${n.read ? '' : ' unread'}`;
+  const dot = !n.read && <span className="notif-unread-dot" aria-hidden />;
+  const when = <small className="muted-note">{timeAgo(n.createdAt)}</small>;
+
+  if (n.type === 'room_invite') {
+    return (
+      <div className={cls}>
+        <span className="notif-name">{dot}<Play size={13} /> {who} te chamou para uma sala {when}</span>
+        <div className="notif-actions">
+          <button className="cta sm" onClick={() => onEnter(n)}>Entrar</button>
+          <button className="ghost sm" aria-label="Dispensar" onClick={() => onRead(n.id)}><X size={13} /></button>
+        </div>
+      </div>
+    );
+  }
+
+  if (n.type === 'friend_request') {
+    return (
+      <div className={cls}>
+        <span className="notif-name">{dot}<UserPlus size={13} /> {who} te enviou um pedido {when}</span>
+        <div className="notif-actions">
+          <button className="cta sm" aria-label="Aceitar" onClick={() => onAccept(n)}><Check size={13} /></button>
+          <button className="ghost sm" aria-label="Recusar" onClick={() => onReject(n)}><X size={13} /></button>
+        </div>
+      </div>
+    );
+  }
+
+  // friend_accepted — informativo; clicar marca como lido.
+  return (
+    <button className={`${cls} as-button`} onClick={() => onRead(n.id)}>
+      <span className="notif-name">{dot}<Check size={13} /> {who} aceitou seu pedido {when}</span>
+    </button>
   );
 }

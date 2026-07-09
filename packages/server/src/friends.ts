@@ -11,6 +11,7 @@
 import { and, eq, or, sql } from 'drizzle-orm';
 import { getDb, friendship as friendshipTable, user as userTable } from '@trevalis/db';
 import { presence } from './presence.js';
+import { addNotification, resolveFriendRequest } from './notifications.js';
 
 /* ------------------------------------------------------------------ */
 /* 1. Núcleo puro (testável, sem banco)                                */
@@ -120,10 +121,15 @@ export async function sendFriendRequest(fromUserId: string, toUsername: string):
       .update(friendshipTable)
       .set({ status: 'accepted' })
       .where(and(eq(friendshipTable.requesterId, target.id), eq(friendshipTable.addresseeId, fromUserId)));
+    // Eu aceitei (re-pedindo) o pedido do target: avisa-o e resolve o "toque"
+    // que eu havia recebido dele.
+    await resolveFriendRequest(fromUserId, target.id);
+    await addNotification(target.id, 'friend_accepted', fromUserId);
     return { ok: true };
   }
 
   await db.insert(friendshipTable).values({ requesterId: fromUserId, addresseeId: target.id, status: 'pending' });
+  await addNotification(target.id, 'friend_request', fromUserId);
   return { ok: true };
 }
 
@@ -142,6 +148,9 @@ export async function acceptFriendRequest(userId: string, otherUserId: string): 
     )
     .returning({ requesterId: friendshipTable.requesterId });
   if (updated.length === 0) return { ok: false, error: 'Pedido não encontrado.', httpStatus: 404 };
+  // Resolve o pedido que eu recebia e avisa o outro que aceitei.
+  await resolveFriendRequest(userId, otherUserId);
+  await addNotification(otherUserId, 'friend_accepted', userId);
   return { ok: true };
 }
 
@@ -157,6 +166,9 @@ export async function removeFriend(userId: string, otherUserId: string): Promise
       and(eq(friendshipTable.requesterId, otherUserId), eq(friendshipTable.addresseeId, userId)),
     ),
   );
+  // Recusar/cancelar um pedido também tira o "toque" de qualquer direção.
+  await resolveFriendRequest(userId, otherUserId);
+  await resolveFriendRequest(otherUserId, userId);
   return { ok: true };
 }
 

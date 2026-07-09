@@ -40,7 +40,13 @@ import {
   unblockUser,
 } from './friends.js';
 import { joinQuickMatch, leaveQuickMatch, matchmakingStatus } from './matchmaking.js';
-import { invites } from './invites.js';
+import {
+  addNotification,
+  listNotifications,
+  markAllRead,
+  markRead,
+  unreadCount,
+} from './notifications.js';
 import { reportUser } from './reports.js';
 import type { RoomManager } from './room.js';
 
@@ -399,19 +405,46 @@ async function handleRequest(
     const u = await authedUser(req, res);
     if (!u) return;
     const f = await listFriends(u.id);
-    const inv = invites.listFor(u.id);
+    // Feed persistido (convites, pedidos e "aceitou"), com lida/não-lida e data.
+    const notifications = await listNotifications(u.id);
+    const unread = await unreadCount(u.id);
     const onlineFriends = f.friends.filter((x) => x.online);
     // Reconexão: partidas em andamento das quais sou membro, MENOS a que estou
     // jogando agora (presença) — é para voltar a uma sala da qual caí/saí.
+    // Ao vivo/derivada: vale enquanto a sala existir e der para voltar.
     const rejoinAll = await listRejoinableRooms(u.id);
     const rejoin = rejoinAll.filter((r) => presence.roomOf(u.id) !== r.code);
     sendJson(res, 200, {
-      friendRequests: f.incoming,
-      invites: inv,
+      notifications,
       onlineFriends,
       rejoin,
-      count: f.incoming.length + inv.length + rejoin.length,
+      unreadCount: unread,
     });
+    return;
+  }
+
+  // --- marcar uma notificação como lida ---
+  if (path === '/api/notifications/read' && req.method === 'POST') {
+    const u = await authedUser(req, res);
+    if (!u) return;
+    let body: unknown;
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      body = {};
+    }
+    const id = typeof (body as { id?: unknown }).id === 'string' ? (body as { id: string }).id : '';
+    if (id) await markRead(u.id, id);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  // --- marcar todas como lidas ---
+  if (path === '/api/notifications/read-all' && req.method === 'POST') {
+    const u = await authedUser(req, res);
+    if (!u) return;
+    await markAllRead(u.id);
+    sendJson(res, 200, { ok: true });
     return;
   }
 
@@ -438,28 +471,8 @@ async function handleRequest(
       sendJson(res, 409, { error: 'A sala não está mais aberta.' });
       return;
     }
-    const [me] = await getDb()
-      .select({ username: sql<string>`coalesce(${userTable.username}, ${userTable.name})` })
-      .from(userTable)
-      .where(eq(userTable.id, u.id))
-      .limit(1);
-    invites.add(toUserId, { userId: u.id, username: me?.username ?? 'alguém' }, code);
-    sendJson(res, 200, { ok: true });
-    return;
-  }
-
-  // --- dispensar um convite recebido ---
-  if (path === '/api/invites/dismiss' && req.method === 'POST') {
-    const u = await authedUser(req, res);
-    if (!u) return;
-    let body: unknown;
-    try {
-      body = await readJsonBody(req);
-    } catch {
-      body = {};
-    }
-    const code = typeof (body as { code?: unknown }).code === 'string' ? (body as { code: string }).code.toUpperCase() : '';
-    if (code) invites.remove(u.id, code);
+    // Convite persistido como notificação (sobrevive a restart; dedup por sala).
+    await addNotification(toUserId, 'room_invite', u.id, { code });
     sendJson(res, 200, { ok: true });
     return;
   }

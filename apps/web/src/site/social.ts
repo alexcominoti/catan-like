@@ -90,13 +90,20 @@ export async function getOnlineCount(): Promise<number> {
   }
 }
 
-/* ---- Notificações + convites de sala (Tier 2) ---- */
+/* ---- Notificações persistentes (Tier 2) ---- */
 
-export interface RoomInvite {
-  fromUserId: string;
-  fromUsername: string;
-  code: string;
-  at: number;
+export type NotificationType = 'room_invite' | 'friend_request' | 'friend_accepted';
+
+/** Uma notificação persistida (lida/não-lida, com data). `AppNotification` para
+ *  não colidir com o global `Notification` do navegador. */
+export interface AppNotification {
+  id: string;
+  type: NotificationType;
+  actorId: string | null;
+  actorUsername: string | null;
+  data: { code?: string } | null;
+  read: boolean;
+  createdAt: string; // ISO 8601
 }
 
 /** Uma partida em andamento à qual posso reconectar. */
@@ -106,16 +113,17 @@ export interface RejoinRoom {
 }
 
 export interface Notifications {
-  friendRequests: PendingView[];
-  invites: RoomInvite[];
+  /** Feed persistido (convites, pedidos, "aceitou"), mais recentes primeiro. */
+  notifications: AppNotification[];
   onlineFriends: FriendView[];
   rejoin: RejoinRoom[];
-  count: number;
+  /** Não-lidas (badge do sino). */
+  unreadCount: number;
 }
 
-const EMPTY_NOTIFS: Notifications = { friendRequests: [], invites: [], onlineFriends: [], rejoin: [], count: 0 };
+const EMPTY_NOTIFS: Notifications = { notifications: [], onlineFriends: [], rejoin: [], unreadCount: 0 };
 
-/** Agregado do sino: pedidos de amizade + convites de sala + amigos online. */
+/** Agregado do sino: feed persistido + amigos online + salas para reconectar. */
 export async function getNotifications(): Promise<Notifications> {
   try {
     const res = await fetch('/api/notifications');
@@ -131,10 +139,19 @@ export function sendInvite(toUserId: string, code: string): Promise<SocialResult
   return post('/api/invites', { toUserId, code });
 }
 
-/** Dispensa um convite recebido. */
-export async function dismissInvite(code: string): Promise<void> {
+/** Marca UMA notificação como lida. */
+export async function markNotificationRead(id: string): Promise<void> {
   try {
-    await fetch('/api/invites/dismiss', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ code }) });
+    await fetch('/api/notifications/read', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ id }) });
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Marca TODAS as notificações como lidas. */
+export async function markAllNotificationsRead(): Promise<void> {
+  try {
+    await fetch('/api/notifications/read-all', { method: 'POST', headers: JSON_HEADERS });
   } catch {
     /* best-effort */
   }

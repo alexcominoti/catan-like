@@ -338,6 +338,36 @@ export const report = pgTable(
   }),
 );
 
+/**
+ * Notificações persistentes (sino do header). Substitui o InviteStore em memória:
+ * uma linha por evento entregue a `userId`, com estado lido/não-lido (`readAt`),
+ * data (`createdAt`) e expiração de 30 dias (poda lazy na leitura). `actorId` é
+ * quem causou o evento (para username + ação de aceitar/entrar). Tipos:
+ * 'room_invite' | 'friend_request' | 'friend_accepted'. `data` guarda o payload
+ * (ex.: { code } da sala do convite). Reconectar e amigos online NÃO entram aqui
+ * (são estados ao vivo, derivados na hora).
+ */
+export const notification = pgTable(
+  'notification',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    type: text('type').notNull(),
+    actorId: text('actor_id').references(() => user.id, { onDelete: 'cascade' }),
+    data: jsonb('data').$type<Record<string, unknown>>(),
+    readAt: timestamp('read_at'),
+    createdAt: timestamp('created_at')
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (t) => ({
+    // Feed do usuário: mais recentes primeiro.
+    userIdx: index('notification_user_idx').on(t.userId, t.createdAt),
+  }),
+);
+
 /** Conjunto completo do schema — passado ao drizzleAdapter do Better Auth. */
 export const schema = {
   user,
@@ -354,4 +384,5 @@ export const schema = {
   roomPlayer,
   gameSnapshot,
   report,
+  notification,
 };
