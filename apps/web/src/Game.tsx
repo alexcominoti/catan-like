@@ -102,7 +102,6 @@ export function Game({
   const [give, setGive] = useState<Resource>('wood');
   const [want, setWant] = useState<Resource>('brick');
   const [arming, setArming] = useState<'yearOfPlenty' | 'monopoly' | 'trade' | 'counter' | null>(null);
-  const [yopPicks, setYopPicks] = useState<Resource[]>([]);
   const [tradeGive, setTradeGive] = useState<Record<Resource, number>>(zeroRes);
   const [tradeWant, setTradeWant] = useState<Record<Resource, number>>(zeroRes);
   const [tradeAny, setTradeAny] = useState(0); // carta coringa: nº de recursos "quaisquer" pedidos
@@ -181,7 +180,6 @@ export function Game({
 
   function resetTransient() {
     setArming(null);
-    setYopPicks([]);
     setTradeGive(zeroRes());
     setTradeWant(zeroRes());
     setTradeAny(0);
@@ -275,7 +273,6 @@ export function Game({
       if (e.key === 'Escape') {
         setMode('idle');
         setArming(null);
-        setYopPicks([]);
         setHelp(false);
         setError(null);
       }
@@ -332,7 +329,6 @@ export function Game({
       if (dispatch({ t: 'playRoadBuilding' })) setMode('buildRoad');
     } else if (card === 'yearOfPlenty') {
       setArming('yearOfPlenty');
-      setYopPicks([]);
     } else if (card === 'monopoly') setArming('monopoly');
   }
 
@@ -634,13 +630,10 @@ export function Game({
           onPick={(r) => dispatch({ t: 'playMonopoly', resource: r })} onClose={() => setArming(null)} />
       )}
       {arming === 'yearOfPlenty' && (
-        <ResourcePickerModal title={`+2 Recursos — escolha ${2 - yopPicks.length} (${yopPicks.map((r) => RESOURCE_ICON[r]).join(' ')})`}
-          onPick={(r) => {
-            const picks = [...yopPicks, r];
-            if (picks.length === 2) dispatch({ t: 'playYearOfPlenty', resources: [picks[0]!, picks[1]!] });
-            else setYopPicks(picks);
-          }}
-          onClose={() => { setArming(null); setYopPicks([]); }} />
+        <YearOfPlentyModal
+          state={state}
+          onConfirm={(resources) => { dispatch({ t: 'playYearOfPlenty', resources }); setArming(null); }}
+          onClose={() => setArming(null)} />
       )}
       {(arming === 'trade' || arming === 'counter') && (
         <TradeBuilderModal state={state} proposer={localColor} tradeGive={tradeGive} tradeWant={tradeWant}
@@ -1048,6 +1041,52 @@ function DiscardModal({
         </div>
         <div className="modal-actions">
           <button className="primary" disabled={total !== count} onClick={() => onDiscard(picks)}>Descartar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Ano da Fartura (+2 Recursos): mesmo formato do descarte (steppers), mas o
+ *  jogador escolhe 2 recursos para PEGAR do banco (pode repetir o mesmo). */
+function YearOfPlentyModal({
+  state,
+  onConfirm,
+  onClose,
+}: {
+  state: GameState;
+  onConfirm: (resources: [Resource, Resource]) => void;
+  onClose: () => void;
+}) {
+  const NEED = 2;
+  const bank = state.bank;
+  const [picks, setPicks] = useState<Record<Resource, number>>({ wood: 0, brick: 0, wool: 0, grain: 0, ore: 0 });
+  const total = RESOURCES.reduce((s, r) => s + picks[r], 0);
+  function confirm() {
+    const chosen: Resource[] = [];
+    for (const r of RESOURCES) for (let i = 0; i < picks[r]; i++) chosen.push(r);
+    if (chosen.length === NEED) onConfirm([chosen[0]!, chosen[1]!]);
+  }
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h3>+2 Recursos — escolha 2 para pegar</h3>
+        <p className="muted-note">Selecionados: {total}/{NEED}</p>
+        <div className="trade-grid" style={{ gridTemplateColumns: '1fr' }}>
+          <div>
+            {RESOURCES.map((r) => (
+              <div key={r} className="trade-row">
+                <span>{RESOURCE_ICON[r]} {RESOURCE_LABEL[r]} ({bank[r]})</span>
+                {/* Trava ao atingir 2 (diminua um para liberar outro) e no que o
+                    banco tem — o servidor recusa pegar recurso que o banco não tem. */}
+                <Stepper value={picks[r]} max={Math.min(bank[r], picks[r] + Math.max(0, NEED - total))} onChange={(v) => setPicks((p) => ({ ...p, [r]: v }))} />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="modal-actions">
+          <button className="primary" disabled={total !== NEED} onClick={confirm}>Pegar</button>
+          <button className="link" onClick={onClose}>Cancelar (ESC)</button>
         </div>
       </div>
     </div>
