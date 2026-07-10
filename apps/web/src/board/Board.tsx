@@ -83,7 +83,11 @@ function edgeTarget(state: GameState, mode: InteractionMode, eid: string, me: Pl
     return ok ? { action: { t: 'placeRoad', edgeId: eid }, cost: NO_COST, kind: 'road' } : null;
   }
   if (mode === 'buildRoad' || mode === 'mainBuild') {
-    return roadConnects(state, me, eid) ? { action: { t: 'buildRoad', edgeId: eid }, cost: COSTS.road, kind: 'road' } : null;
+    // Estradas grátis da carta "2 Estradas" (pendingFreeRoads) não custam nada —
+    // o chip de confirmação precisa refletir isso (senão trava por "falta tijolo").
+    // Espelha a prioridade do reduce.ts (free road antes do pagamento).
+    const cost = state.pendingFreeRoads > 0 ? NO_COST : COSTS.road;
+    return roadConnects(state, me, eid) ? { action: { t: 'buildRoad', edgeId: eid }, cost, kind: 'road' } : null;
   }
   return null;
 }

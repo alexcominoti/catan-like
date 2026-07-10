@@ -49,6 +49,7 @@ import {
 } from './notifications.js';
 import { reportUser } from './reports.js';
 import type { RoomManager } from './room.js';
+import { metricsSnapshot } from './metrics.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -145,6 +146,22 @@ async function handleRequest(
   // --- health check (usado pelo Fly) ---
   if (path === '/healthz' || path === '/api/health') {
     sendJson(res, 200, { ok: true, service: 'trevalis' });
+    return;
+  }
+
+  // --- métricas de aplicação (Fase 0): agregados para medir carga/gargalos.
+  //     Sem dados de usuário. Se METRICS_TOKEN estiver definido, exige o token. ---
+  if (path === '/api/metrics') {
+    const token = process.env.METRICS_TOKEN;
+    if (token) {
+      const provided =
+        url.searchParams.get('token') ?? (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
+      if (provided !== token) {
+        sendJson(res, 401, { error: 'Nao autorizado.' });
+        return;
+      }
+    }
+    sendJson(res, 200, metricsSnapshot(manager.stats()));
     return;
   }
 

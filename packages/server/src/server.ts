@@ -7,6 +7,7 @@ import { EMPTY_ROOM_TTL_MS, RECONNECT_GRACE_MS, RoomManager, type LiveRoom } fro
 import { presence } from './presence.js';
 import { summarizeMatch, type MatchSummary } from './match.js';
 import { sanitizeChatText } from './chat.js';
+import { setWsCountProvider } from './metrics.js';
 import { hasDatabase } from '@trevalis/db';
 import type { GameState } from '@trevalis/engine';
 import type { ClientMessage, RoomConfig, ServerMessage } from './protocol.js';
@@ -62,6 +63,8 @@ async function defaultRoomExists(code: string): Promise<boolean> {
  * presenca/reconexao/graca vive em LiveRoom (room.ts).
  */
 function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSocketServer {
+  // Expõe o nº de sockets WS vivos para /api/metrics (Fase 0).
+  setWsCountProvider(() => wss.clients.size);
   const manager = deps.manager ?? new RoomManager();
   const resolveUserId = deps.resolveUserId ?? defaultResolveUserId;
   const roomExists = deps.roomExists ?? defaultRoomExists;

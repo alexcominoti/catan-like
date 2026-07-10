@@ -11,6 +11,7 @@ import {
   type Resource,
 } from '@trevalis/engine';
 import { planBotAction, resolveBotProposal, type Difficulty } from '@trevalis/bot';
+import { timeBotMove, type RoomStats } from './metrics.js';
 import type { ChatMessage, Pace, RoomConfig } from './protocol.js';
 
 /** Máximo de mensagens de chat guardadas por sala (histórico ao reconectar). */
@@ -329,7 +330,8 @@ export class GameRoom {
    * servidor chama, uma por vez com intervalo, para o bot não jogar "instantâneo".
    */
   stepBot(): boolean {
-    const move = planBotAction(this.state, this.isBot, this.difficultyOf);
+    // Mede o compute do bot (gargalo de CPU) — ver metrics.ts / Fase 0.
+    const move = timeBotMove(() => planBotAction(this.state, this.isBot, this.difficultyOf));
     if (!move) return false;
     const r = reduce(this.state, move.by, move.action);
     if (!r.ok) return false; // nao deveria ocorrer; evita laco infinito
@@ -401,6 +403,11 @@ export class LiveRoom {
 
   hasHuman(): boolean {
     return this.connections.size > 0;
+  }
+
+  /** Nº de conexões WS ativas nesta sala (jogadores + espectadores) — métricas. */
+  connectionCount(): number {
+    return this.connections.size;
   }
 
   /** Todos os userIds conectados agora (jogadores E espectadores) — para broadcast. */
@@ -496,6 +503,25 @@ export class RoomManager {
   remove(code: string): void {
     this.rooms.get(code)?.dispose();
     this.rooms.delete(code);
+  }
+
+  /** Agregados para /api/metrics (sem dados de usuário): salas/partidas/conexões. */
+  stats(): RoomStats {
+    let games = 0;
+    let inProgress = 0;
+    let connections = 0;
+    let seatedHumans = 0;
+    let botsAI = 0;
+    for (const room of this.rooms.values()) {
+      connections += room.connectionCount();
+      const g = room.gameRoom;
+      if (!g) continue;
+      games += 1;
+      if (g.state.phase !== 'ended') inProgress += 1;
+      seatedHumans += g.humans.length;
+      botsAI += g.config.bots.length + g.awayColors().length;
+    }
+    return { rooms: this.rooms.size, games, inProgress, connections, seatedHumans, botsAI };
   }
 
   /** Varre as salas vazias ha mais de `ttlMs`; `onExpire` decide o que persistir/remover. */
