@@ -10,7 +10,7 @@ import {
   type PlayerColor,
   type Resource,
 } from '@trevalis/engine';
-import { planBotAction, resolveBotProposal, type Difficulty } from '@trevalis/bot';
+import { planBotAction, resolveBotProposal, type BotMove, type Difficulty } from '@trevalis/bot';
 import { timeBotMove, type RoomStats } from './metrics.js';
 import type { ChatMessage, Pace, RoomConfig } from './protocol.js';
 
@@ -326,18 +326,52 @@ export class GameRoom {
   }
 
   /**
-   * Aplica UMA jogada de bot (a próxima). Retorna se algo foi aplicado. É o que o
-   * servidor chama, uma por vez com intervalo, para o bot não jogar "instantâneo".
+   * Aplica UMA jogada de bot (a próxima), computada no MAIN thread. Usado no setup
+   * (runBots) e nos testes; em partida o servidor usa o pool de workers (Fase 1)
+   * + `applyBotMove`.
    */
   stepBot(): boolean {
     // Mede o compute do bot (gargalo de CPU) — ver metrics.ts / Fase 0.
     const move = timeBotMove(() => planBotAction(this.state, this.isBot, this.difficultyOf));
-    if (!move) return false;
+    return move ? this.applyBotMove(move) : false;
+  }
+
+  /**
+   * Aplica uma jogada de bot JÁ CALCULADA (pelo pool de workers — Fase 1): o
+   * compute pesado roda fora do event loop e aqui só corre o `reduce` (barato,
+   * autoritativo). `false` se a jogada não é mais legal (o estado avançou enquanto
+   * o worker calculava) — o chamador recomputa no próximo pump.
+   */
+  applyBotMove(move: BotMove): boolean {
     const r = reduce(this.state, move.by, move.action);
-    if (!r.ok) return false; // nao deveria ocorrer; evita laco infinito
+    if (!r.ok) return false;
     this.state = r.state;
     this.pendingEvents.push(...r.events);
     return true;
+  }
+
+  /** Cores hoje pilotadas pela IA (bots fixos + humanos convertidos por AFK). */
+  botColors(): PlayerColor[] {
+    return [...this.botSet];
+  }
+
+  /** Mapa cor→dificuldade para o pool de bots (o worker usa 'medium' por default). */
+  botDifficultyMap(): Record<PlayerColor, Difficulty> {
+    return this.config.botDifficulty;
+  }
+
+  /**
+   * Pré-check BARATO (sem rodar a IA) de que PODE haver jogada de bot agora —
+   * superconjunto seguro de `botHasMove()`: nunca dá falso-negativo (não trava um
+   * bot); no máximo agenda um pump que o pool resolve como `null`. Evita computar a
+   * IA no event loop só para decidir se agenda.
+   */
+  mightHaveBotMove(): boolean {
+    const s = this.state;
+    if (s.phase === 'ended') return false;
+    if (s.phase === 'discard') return this.botColors().some((c) => (s.pendingDiscards[c] ?? 0) > 0);
+    if (s.activeTrade) return s.activeTrade.to.some((c) => this.isBot(c)) || this.isBot(s.currentPlayer);
+    return this.isBot(s.currentPlayer);
   }
 
   /**

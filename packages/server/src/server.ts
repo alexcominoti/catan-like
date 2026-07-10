@@ -8,6 +8,7 @@ import { presence } from './presence.js';
 import { summarizeMatch, type MatchSummary } from './match.js';
 import { sanitizeChatText } from './chat.js';
 import { setWsCountProvider } from './metrics.js';
+import { planBotMove } from './bot-pool.js';
 import { hasDatabase } from '@trevalis/db';
 import type { GameState } from '@trevalis/engine';
 import type { ClientMessage, RoomConfig, ServerMessage } from './protocol.js';
@@ -307,7 +308,8 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
       botTimers.delete(code);
     }
     const room = live.gameRoom;
-    if (!room || !room.botHasMove()) return;
+    // Pré-check BARATO (não roda a IA no event loop só para decidir agendar).
+    if (!room || !room.mightHaveBotMove()) return;
     const delay = room.config.pace === 'fast' ? 650 : 1100; // ms entre jogadas de bot
     botTimers.set(
       code,
@@ -315,7 +317,17 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
         botTimers.delete(code);
         const cur = manager.get(code);
         if (!cur || cur.gameRoom !== room) return; // sala trocada/removida entretanto
-        if (room.stepBot()) broadcastAndSchedule(code, live); // re-agenda a próxima jogada
+        // Compute FORA do event loop (pool de workers; fallback síncrono). Fase 1.
+        void planBotMove(room.state, room.botColors(), room.botDifficultyMap())
+          .then((move) => {
+            const cur2 = manager.get(code);
+            if (!cur2 || cur2.gameRoom !== room) return; // sala mudou enquanto calculava
+            // Aplica e re-agenda a próxima. Se `move` é null ou o estado avançou
+            // (applyBotMove=false), não re-agenda daqui — o próximo broadcast (ex.:
+            // ação de humano) já chama scheduleBotPump.
+            if (move && room.applyBotMove(move)) broadcastAndSchedule(code, live);
+          })
+          .catch(() => { /* pool caiu: o fallback já cobre; ignora */ });
       }, delay),
     );
   }
