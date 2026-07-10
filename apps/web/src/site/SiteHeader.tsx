@@ -1,26 +1,81 @@
-import { Hexagon } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Hexagon, Globe, ChevronDown, Check } from 'lucide-react';
 import { authClient } from '../auth/client.js';
 import { NotificationsBell } from './NotificationsBell.js';
-import { useLang, useT, LANGS } from '../i18n/index.js';
+import { useLang, useT, LANGS, type Lang } from '../i18n/index.js';
 
 export type Page = 'landing' | 'lobby' | 'room' | 'profile' | 'friends' | 'auth';
 
-/** Seletor de idioma PT | EN (compacto, no cabeçalho). */
+/** Nome de cada idioma no PRÓPRIO idioma (endônimo) — para o usuário se achar. */
+const LANG_NAME: Record<Lang, string> = { 'pt-BR': 'Português', en: 'English' };
+
+/**
+ * Bandeira do Brasil em SVG. Emoji de bandeira (🇧🇷) NÃO renderiza como bandeira
+ * no Windows/Chrome (vira "BR"), então desenhamos.
+ */
+function BrFlag({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={Math.round(size * 0.7)} viewBox="0 0 28 20" aria-hidden="true" style={{ display: 'block', borderRadius: 3, flexShrink: 0 }}>
+      <rect width="28" height="20" rx="3" fill="#1f9d43" />
+      <path d="M14 2.4 L25.6 10 L14 17.6 L2.4 10 Z" fill="#f7d117" />
+      <circle cx="14" cy="10" r="4.1" fill="#16357e" />
+    </svg>
+  );
+}
+
+/** Ícone de cada idioma: bandeira do BR (pt-BR) ou globo (en). */
+function LangIcon({ lang }: { lang: Lang }) {
+  return lang === 'pt-BR' ? <BrFlag /> : <Globe size={16} />;
+}
+
+/** Seletor de idioma (dropdown) com bandeira do Brasil (pt-BR) e globo (en). */
 function LangSwitcher() {
   const { lang, setLang } = useLang();
   const t = useT();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Fecha ao clicar fora.
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
   return (
-    <div className="lang-switch" role="group" aria-label={t('header.lang.label')}>
-      {LANGS.map((l) => (
-        <button
-          key={l}
-          className={l === lang ? 'on' : ''}
-          aria-pressed={l === lang}
-          onClick={() => setLang(l)}
-        >
-          {l === 'pt-BR' ? 'PT' : 'EN'}
-        </button>
-      ))}
+    <div className="lang-select" ref={ref}>
+      <button
+        className="lang-trigger"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={t('header.lang.select')}
+        title={t('header.lang.select')}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <LangIcon lang={lang} />
+        <span className="lang-code">{lang === 'pt-BR' ? 'PT-BR' : 'EN'}</span>
+        <ChevronDown size={14} className={`lang-caret${open ? ' open' : ''}`} />
+      </button>
+      {open && (
+        <div className="lang-menu" role="listbox" aria-label={t('header.lang.select')}>
+          {LANGS.map((l) => (
+            <button
+              key={l}
+              role="option"
+              aria-selected={l === lang}
+              className={`lang-option${l === lang ? ' on' : ''}`}
+              onClick={() => { setLang(l); setOpen(false); }}
+            >
+              <LangIcon lang={l} />
+              <span className="lang-name">{LANG_NAME[l]}</span>
+              {l === lang && <Check size={15} className="lang-check" />}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

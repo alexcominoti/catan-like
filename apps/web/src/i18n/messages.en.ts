@@ -17,6 +17,7 @@ export const en: Record<MsgKey, string> = {
   'header.signIn': 'Sign in',
   'header.playNow': 'Play now',
   'header.lang.label': 'Language',
+  'header.lang.select': 'Select language',
 
   // Resources
   'resource.brick': 'Brick',
@@ -36,7 +37,7 @@ export const en: Record<MsgKey, string> = {
   'landing.titleAccent': 'conquer',
   'landing.titlePost': ' the island.',
   'landing.subtitle':
-    'Trevalis is the fastest way to play hexagonal colonization online. Create your free account, set up a table and play — solo against bots or with friends via link. You need to sign in to play; the server runs every match.',
+    'The fastest way to play hexagonal colonization in your browser — no download needed. Create your free account, set up a table in seconds, and play against bots or friends. To rally your crew, just share the link.',
   'landing.enterLobby': 'Enter the lobby',
   'landing.watchGame': 'Watch a game',
   'landing.playerOnline': 'player online',

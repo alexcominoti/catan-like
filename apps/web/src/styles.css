@@ -1194,6 +1194,33 @@ button.link {
 .site-actions { display: flex; gap: 10px; align-items: center; }
 .site-actions .ghost { background: none; border: none; color: var(--muted); }
 
+/* Seletor de idioma (dropdown com bandeira do BR / globo) */
+.lang-select { position: relative; }
+.lang-trigger {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 6px 8px; border-radius: 10px;
+  background: var(--panel-2); border: 1px solid var(--border);
+  color: var(--text); font-weight: 600; font-size: 13px; cursor: pointer;
+}
+.lang-trigger:hover { background: var(--border); }
+.lang-trigger .lang-code { letter-spacing: .3px; }
+.lang-trigger .lang-caret { color: var(--muted); transition: transform .15s ease; }
+.lang-trigger .lang-caret.open { transform: rotate(180deg); }
+.lang-menu {
+  position: absolute; top: calc(100% + 8px); right: 0; min-width: 190px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 20px 50px -16px rgba(80, 40, 20, .45); z-index: 70; padding: 6px;
+}
+.lang-option {
+  width: 100%; display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px; border-radius: 9px; background: none; border: none;
+  color: var(--text); font-weight: 600; font-size: 14px; cursor: pointer; text-align: left;
+}
+.lang-option:hover { background: var(--panel-2); }
+.lang-option.on { color: var(--accent); }
+.lang-option .lang-name { flex: 1; }
+.lang-option .lang-check { color: var(--accent); flex-shrink: 0; }
+
 .cta { background: var(--accent); color: #fff; border: none; border-radius: 10px; padding: 10px 18px; font-weight: 600; font-size: 15px; cursor: pointer; }
 .cta:hover { background: var(--accent-dark); }
 .cta.big { padding: 14px 24px; font-size: 16px; }

@@ -19,6 +19,7 @@ export const ptBR = {
   'header.signIn': 'Entrar',
   'header.playNow': 'Jogar agora',
   'header.lang.label': 'Idioma',
+  'header.lang.select': 'Selecionar idioma',
 
   // Recursos (mesma ordem do padrão do produto)
   'resource.brick': 'Tijolo',
@@ -38,7 +39,7 @@ export const ptBR = {
   'landing.titleAccent': 'conquiste',
   'landing.titlePost': ' a ilha.',
   'landing.subtitle':
-    'Trevalis é o jeito mais rápido de jogar colonização hexagonal online. Crie sua conta grátis, monte uma mesa e jogue — sozinho contra bots ou com amigos pelo link. É preciso entrar para jogar; o servidor cuida de cada partida.',
+    'O jeito mais rápido de jogar colonização hexagonal no navegador — sem baixar nada. Crie sua conta grátis, monte a mesa em segundos e dispute contra bots ou com amigos. Para chamar a galera, é só mandar o link.',
   'landing.enterLobby': 'Entrar no lobby',
   'landing.watchGame': 'Ver uma partida',
   'landing.playerOnline': 'jogador online',
