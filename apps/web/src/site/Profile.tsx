@@ -4,16 +4,19 @@ import { authClient } from '../auth/client.js';
 import { validateUsername } from '../auth/username.js';
 import { sendFriendRequest } from './social.js';
 import { LoginGate } from './LoginGate.js';
+import { useT, useLang, type Lang, type MsgKey } from '../i18n/index.js';
 
 // PARTIDAS/VITÓRIAS/SEQUÊNCIA e "Últimas partidas" vêm de GET /api/profile/stats
 // (dados REAIS do banco). Como ainda não persistimos partidas, na prática vêm
 // zerados/vazios — a UI mostra o estado vazio em vez de números mockados.
 // ELO e Conquistas seguem "Em breve" (ver docs/backlog.md → Perfil).
-const MAP_LABEL: Record<string, string> = {
-  standard: 'Clássico (3–4)',
-  large: 'Grande (5–6)',
-  huge: 'Enorme (7–8)',
+const MAP_LABEL: Record<string, MsgKey> = {
+  standard: 'map.standard',
+  large: 'map.large',
+  huge: 'map.huge',
 };
+
+type TFn = (key: MsgKey, params?: Record<string, string | number>) => string;
 
 interface ProfileMatch {
   won: boolean;
@@ -32,17 +35,17 @@ interface ProfileStats {
   matches: ProfileMatch[];
 }
 
-/** Tempo relativo curto (pt-BR) a partir de um ISO. */
-function relativeTime(iso: string | null): string {
+/** Tempo relativo curto, no idioma atual, a partir de um ISO. */
+function relativeTime(iso: string | null, t: TFn, lang: Lang): string {
   if (!iso) return '';
   const diff = Date.now() - new Date(iso).getTime();
   const h = Math.floor(diff / 3_600_000);
-  if (h < 1) return 'agora há pouco';
-  if (h < 24) return `há ${h}h`;
+  if (h < 1) return t('profile.time.justNow');
+  if (h < 24) return t('profile.time.hoursAgo', { h });
   const d = Math.floor(h / 24);
-  if (d === 1) return 'ontem';
-  if (d < 7) return `${d} dias`;
-  return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
+  if (d === 1) return t('profile.time.yesterday');
+  if (d < 7) return t('profile.time.daysAgo', { d });
+  return new Date(iso).toLocaleDateString(lang, { day: '2-digit', month: 'short' });
 }
 
 /**
@@ -60,6 +63,8 @@ export function Profile({
   onOwnUsername?: (u: string) => void;
   onNeedAuth?: () => void;
 }) {
+  const t = useT();
+  const { lang } = useLang();
   const isOwn = username == null;
   const { data: session, isPending } = authClient.useSession();
   const u = session?.user as
@@ -108,19 +113,19 @@ export function Profile({
     void fetch(`/api/profile/by-username/${encodeURIComponent(username)}`)
       .then(async (r) => {
         const data = (await r.json().catch(() => ({}))) as { username?: string; stats?: ProfileStats; error?: string };
-        if (!r.ok) throw new Error(data.error ?? 'Usuário não encontrado.');
+        if (!r.ok) throw new Error(data.error ?? t('profile.notFound'));
         return data as { username: string; stats: ProfileStats };
       })
       .then((data) => {
         if (alive) setPublicProfile(data);
       })
       .catch((err) => {
-        if (alive) setPublicError(err instanceof Error ? err.message : 'Erro inesperado.');
+        if (alive) setPublicError(err instanceof Error ? err.message : t('common.unexpected'));
       });
     return () => {
       alive = false;
     };
-  }, [isOwn, username]);
+  }, [isOwn, username, t]);
 
   const stats = isOwn ? ownStats : (publicProfile?.stats ?? null);
 
@@ -137,29 +142,29 @@ export function Profile({
     setFriendMsg(null);
     const res = await sendFriendRequest(publicName);
     setFriendBusy(false);
-    setFriendMsg(res.ok ? 'Pedido de amizade enviado!' : res.error);
+    setFriendMsg(res.ok ? t('profile.friendSent') : res.error);
   }
 
   const winRate =
     stats && stats.gamesPlayed > 0 ? Math.round((stats.gamesWon / stats.gamesPlayed) * 100) : 0;
   const losses = stats ? stats.gamesPlayed - stats.gamesWon : 0;
 
-  const display = isOwn ? (ownUsername || 'jogador') : (publicProfile?.username ?? username ?? 'jogador');
+  const display = isOwn ? (ownUsername || t('profile.playerFallback')) : (publicProfile?.username ?? username ?? t('profile.playerFallback'));
   const initial = display.charAt(0).toUpperCase();
   const joined = isOwn && u?.createdAt
-    ? new Date(u.createdAt).toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' })
+    ? new Date(u.createdAt).toLocaleDateString(lang, { month: 'short', year: 'numeric' })
     : null;
 
   // Perfil PRÓPRIO é rota protegida (só a Home é pública); perfil público por
   // username segue acessível por link (somente leitura).
   if (isOwn && isPending) {
-    return <div className="page"><p className="muted-note">Carregando…</p></div>;
+    return <div className="page"><p className="muted-note">{t('common.loading')}</p></div>;
   }
   if (isOwn && !session?.user) {
     return (
       <LoginGate
-        title="Entre para ver seu perfil"
-        hint="Você precisa de uma conta para acessar seu perfil."
+        title={t('profile.gate.title')}
+        hint={t('profile.gate.hint')}
         onNeedAuth={onNeedAuth ?? (() => {})}
       />
     );
@@ -180,25 +185,25 @@ export function Profile({
       <div className="card profile-head">
         <span className="avatar">{initial}</span>
         <div className="profile-id">
-          <span className="eyebrow">JOGADOR</span>
+          <span className="eyebrow">{t('profile.player')}</span>
           <h1>
             {display}
             {changed && (
-              <span className="name-locked" title="Você já alterou seu nome de usuário.">
-                <Lock size={13} /> nome já alterado
+              <span className="name-locked" title={t('profile.nameChangedTitle')}>
+                <Lock size={13} /> {t('profile.nameChanged')}
               </span>
             )}
           </h1>
-          <span className="muted-note">{joined ? `Entrou em ${joined}` : 'Trevalis'}</span>
+          <span className="muted-note">{joined ? t('profile.joined', { date: joined }) : 'Trevalis'}</span>
         </div>
         {isOwn && (
           <button className="ghost" onClick={() => setEditing(true)} disabled={!u}>
-            <Settings size={15} /> Editar perfil
+            <Settings size={15} /> {t('profile.editProfile')}
           </button>
         )}
         {canAddFriend && (
           <button className="cta" onClick={addFriend} disabled={friendBusy}>
-            <UserPlus size={15} /> {friendBusy ? 'Enviando…' : 'Adicionar amigo'}
+            <UserPlus size={15} /> {friendBusy ? t('profile.sending') : t('profile.addFriend')}
           </button>
         )}
       </div>
@@ -208,48 +213,48 @@ export function Profile({
         {/* ELO: "Em breve" — sem sistema de rating ainda. Ver docs/backlog.md → Perfil. */}
         <div className="card stat-box">
           <span className="eyebrow stat-eyebrow"><Trophy size={14} /> ELO</span>
-          <span className="soon-tag">Em breve</span>
+          <span className="soon-tag">{t('common.soon')}</span>
         </div>
         <div className="card stat-box">
-          <span className="eyebrow stat-eyebrow"><CircleDot size={14} /> PARTIDAS</span>
+          <span className="eyebrow stat-eyebrow"><CircleDot size={14} /> {t('profile.stat.games')}</span>
           <span className="stat-value">{stats?.gamesPlayed ?? 0}</span>
-          <span className="muted-note">total jogadas</span>
+          <span className="muted-note">{t('profile.stat.gamesSub')}</span>
         </div>
         <div className="card stat-box">
-          <span className="eyebrow stat-eyebrow"><TrendingUp size={14} /> VITÓRIAS</span>
+          <span className="eyebrow stat-eyebrow"><TrendingUp size={14} /> {t('profile.stat.wins')}</span>
           <span className="stat-value">{winRate}%</span>
-          <span className="muted-note">{stats?.gamesWon ?? 0}V / {losses}D</span>
+          <span className="muted-note">{t('profile.stat.winLoss', { w: stats?.gamesWon ?? 0, l: losses })}</span>
         </div>
         <div className="card stat-box">
-          <span className="eyebrow stat-eyebrow"><Flame size={14} /> SEQUÊNCIA</span>
+          <span className="eyebrow stat-eyebrow"><Flame size={14} /> {t('profile.stat.streak')}</span>
           <span className="stat-value">{stats?.currentStreak ?? 0}</span>
-          <span className="muted-note">recorde: {stats?.longestStreak ?? 0}</span>
+          <span className="muted-note">{t('profile.stat.record', { n: stats?.longestStreak ?? 0 })}</span>
         </div>
         {/* KARMA: anti-abandono (partidas levadas até o fim). Ver karma.ts no servidor. */}
         <div className="card stat-box">
-          <span className="eyebrow stat-eyebrow"><ShieldCheck size={14} /> KARMA</span>
+          <span className="eyebrow stat-eyebrow"><ShieldCheck size={14} /> {t('profile.stat.karma')}</span>
           <span className="stat-value">{stats?.karma ?? 100}%</span>
-          <span className="muted-note">{stats?.gamesAbandoned ? `${stats.gamesAbandoned} abandonada(s)` : 'sem abandonos'}</span>
+          <span className="muted-note">{stats?.gamesAbandoned ? t('profile.stat.abandoned', { n: stats.gamesAbandoned }) : t('profile.stat.noAbandons')}</span>
         </div>
       </div>
 
       <div className="profile-cols">
         <div className="card">
           <div className="card-head">
-            <h2>Últimas partidas</h2>
+            <h2>{t('profile.recentMatches')}</h2>
           </div>
           {!stats || stats.matches.length === 0 ? (
-            <p className="muted-note match-empty">Sem partidas ainda. Jogue uma para começar seu histórico!</p>
+            <p className="muted-note match-empty">{t('profile.noMatches')}</p>
           ) : (
             stats.matches.map((m, i) => (
               <div key={i} className="match-row">
                 <span className={`dot ${m.won ? 'win' : 'loss'}`} />
                 <div className="match-info">
-                  <b>{m.won ? 'Vitória' : 'Derrota'}</b> · {m.points} pts · {m.map ? (MAP_LABEL[m.map] ?? m.map) : '—'}
-                  <small>{m.opponents.length ? `vs ${m.opponents.join(', ')}` : 'sem oponentes'}</small>
+                  <b>{m.won ? t('profile.win') : t('profile.loss')}</b> · {m.points} pts · {m.map ? (MAP_LABEL[m.map] ? t(MAP_LABEL[m.map]!) : m.map) : '—'}
+                  <small>{m.opponents.length ? `vs ${m.opponents.join(', ')}` : t('profile.noOpponents')}</small>
                 </div>
                 <div className="match-delta">
-                  <small>{relativeTime(m.finishedAt)}</small>
+                  <small>{relativeTime(m.finishedAt, t, lang)}</small>
                 </div>
               </div>
             ))
@@ -258,11 +263,11 @@ export function Profile({
 
         {/* Conquistas: "Em breve" — sem catálogo/desbloqueio. Ver docs/backlog.md → Perfil. */}
         <div className="card">
-          <h2>Conquistas</h2>
+          <h2>{t('profile.achievements')}</h2>
           <div className="soon-block">
             <Award size={26} className="ic-primary" />
-            <span className="soon-tag">Em breve</span>
-            <p className="muted-note">Catálogo de conquistas a caminho.</p>
+            <span className="soon-tag">{t('common.soon')}</span>
+            <p className="muted-note">{t('profile.achievementsSoon')}</p>
           </div>
         </div>
       </div>
@@ -295,6 +300,7 @@ function EditUsernameModal({
   onClose: () => void;
   onSaved: (name: string) => void;
 }) {
+  const t = useT();
   const [value, setValue] = useState(current);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -310,10 +316,10 @@ function EditUsernameModal({
         body: JSON.stringify({ username: value.trim() }),
       });
       const data = (await res.json().catch(() => ({}))) as { username?: string; error?: string };
-      if (!res.ok) throw new Error(data.error ?? 'Falha ao alterar o nome.');
+      if (!res.ok) throw new Error(data.error ?? t('profile.edit.failName'));
       onSaved(data.username ?? value.trim());
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro inesperado.');
+      setError(err instanceof Error ? err.message : t('common.unexpected'));
       setConfirming(false);
     } finally {
       setBusy(false);
@@ -335,12 +341,12 @@ function EditUsernameModal({
   return (
     <div className="pf-modal-overlay" onClick={onClose}>
       <form className="pf-modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
-        <h2>Editar perfil</h2>
+        <h2>{t('profile.editProfile')}</h2>
 
         {error && <div className="auth-error">{error}</div>}
 
         <label className="pf-field">
-          Nome de usuário
+          {t('auth.field.username')}
           <input
             value={value}
             onChange={(e) => setValue(e.target.value)}
@@ -349,29 +355,29 @@ function EditUsernameModal({
             maxLength={20}
             autoFocus
           />
-          <small className="auth-hint">4–20 caracteres; letras, números, ponto e hífen.</small>
+          <small className="auth-hint">{t('auth.field.usernameHint')}</small>
         </label>
 
         {alreadyChanged ? (
           <div className="pf-locked-note">
-            <Lock size={14} /> Você já usou sua alteração de nome — o campo está somente leitura.
+            <Lock size={14} /> {t('profile.edit.locked')}
           </div>
         ) : confirming ? (
           <div className="pf-confirm">
-            <p>Você só pode alterar seu nome uma vez. Tem certeza?</p>
+            <p>{t('profile.edit.confirm')}</p>
             <div className="pf-actions">
               <button type="button" className="ghost" onClick={() => setConfirming(false)} disabled={busy}>
-                Cancelar
+                {t('common.cancel')}
               </button>
               <button type="button" className="cta" onClick={save} disabled={busy}>
-                <Check size={15} /> {busy ? 'Salvando…' : 'Sim, alterar'}
+                <Check size={15} /> {busy ? t('profile.edit.saving') : t('profile.edit.confirmYes')}
               </button>
             </div>
           </div>
         ) : (
           <div className="pf-actions">
-            <button type="button" className="ghost" onClick={onClose}>Fechar</button>
-            <button type="submit" className="cta">Alterar nome</button>
+            <button type="button" className="ghost" onClick={onClose}>{t('common.close')}</button>
+            <button type="submit" className="cta">{t('profile.edit.changeName')}</button>
           </div>
         )}
       </form>

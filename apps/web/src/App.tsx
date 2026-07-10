@@ -67,6 +67,8 @@ export function App() {
   const [pendingRoom, setPendingRoom] = useState<string | null>(roomCodeFromPath);
   // A partida ao vivo (online) ocupa a tela inteira, sem o header do site.
   const [roomFullscreen, setRoomFullscreen] = useState(false);
+  // Intenção do criador: "Partida privada" abre a sala já como privada.
+  const [createPrivate, setCreatePrivate] = useState(false);
   const { data: session } = authClient.useSession();
 
   // Heartbeat de presença: enquanto logado, avisa o servidor a cada 30s que está
@@ -132,7 +134,7 @@ export function App() {
       {page === 'landing' && <Landing onPlay={() => nav('lobby')} onWatch={() => nav('lobby')} />}
       {page === 'lobby' && (
         <RoomBrowser
-          onCreate={() => nav('room')}
+          onCreate={(opts) => { setCreatePrivate(Boolean(opts?.isPrivate)); nav('room'); }}
           onEnterRoom={enterRoom}
           onNeedAuth={() => nav('auth')}
         />
@@ -140,6 +142,7 @@ export function App() {
       {page === 'room' && (
         <RoomScreen
           code={roomCode}
+          initialPrivate={createPrivate}
           onRoomCreated={enterRoom}
           onLeave={() => nav('lobby')}
           onNeedAuth={() => { setPendingRoom(roomCode); nav('auth'); }}

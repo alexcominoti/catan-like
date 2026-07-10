@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useT } from '../i18n/index.js';
 
 /** Posicoes dos pips (grade 3x3) para cada face 1..6. */
 const PIPS: Record<number, [number, number][]> = {
@@ -13,10 +14,11 @@ const PIPS: Record<number, [number, number][]> = {
 const SIZE = 42;
 
 function Die({ value, accent }: { value: number; accent: boolean }) {
+  const t = useT();
   const cells = PIPS[value] ?? [];
   const pos = (i: number) => SIZE * 0.25 + i * SIZE * 0.25; // 3 colunas/linhas
   return (
-    <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} aria-label={`dado ${value}`}>
+    <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} aria-label={t('game.diceAria', { n: value })}>
       <rect
         x={2}
         y={2}

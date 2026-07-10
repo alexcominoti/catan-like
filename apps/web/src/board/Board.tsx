@@ -13,6 +13,7 @@ import {
 } from '@trevalis/engine';
 import { PLAYER_FILL, RESOURCE_ICON, TERRAIN_FILL } from '../game/theme.js';
 import { RES_IMG } from '../game/cards.js';
+import { useT } from '../i18n/index.js';
 
 export type InteractionMode =
   | 'idle'
@@ -122,6 +123,7 @@ function norm(v: Pt): Pt {
 }
 
 export function Board({ state, mode, hintVertex, onBuild, onHex }: BoardProps) {
+  const t = useT();
   const { board, buildings, roads, blocker } = state;
   const me = state.currentPlayer;
   const myHand = state.players.find((p) => p.color === me)?.hand;
@@ -179,7 +181,7 @@ export function Board({ state, mode, hintVertex, onBuild, onHex }: BoardProps) {
   const viewBox = frame.viewBox;
 
   return (
-    <svg viewBox={viewBox} role="img" aria-label="Tabuleiro hexagonal">
+    <svg viewBox={viewBox} role="img" aria-label={t('board.aria')}>
       <defs>
         <radialGradient id="hexLight" cx="35%" cy="22%" r="80%">
           <stop offset="0%" stopColor="#ffffff" stopOpacity={0.32} />

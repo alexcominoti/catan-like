@@ -1,22 +1,23 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Zap, Users, Trophy, Hexagon, ShieldCheck, Sparkles, Map } from 'lucide-react';
 import { getOnlineCount } from './social.js';
+import { useT, useLang, type MsgKey } from '../i18n/index.js';
 
-const RESOURCE_PILLS: { label: string; color: string }[] = [
-  { label: 'Tijolo', color: '#c0563a' },
-  { label: 'Madeira', color: '#6e4a2f' },
-  { label: 'Ovelha', color: '#7fae3f' },
-  { label: 'Trigo', color: '#e3b23c' },
-  { label: 'Pedra', color: '#6b7480' },
+const RESOURCE_PILLS: { key: MsgKey; color: string }[] = [
+  { key: 'resource.brick', color: '#c0563a' },
+  { key: 'resource.wood', color: '#6e4a2f' },
+  { key: 'resource.grain', color: '#e3b23c' },
+  { key: 'resource.wool', color: '#7fae3f' },
+  { key: 'resource.ore', color: '#6b7480' },
 ];
 
-const FEATURES: { icon: ReactNode; title: string; text: string }[] = [
-  { icon: <Zap size={20} />, title: 'Partidas rápidas', text: 'Encontre um jogo em segundos com matchmaking por elo.' },
-  { icon: <Users size={20} />, title: 'Salões privados', text: 'Convide amigos por link, defina regras, expansões e bots.' },
-  { icon: <Trophy size={20} />, title: 'Ranqueadas', text: 'Suba do Colono a Grão-Mestre em temporadas mensais.' },
-  { icon: <Map size={20} />, title: 'Mapas customizados', text: 'Beira-mar, Cavaleiros, Cidades & Cavalaria e mais.' },
-  { icon: <ShieldCheck size={20} />, title: 'Jogo justo', text: 'Detecção anti-conluio e relógio de turno configurável.' },
-  { icon: <Sparkles size={20} />, title: 'Replays', text: 'Revise cada lance, cada troca, cada cartão de progresso.' },
+const FEATURES: { icon: ReactNode; titleKey: MsgKey; textKey: MsgKey }[] = [
+  { icon: <Zap size={20} />, titleKey: 'landing.feat.quick.title', textKey: 'landing.feat.quick.text' },
+  { icon: <Users size={20} />, titleKey: 'landing.feat.private.title', textKey: 'landing.feat.private.text' },
+  { icon: <Trophy size={20} />, titleKey: 'landing.feat.ranked.title', textKey: 'landing.feat.ranked.text' },
+  { icon: <Map size={20} />, titleKey: 'landing.feat.maps.title', textKey: 'landing.feat.maps.text' },
+  { icon: <ShieldCheck size={20} />, titleKey: 'landing.feat.fair.title', textKey: 'landing.feat.fair.text' },
+  { icon: <Sparkles size={20} />, titleKey: 'landing.feat.replays.title', textKey: 'landing.feat.replays.text' },
 ];
 
 const HEX = [
@@ -30,6 +31,8 @@ const HEX = [
 ];
 
 export function Landing({ onPlay, onWatch }: { onPlay: () => void; onWatch: () => void }) {
+  const t = useT();
+  const { lang } = useLang();
   // Contador REAL de jogadores online (serviço de presença; item da landing no
   // backlog). Atualiza a cada 30s. Só aparece quando há alguém online.
   const [online, setOnline] = useState<number | null>(null);
@@ -48,16 +51,12 @@ export function Landing({ onPlay, onWatch }: { onPlay: () => void; onWatch: () =
     <div className="landing">
       <section className="hero">
         <div className="hero-copy">
-          <span className="badge-pill"><Sparkles size={13} /> BETA ABERTA · CRIE SUA CONTA GRÁTIS</span>
-          <h1>Construa, troque e <span className="accent-text">conquiste</span> a ilha.</h1>
-          <p>
-            Trevalis é o jeito mais rápido de jogar colonização hexagonal online. Crie sua conta
-            grátis, monte uma mesa e jogue — sozinho contra bots ou com amigos pelo link. É preciso
-            entrar para jogar; o servidor cuida de cada partida.
-          </p>
+          <span className="badge-pill"><Sparkles size={13} /> {t('landing.badge')}</span>
+          <h1>{t('landing.titlePre')}<span className="accent-text">{t('landing.titleAccent')}</span>{t('landing.titlePost')}</h1>
+          <p>{t('landing.subtitle')}</p>
           <div className="hero-buttons">
-            <button className="cta big" onClick={onPlay}>Entrar no lobby</button>
-            <button className="ghost big" onClick={onWatch}>Ver uma partida</button>
+            <button className="cta big" onClick={onPlay}>{t('landing.enterLobby')}</button>
+            <button className="ghost big" onClick={onWatch}>{t('landing.watchGame')}</button>
           </div>
           {/*
             "Anticheat ativo" segue removido (sem implementação). O contador de
@@ -67,10 +66,10 @@ export function Landing({ onPlay, onWatch }: { onPlay: () => void; onWatch: () =
           <div className="hero-stats">
             {online != null && online > 0 && (
               <span className="online-stat">
-                <i className="presence-pulse" /> {online.toLocaleString('pt-BR')} {online === 1 ? 'jogador online' : 'jogadores online'}
+                <i className="presence-pulse" /> {online.toLocaleString(lang)} {online === 1 ? t('landing.playerOnline') : t('landing.playersOnline')}
               </span>
             )}
-            <span><Zap size={15} /> Servidor BR</span>
+            <span><Zap size={15} /> {t('landing.serverBr')}</span>
           </div>
         </div>
         <div className="hero-art">
@@ -90,23 +89,23 @@ export function Landing({ onPlay, onWatch }: { onPlay: () => void; onWatch: () =
       </section>
 
       <section className="resource-strip">
-        <span className="strip-title">Cinco recursos. Infinitas estratégias.</span>
+        <span className="strip-title">{t('landing.stripTitle')}</span>
         <div className="pills">
           {RESOURCE_PILLS.map((p) => (
-            <span key={p.label} className="pill" style={{ background: p.color }}>{p.label}</span>
+            <span key={p.key} className="pill" style={{ background: p.color }}>{t(p.key)}</span>
           ))}
         </div>
       </section>
 
       <section className="features">
-        <h2>Tudo o que sua mesa precisa.</h2>
-        <p className="features-sub">Mecânicas fiéis, interface limpa e ferramentas que economizam o seu turno.</p>
+        <h2>{t('landing.featuresTitle')}</h2>
+        <p className="features-sub">{t('landing.featuresSub')}</p>
         <div className="feature-grid">
           {FEATURES.map((f) => (
-            <div key={f.title} className="feature-card">
+            <div key={f.titleKey} className="feature-card">
               <span className="feature-icon">{f.icon}</span>
-              <h3>{f.title}</h3>
-              <p>{f.text}</p>
+              <h3>{t(f.titleKey)}</h3>
+              <p>{t(f.textKey)}</p>
             </div>
           ))}
         </div>

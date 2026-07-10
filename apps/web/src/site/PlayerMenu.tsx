@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { UserPlus, UserCheck, Clock, Ban, ExternalLink, Check, VolumeX, Volume2, Flag } from 'lucide-react';
+import { useT } from '../i18n/index.js';
 import {
   acceptFriend,
   blockUser,
@@ -59,6 +60,7 @@ export function PlayerMenu({
   muted?: boolean;
   onToggleMute?: () => void;
 }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const [reported, setReported] = useState(false);
   const rel = relationOf(data, username);
@@ -93,29 +95,29 @@ export function PlayerMenu({
       <div className="pmenu-head">@{username}</div>
 
       <button className="pmenu-item" onClick={() => { window.open(`/profile/${encodeURIComponent(username)}`, '_blank', 'noopener'); onClose(); }}>
-        <ExternalLink size={14} /> Ver perfil <span className="pmenu-hint">nova aba</span>
+        <ExternalLink size={14} /> {t('pmenu.viewProfile')} <span className="pmenu-hint">{t('pmenu.newTab')}</span>
       </button>
 
       {rel.state !== 'blocked' && (
         <>
           {rel.state === 'none' && (
             <button className="pmenu-item" disabled={busy} onClick={() => run(() => sendFriendRequest(username))}>
-              <UserPlus size={14} /> Adicionar amigo
+              <UserPlus size={14} /> {t('pmenu.addFriend')}
             </button>
           )}
           {rel.state === 'outgoing' && (
             <button className="pmenu-item" disabled={busy} onClick={() => run(() => removeFriend(rel.userId!))}>
-              <Clock size={14} /> Pedido pendente <span className="pmenu-hint">cancelar</span>
+              <Clock size={14} /> {t('pmenu.pending')} <span className="pmenu-hint">{t('pmenu.cancel')}</span>
             </button>
           )}
           {rel.state === 'incoming' && (
             <button className="pmenu-item" disabled={busy} onClick={() => run(() => acceptFriend(rel.userId!))}>
-              <Check size={14} /> Aceitar pedido
+              <Check size={14} /> {t('pmenu.acceptRequest')}
             </button>
           )}
           {rel.state === 'friends' && (
             <button className="pmenu-item" disabled={busy} onClick={() => run(() => removeFriend(rel.userId!))}>
-              <UserCheck size={14} /> Amigos <span className="pmenu-hint">remover</span>
+              <UserCheck size={14} /> {t('pmenu.friends')} <span className="pmenu-hint">{t('pmenu.remove')}</span>
             </button>
           )}
         </>
@@ -123,25 +125,25 @@ export function PlayerMenu({
 
       {rel.state === 'blocked' ? (
         <button className="pmenu-item danger" disabled={busy} onClick={() => run(() => unblockUser(rel.userId!))}>
-          <Ban size={14} /> Desbloquear
+          <Ban size={14} /> {t('pmenu.unblock')}
         </button>
       ) : (
         <button className="pmenu-item danger" disabled={busy} onClick={() => run(() => blockUser(username))}>
-          <Ban size={14} /> Bloquear
+          <Ban size={14} /> {t('pmenu.block')}
         </button>
       )}
 
       {/* Silenciar (mute) no jogo — client-side, só durante a partida. */}
       {onToggleMute && (
         <button className="pmenu-item" onClick={() => { onToggleMute(); onClose(); }}>
-          {muted ? <><Volume2 size={14} /> Reativar no chat</> : <><VolumeX size={14} /> Silenciar no chat</>}
+          {muted ? <><Volume2 size={14} /> {t('pmenu.unmute')}</> : <><VolumeX size={14} /> {t('pmenu.mute')}</>}
         </button>
       )}
 
       {/* Denunciar — persiste para moderação. */}
       <button className="pmenu-item danger" disabled={busy || reported}
         onClick={async () => { setReported(true); await reportUser(username, roomCode); }}>
-        <Flag size={14} /> {reported ? 'Denunciado' : 'Denunciar'}
+        <Flag size={14} /> {reported ? t('pmenu.reported') : t('pmenu.report')}
       </button>
     </div>
   );

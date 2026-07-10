@@ -2,9 +2,17 @@ import { useState, type FormEvent } from 'react';
 import { Hexagon } from 'lucide-react';
 import { authClient, resetRedirectUrl } from '../auth/client.js';
 import { validateUsername } from '../auth/username.js';
+import { useT, useLang, type MsgKey } from '../i18n/index.js';
 import './auth.css';
 
 type Mode = 'login' | 'signup' | 'forgot' | 'reset';
+
+const TITLE_KEY: Record<Mode, MsgKey> = {
+  login: 'auth.title.login',
+  signup: 'auth.title.signup',
+  forgot: 'auth.title.forgot',
+  reset: 'auth.title.reset',
+};
 
 /** Le ?token= da URL (link de redefinicao de senha enviado por e-mail). */
 function resetTokenFromUrl(): string | null {
@@ -13,6 +21,8 @@ function resetTokenFromUrl(): string | null {
 }
 
 export function Auth({ onAuthed }: { onAuthed: () => void }) {
+  const t = useT();
+  const { lang } = useLang();
   const token = resetTokenFromUrl();
   const [mode, setMode] = useState<Mode>(token ? 'reset' : 'login');
   const [name, setName] = useState('');
@@ -30,40 +40,35 @@ export function Auth({ onAuthed }: { onAuthed: () => void }) {
     try {
       if (mode === 'login') {
         const { error } = await authClient.signIn.email({ email, password });
-        if (error) throw new Error(error.message ?? 'Falha no login.');
+        if (error) throw new Error(error.message ?? t('auth.err.login'));
         onAuthed();
       } else if (mode === 'signup') {
         // O "nome" no cadastro É o username: valida a regex antes de enviar.
         const vErr = validateUsername(name);
         if (vErr) throw new Error(vErr);
-        const { error } = await authClient.signUp.email({ email, password, name: name.trim() });
-        if (error) throw new Error(error.message ?? 'Falha no cadastro.');
-        setNotice('Conta criada! Verifique seu e-mail para confirmar (se exigido) e entre.');
+        const { error } = await authClient.signUp.email({ email, password, name: name.trim(), language: lang });
+        if (error) throw new Error(error.message ?? t('auth.err.signup'));
+        setNotice(t('auth.notice.signup'));
         setMode('login');
       } else if (mode === 'forgot') {
         const { error } = await authClient.requestPasswordReset({ email, redirectTo: resetRedirectUrl() });
-        if (error) throw new Error(error.message ?? 'Falha ao enviar e-mail.');
-        setNotice('Se o e-mail existir, enviamos um link para redefinir a senha.');
+        if (error) throw new Error(error.message ?? t('auth.err.forgot'));
+        setNotice(t('auth.notice.forgot'));
       } else if (mode === 'reset') {
-        if (!token) throw new Error('Token de redefinicao ausente ou invalido.');
+        if (!token) throw new Error(t('auth.err.tokenMissing'));
         const { error } = await authClient.resetPassword({ newPassword: password, token });
-        if (error) throw new Error(error.message ?? 'Falha ao redefinir a senha.');
-        setNotice('Senha redefinida! Voce ja pode entrar.');
+        if (error) throw new Error(error.message ?? t('auth.err.reset'));
+        setNotice(t('auth.notice.reset'));
         setMode('login');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro inesperado.');
+      setError(err instanceof Error ? err.message : t('auth.err.unexpected'));
     } finally {
       setBusy(false);
     }
   }
 
-  const titles: Record<Mode, string> = {
-    login: 'Entrar',
-    signup: 'Criar conta',
-    forgot: 'Recuperar senha',
-    reset: 'Definir nova senha',
-  };
+  const title = t(TITLE_KEY[mode]);
 
   return (
     <div className="auth-wrap">
@@ -71,30 +76,30 @@ export function Auth({ onAuthed }: { onAuthed: () => void }) {
         <div className="auth-brand">
           <span className="brand-mark"><Hexagon size={18} strokeWidth={2.5} /></span> Trevalis
         </div>
-        <h1>{titles[mode]}</h1>
+        <h1>{title}</h1>
 
         {error && <div className="auth-error">{error}</div>}
         {notice && <div className="auth-notice">{notice}</div>}
 
         {mode === 'signup' && (
           <label>
-            Nome de usuário
+            {t('auth.field.username')}
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
               autoComplete="username"
-              placeholder="ex.: marina.dev"
+              placeholder={t('auth.field.usernamePlaceholder')}
               minLength={4}
               maxLength={20}
             />
-            <small className="auth-hint">4–20 caracteres; letras, números, ponto e hífen.</small>
+            <small className="auth-hint">{t('auth.field.usernameHint')}</small>
           </label>
         )}
 
         {(mode === 'login' || mode === 'signup' || mode === 'forgot') && (
           <label>
-            E-mail
+            {t('auth.field.email')}
             <input
               type="email"
               value={email}
@@ -107,7 +112,7 @@ export function Auth({ onAuthed }: { onAuthed: () => void }) {
 
         {(mode === 'login' || mode === 'signup' || mode === 'reset') && (
           <label>
-            {mode === 'reset' ? 'Nova senha' : 'Senha'}
+            {mode === 'reset' ? t('auth.field.newPassword') : t('auth.field.password')}
             <input
               type="password"
               value={password}
@@ -120,21 +125,21 @@ export function Auth({ onAuthed }: { onAuthed: () => void }) {
         )}
 
         <button className="cta auth-submit" type="submit" disabled={busy}>
-          {busy ? '...' : titles[mode]}
+          {busy ? '...' : title}
         </button>
 
         <div className="auth-links">
           {mode === 'login' && (
             <>
-              <button type="button" className="link" onClick={() => setMode('signup')}>Criar conta</button>
-              <button type="button" className="link" onClick={() => setMode('forgot')}>Esqueci a senha</button>
+              <button type="button" className="link" onClick={() => setMode('signup')}>{t('auth.link.signup')}</button>
+              <button type="button" className="link" onClick={() => setMode('forgot')}>{t('auth.link.forgot')}</button>
             </>
           )}
           {mode === 'signup' && (
-            <button type="button" className="link" onClick={() => setMode('login')}>Ja tenho conta</button>
+            <button type="button" className="link" onClick={() => setMode('login')}>{t('auth.link.haveAccount')}</button>
           )}
           {(mode === 'forgot' || mode === 'reset') && (
-            <button type="button" className="link" onClick={() => setMode('login')}>Voltar ao login</button>
+            <button type="button" className="link" onClick={() => setMode('login')}>{t('auth.link.backToLogin')}</button>
           )}
         </div>
       </form>

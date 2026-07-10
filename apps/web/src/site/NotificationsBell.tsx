@@ -9,21 +9,22 @@ import {
   type AppNotification,
   type Notifications,
 } from './social.js';
+import { useT, useLang, type Lang } from '../i18n/index.js';
 
 const POLL_MS = 20_000;
 
 const EMPTY: Notifications = { notifications: [], onlineFriends: [], rejoin: [], unreadCount: 0 };
 
-const RTF = new Intl.RelativeTimeFormat('pt-BR', { numeric: 'auto' });
-/** Tempo relativo curto ("há 5 min", "ontem") a partir de um ISO. */
-function timeAgo(iso: string): string {
+/** Tempo relativo curto ("há 5 min", "ontem") a partir de um ISO, no idioma atual. */
+function timeAgo(iso: string, lang: Lang, nowLabel: string): string {
+  const rtf = new Intl.RelativeTimeFormat(lang, { numeric: 'auto' });
   const s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
-  if (s < 45) return 'agora';
+  if (s < 45) return nowLabel;
   const m = Math.round(s / 60);
-  if (m < 60) return RTF.format(-m, 'minute');
+  if (m < 60) return rtf.format(-m, 'minute');
   const h = Math.round(m / 60);
-  if (h < 24) return RTF.format(-h, 'hour');
-  return RTF.format(-Math.round(h / 24), 'day');
+  if (h < 24) return rtf.format(-h, 'hour');
+  return rtf.format(-Math.round(h / 24), 'day');
 }
 
 /**
@@ -34,6 +35,7 @@ function timeAgo(iso: string): string {
  * `onEnterRoom` navega para a sala.
  */
 export function NotificationsBell({ onEnterRoom }: { onEnterRoom: (code: string) => void }) {
+  const t = useT();
   const [data, setData] = useState<Notifications>(EMPTY);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -71,7 +73,7 @@ export function NotificationsBell({ onEnterRoom }: { onEnterRoom: (code: string)
 
   return (
     <div className="notif" ref={ref}>
-      <button className="notif-bell" aria-label="Notificações" onClick={() => { setOpen((o) => !o); refresh(); }}>
+      <button className="notif-bell" aria-label={t('notif.title')} onClick={() => { setOpen((o) => !o); refresh(); }}>
         <Bell size={17} />
         {data.unreadCount > 0 && <span className="notif-badge">{data.unreadCount > 9 ? '9+' : data.unreadCount}</span>}
       </button>
@@ -79,20 +81,20 @@ export function NotificationsBell({ onEnterRoom }: { onEnterRoom: (code: string)
       {open && (
         <div className="notif-panel">
           <div className="notif-head">
-            <span>Notificações</span>
+            <span>{t('notif.title')}</span>
             {data.unreadCount > 0 && (
-              <button className="notif-readall" onClick={readAll}><CheckCheck size={12} /> Marcar todas como lidas</button>
+              <button className="notif-readall" onClick={readAll}><CheckCheck size={12} /> {t('notif.markAllRead')}</button>
             )}
           </div>
 
           {/* Reconectar (ao vivo — vale enquanto a sala existir e der para voltar). */}
           {data.rejoin.length > 0 && (
             <div className="notif-section notif-rejoin">
-              <span className="notif-label"><LogIn size={12} /> Reconectar</span>
+              <span className="notif-label"><LogIn size={12} /> {t('notif.reconnect')}</span>
               {data.rejoin.map((r) => (
                 <div key={r.code} className="notif-row">
-                  <span className="notif-name">🎮 {r.name} <small className="muted-note">em andamento</small></span>
-                  <button className="cta sm" onClick={() => { setOpen(false); onEnterRoom(r.code); }}><LogIn size={13} /> Voltar</button>
+                  <span className="notif-name">🎮 {r.name} <small className="muted-note">{t('notif.inProgress')}</small></span>
+                  <button className="cta sm" onClick={() => { setOpen(false); onEnterRoom(r.code); }}><LogIn size={13} /> {t('notif.back')}</button>
                 </div>
               ))}
             </div>
@@ -116,17 +118,17 @@ export function NotificationsBell({ onEnterRoom }: { onEnterRoom: (code: string)
 
           {data.onlineFriends.length > 0 && (
             <div className="notif-section">
-              <span className="notif-label"><Circle size={9} className="presence-dot on" fill="currentColor" /> Amigos online</span>
+              <span className="notif-label"><Circle size={9} className="presence-dot on" fill="currentColor" /> {t('notif.onlineFriends')}</span>
               {data.onlineFriends.map((f) => (
                 <div key={f.userId} className="notif-row">
-                  <span className="notif-name">@{f.username} <small className="muted-note">{f.room ? 'em partida' : 'online'}</small></span>
+                  <span className="notif-name">@{f.username} <small className="muted-note">{f.room ? t('notif.inGame') : t('notif.online')}</small></span>
                   {f.room && <button className="cta sm" onClick={() => { setOpen(false); onEnterRoom(f.room!); }}><Play size={13} /></button>}
                 </div>
               ))}
             </div>
           )}
 
-          {!hasAny && <div className="notif-empty">Sem novidades por aqui.</div>}
+          {!hasAny && <div className="notif-empty">{t('notif.empty')}</div>}
         </div>
       )}
     </div>
@@ -147,18 +149,20 @@ function NotifRow({
   onAccept: (n: AppNotification) => void;
   onReject: (n: AppNotification) => void;
 }) {
-  const who = n.actorUsername ? `@${n.actorUsername}` : 'Alguém';
+  const t = useT();
+  const { lang } = useLang();
+  const who = n.actorUsername ? `@${n.actorUsername}` : t('notif.someone');
   const cls = `notif-row notif-item${n.read ? '' : ' unread'}`;
   const dot = !n.read && <span className="notif-unread-dot" aria-hidden />;
-  const when = <small className="muted-note">{timeAgo(n.createdAt)}</small>;
+  const when = <small className="muted-note">{timeAgo(n.createdAt, lang, t('time.now'))}</small>;
 
   if (n.type === 'room_invite') {
     return (
       <div className={cls}>
-        <span className="notif-name">{dot}<Play size={13} /> {who} te chamou para uma sala {when}</span>
+        <span className="notif-name">{dot}<Play size={13} /> {t('notif.roomInvite', { who })} {when}</span>
         <div className="notif-actions">
-          <button className="cta sm" onClick={() => onEnter(n)}>Entrar</button>
-          <button className="ghost sm" aria-label="Dispensar" onClick={() => onRead(n.id)}><X size={13} /></button>
+          <button className="cta sm" onClick={() => onEnter(n)}>{t('notif.enter')}</button>
+          <button className="ghost sm" aria-label={t('notif.dismiss')} onClick={() => onRead(n.id)}><X size={13} /></button>
         </div>
       </div>
     );
@@ -167,10 +171,10 @@ function NotifRow({
   if (n.type === 'friend_request') {
     return (
       <div className={cls}>
-        <span className="notif-name">{dot}<UserPlus size={13} /> {who} te enviou um pedido {when}</span>
+        <span className="notif-name">{dot}<UserPlus size={13} /> {t('notif.friendRequest', { who })} {when}</span>
         <div className="notif-actions">
-          <button className="cta sm" aria-label="Aceitar" onClick={() => onAccept(n)}><Check size={13} /></button>
-          <button className="ghost sm" aria-label="Recusar" onClick={() => onReject(n)}><X size={13} /></button>
+          <button className="cta sm" aria-label={t('notif.accept')} onClick={() => onAccept(n)}><Check size={13} /></button>
+          <button className="ghost sm" aria-label={t('notif.reject')} onClick={() => onReject(n)}><X size={13} /></button>
         </div>
       </div>
     );
@@ -179,7 +183,7 @@ function NotifRow({
   // friend_accepted — informativo; clicar marca como lido.
   return (
     <button className={`${cls} as-button`} onClick={() => onRead(n.id)}>
-      <span className="notif-name">{dot}<Check size={13} /> {who} aceitou seu pedido {when}</span>
+      <span className="notif-name">{dot}<Check size={13} /> {t('notif.friendAccepted', { who })} {when}</span>
     </button>
   );
 }

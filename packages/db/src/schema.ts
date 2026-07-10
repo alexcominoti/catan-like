@@ -42,6 +42,9 @@ export const user = pgTable(
     usernameChanged: boolean('username_changed')
       .$defaultFn(() => false)
       .notNull(),
+    // Idioma preferido (pt-BR | en) — usado nos e-mails transacionais. Espelha a
+    // escolha do cliente (localStorage) via PATCH /api/profile.
+    language: text('language'),
     preferences: jsonb('preferences').$type<Record<string, unknown>>(),
     createdAt: timestamp('created_at')
       .$defaultFn(() => new Date())

@@ -50,6 +50,13 @@
       "when": 1751800000000,
       "tag": "0006_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1751900000000,
+      "tag": "0007_user_language",
+      "breakpoints": true
     }
   ]
 }

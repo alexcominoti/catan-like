@@ -5,6 +5,7 @@
  * apenas LOGA o link no console — util em dev e para nao travar o boot.
  */
 import { Resend } from 'resend';
+import { tr, type Lang } from './i18n.js';
 
 const apiKey = process.env.RESEND_API_KEY;
 const from = process.env.EMAIL_FROM ?? 'Trevalis <no-reply@trevalis.app>';
@@ -45,17 +46,18 @@ export async function sendEmail(mail: Mail): Promise<void> {
   }
 }
 
-/** Template minimo (mesmo HTML/text) para um e-mail com um botao/link. */
-export function actionEmail(title: string, intro: string, cta: string, url: string): {
+/** Template minimo (mesmo HTML/text) para um e-mail com um botao/link, localizado. */
+export function actionEmail(lang: Lang, title: string, intro: string, cta: string, url: string): {
   html: string;
   text: string;
 } {
+  const footer = tr(lang, 'email.footer', { url });
   const html = `<div style="font-family:system-ui,sans-serif;max-width:480px;margin:auto">
   <h2 style="color:#c2603f">Trevalis</h2>
   <h3>${title}</h3>
   <p>${intro}</p>
   <p><a href="${url}" style="background:#c2603f;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;display:inline-block">${cta}</a></p>
-  <p style="color:#888;font-size:12px">Se o botao nao funcionar, copie e cole: ${url}</p>
+  <p style="color:#888;font-size:12px">${footer}</p>
 </div>`;
   const text = `Trevalis — ${title}\n\n${intro}\n\n${cta}: ${url}\n`;
   return { html, text };

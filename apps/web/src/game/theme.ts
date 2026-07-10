@@ -10,22 +10,8 @@ export const TERRAIN_FILL: Record<Terrain, string> = {
   desert: '#d9c79a',
 };
 
-export const TERRAIN_LABEL: Record<Terrain, string> = {
-  forest: 'Floresta',
-  hills: 'Colinas',
-  pasture: 'Pasto',
-  field: 'Campo',
-  mountain: 'Montanha',
-  desert: 'Deserto',
-};
-
-export const RESOURCE_LABEL: Record<Resource, string> = {
-  wood: 'Madeira',
-  brick: 'Tijolo',
-  wool: 'Lã',
-  grain: 'Trigo',
-  ore: 'Minério',
-};
+// Os rótulos de terreno/recurso/cor agora vivem no dicionário i18n
+// (apps/web/src/i18n/messages.*), traduzidos por idioma. Aqui só cores e ícones.
 
 export const RESOURCE_ICON: Record<Resource, string> = {
   wood: '🌲',
@@ -44,15 +30,4 @@ export const PLAYER_FILL: Record<PlayerColor, string> = {
   brown: '#8a5524',
   purple: '#8e44ad',
   pink: '#e0529c',
-};
-
-export const PLAYER_LABEL: Record<PlayerColor, string> = {
-  red: 'Vermelho',
-  blue: 'Azul',
-  white: 'Branco',
-  orange: 'Laranja',
-  green: 'Verde',
-  brown: 'Marrom',
-  purple: 'Roxo',
-  pink: 'Rosa',
 };

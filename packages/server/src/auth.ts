@@ -14,6 +14,7 @@ import { sql } from 'drizzle-orm';
 import { getDb, hasDatabase, schema, user as userTable } from '@trevalis/db';
 import { sendEmail, actionEmail } from './mailer.js';
 import { validateUsername } from './username.js';
+import { resolveLang, tr } from './i18n.js';
 
 export type Auth = ReturnType<typeof betterAuth>;
 
@@ -72,26 +73,30 @@ function buildOptions(): BetterAuthOptions {
       minPasswordLength: 8,
       requireEmailVerification: process.env.REQUIRE_EMAIL_VERIFICATION === 'true',
       sendResetPassword: async ({ user, url }) => {
+        const lang = resolveLang({ user: user as { language?: string | null } });
         const { html, text } = actionEmail(
-          'Redefinir sua senha',
-          'Recebemos um pedido para redefinir a senha da sua conta Trevalis.',
-          'Redefinir senha',
+          lang,
+          tr(lang, 'email.reset.title'),
+          tr(lang, 'email.reset.intro'),
+          tr(lang, 'email.reset.cta'),
           url,
         );
-        await sendEmail({ to: user.email, subject: 'Redefinir senha — Trevalis', html, text });
+        await sendEmail({ to: user.email, subject: tr(lang, 'email.reset.subject'), html, text });
       },
     },
     emailVerification: {
       sendOnSignUp: true,
       autoSignInAfterVerification: true,
       sendVerificationEmail: async ({ user, url }) => {
+        const lang = resolveLang({ user: user as { language?: string | null } });
         const { html, text } = actionEmail(
-          'Confirme seu e-mail',
-          'Bem-vindo ao Trevalis! Confirme seu e-mail para ativar a conta.',
-          'Confirmar e-mail',
+          lang,
+          tr(lang, 'email.verify.title'),
+          tr(lang, 'email.verify.intro'),
+          tr(lang, 'email.verify.cta'),
           url,
         );
-        await sendEmail({ to: user.email, subject: 'Confirme seu e-mail — Trevalis', html, text });
+        await sendEmail({ to: user.email, subject: tr(lang, 'email.verify.subject'), html, text });
       },
     },
     user: {
@@ -100,6 +105,8 @@ function buildOptions(): BetterAuthOptions {
         username: { type: 'string', required: false, input: true },
         // cota de troca de username já usada? (somente leitura para o cliente).
         usernameChanged: { type: 'boolean', required: false, input: false },
+        // idioma preferido (pt-BR | en) — o cliente envia no cadastro; usado nos e-mails.
+        language: { type: 'string', required: false, input: true },
       },
     },
     databaseHooks: {
@@ -109,19 +116,16 @@ function buildOptions(): BetterAuthOptions {
           // unicidade ANTES de criar a conta (mensagens claras em vez de erro
           // bruto do índice único). Ver apps/web/src/site/Auth.tsx.
           before: async (u) => {
+            const lang = resolveLang({ user: u as { language?: string | null } });
             const name = (u.name ?? '').trim();
             const err = validateUsername(name);
             if (err) throw new APIError('BAD_REQUEST', { message: err });
             if (await isUsernameTaken(name)) {
-              throw new APIError('BAD_REQUEST', {
-                message: 'Esse nome de usuário já está em uso.',
-              });
+              throw new APIError('BAD_REQUEST', { message: tr(lang, 'account.usernameTaken') });
             }
             // E-mail único com mensagem clara (em vez do erro bruto do índice).
             if (u.email && (await isEmailTaken(u.email))) {
-              throw new APIError('BAD_REQUEST', {
-                message: 'Esse e-mail já está cadastrado.',
-              });
+              throw new APIError('BAD_REQUEST', { message: tr(lang, 'account.emailTaken') });
             }
             return { data: { ...u, name, username: name } };
           },

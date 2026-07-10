@@ -8,9 +8,20 @@
  * `authClient.useSession()`, etc.
  */
 import { createAuthClient } from 'better-auth/react';
+import { inferAdditionalFields } from 'better-auth/client/plugins';
 
 export const authClient = createAuthClient({
   baseURL: typeof window !== 'undefined' ? window.location.origin : undefined,
+  // Tipa os campos extras do usuário no cliente (sem depender do tipo do servidor),
+  // para podermos enviá-los no cadastro — ex.: `language` nos e-mails localizados.
+  plugins: [
+    inferAdditionalFields({
+      user: {
+        username: { type: 'string', required: false },
+        language: { type: 'string', required: false },
+      },
+    }),
+  ],
 });
 
 /** URL para onde o e-mail de redefinicao deve levar (pagina de reset da SPA). */

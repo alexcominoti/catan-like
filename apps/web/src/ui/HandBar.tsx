@@ -1,13 +1,13 @@
 import { RESOURCES, type ProgressCard, type Resource } from '@trevalis/engine';
-import { RESOURCE_LABEL } from '../game/theme.js';
 import { RES_IMG, DEV_IMG } from '../game/cards.js';
+import { useT, type MsgKey } from '../i18n/index.js';
 
-const DEV_LABEL: Record<ProgressCard, string> = {
-  knight: 'Cavaleiro',
-  roadBuilding: '2 Estradas',
-  yearOfPlenty: '+2 Recursos',
-  monopoly: 'Monopólio',
-  victoryPoint: 'Ponto de Vitória',
+const DEV_KEY: Record<ProgressCard, MsgKey> = {
+  knight: 'card.knight',
+  roadBuilding: 'card.roadBuilding',
+  yearOfPlenty: 'card.yearOfPlenty',
+  monopoly: 'card.monopoly',
+  victoryPoint: 'card.victoryPoint',
 };
 
 const DEV_ORDER: ProgressCard[] = ['knight', 'roadBuilding', 'yearOfPlenty', 'monopoly', 'victoryPoint'];
@@ -19,6 +19,7 @@ function CardPile({
   title,
   dataKey,
   playable,
+  playHint,
   onPlay,
 }: {
   count: number;
@@ -26,6 +27,7 @@ function CardPile({
   title: string;
   dataKey: string;
   playable?: boolean;
+  playHint: string;
   onPlay?: () => void;
 }) {
   const width = 64 + (count - 1) * 9;
@@ -33,7 +35,7 @@ function CardPile({
     <button
       type="button"
       className={`card-pile${onPlay ? ' clickable' : ''}${playable ? ' playable' : ''}`}
-      title={`${title}${count > 1 ? ` ×${count}` : ''}${playable ? ' — clique para jogar' : ''}`}
+      title={`${title}${count > 1 ? ` ×${count}` : ''}${playable ? ` — ${playHint}` : ''}`}
       onClick={onPlay}
       disabled={!onPlay}
       data-card={dataKey}
@@ -60,6 +62,8 @@ export function HandBar({
   canPlay: (c: ProgressCard) => boolean;
   onPlay: (c: ProgressCard) => void;
 }) {
+  const t = useT();
+  const playHint = t('game.clickToPlay');
   const total = RESOURCES.reduce((s, r) => s + hand[r], 0);
   const devCounts = new Map<ProgressCard, number>();
   for (const c of devCards) devCounts.set(c, (devCounts.get(c) ?? 0) + 1);
@@ -67,9 +71,9 @@ export function HandBar({
 
   return (
     <div className="hand-cards">
-      {total === 0 && devList.length === 0 && <span className="muted-note">Sem cartas</span>}
+      {total === 0 && devList.length === 0 && <span className="muted-note">{t('game.noCards')}</span>}
       {RESOURCES.filter((r) => hand[r] > 0).map((r) => (
-        <CardPile key={r} count={hand[r]} img={RES_IMG[r]} title={RESOURCE_LABEL[r]} dataKey={r} />
+        <CardPile key={r} count={hand[r]} img={RES_IMG[r]} title={t(`resource.${r}` as MsgKey)} dataKey={r} playHint={playHint} />
       ))}
       {devList.length > 0 && <span className="hand-divider" aria-hidden="true" />}
       {devList.map((c) => {
@@ -79,9 +83,10 @@ export function HandBar({
             key={c}
             count={devCounts.get(c)!}
             img={DEV_IMG[c]}
-            title={DEV_LABEL[c]}
+            title={t(DEV_KEY[c])}
             dataKey={c}
             playable={ok}
+            playHint={playHint}
             onPlay={ok ? () => onPlay(c) : undefined}
           />
         );

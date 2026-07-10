@@ -31,7 +31,14 @@ import { Toasts, useToasts, type ToastTone } from './ui/Toasts.js';
 import { play as playSound, setMuted, unlockAudio, nudgeVolume, type SoundKind } from './ui/sound.js';
 import type { GameClient, ChatMessage } from './net/client.js';
 import { PlayerMenu, useRelationships } from './site/PlayerMenu.js';
-import { PLAYER_FILL, PLAYER_LABEL, RESOURCE_ICON, RESOURCE_LABEL } from './game/theme.js';
+import { PLAYER_FILL, RESOURCE_ICON } from './game/theme.js';
+import { useT, type MsgKey } from './i18n/index.js';
+
+/** Assinatura da função de tradução, para passar aos helpers de módulo. */
+type TFn = (key: MsgKey, params?: Record<string, string | number>) => string;
+const colorLabel = (t: TFn, c: PlayerColor) => t(`color.${c}` as MsgKey);
+const resLabel = (t: TFn, r: Resource) => t(`resource.${r}` as MsgKey);
+const cardLabel = (t: TFn, c: ProgressCard) => t(`card.${c}` as MsgKey);
 
 /**
  * Modo ONLINE: o RoomScreen e o dono da conexao (GameClient) e da assinatura
@@ -94,9 +101,10 @@ export function Game({
   /** Toda partida é ONLINE: servidor autoritativo via WebSocket (não há mais hotseat local). */
   online: OnlineGameProps;
 }) {
+  const t = useT();
   // O estado é sempre controlado pelo RoomScreen a partir das mensagens do servidor.
   const state = online.state;
-  const [log, setLog] = useState<LogEntry[]>([{ kind: 'event', text: 'Partida iniciada. Coloquem as vilas iniciais.' }]);
+  const [log, setLog] = useState<LogEntry[]>(() => [{ kind: 'event', text: t('game.matchStarted') }]);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<InteractionMode>('idle');
   const [give, setGive] = useState<Resource>('wood');
@@ -140,9 +148,9 @@ export function Game({
   }, [state.activeTrade]);
 
   function sendChat() {
-    const t = chatInput.trim();
-    if (!t || isSpectator) return; // só jogadores enviam; o servidor faz o broadcast
-    online.client.sendChat(t);
+    const msg = chatInput.trim();
+    if (!msg || isSpectator) return; // só jogadores enviam; o servidor faz o broadcast
+    online.client.sendChat(msg);
     setChatInput('');
   }
 
@@ -192,14 +200,14 @@ export function Game({
    */
   function applyEvents(events: GameEvent[], newState: GameState) {
     const lines: LogEntry[] = events
-      .map((e) => describeEvent(e, newState))
+      .map((e) => describeEvent(e, newState, t))
       .filter(Boolean)
       .map((text) => ({ kind: 'event' as const, text }));
     const sep: LogEntry[] = events.some((e) => e.t === 'turnEnded') ? [{ kind: 'sep' as const }] : [];
     setLog((prev) => [...lines, ...sep, ...prev].slice(0, 200));
     for (const e of events) {
-      const t = toastForEvent(e, newState);
-      if (t) push(t.text, t.tone);
+      const toast = toastForEvent(e, newState, t);
+      if (toast) push(toast.text, toast.tone);
       const s = soundForEvent(e);
       if (s) playSound(s);
     }
@@ -402,10 +410,10 @@ export function Game({
           else void document.documentElement.requestFullscreen?.();
           break;
         case 'ArrowUp':
-          e.preventDefault(); push(`🔊 Volume ${Math.round(nudgeVolume(0.1) * 100)}%`, 'info');
+          e.preventDefault(); push(t('game.volume', { pct: Math.round(nudgeVolume(0.1) * 100) }), 'info');
           break;
         case 'ArrowDown':
-          e.preventDefault(); push(`🔊 Volume ${Math.round(nudgeVolume(-0.1) * 100)}%`, 'info');
+          e.preventDefault(); push(t('game.volume', { pct: Math.round(nudgeVolume(-0.1) * 100) }), 'info');
           break;
       }
     }
@@ -420,11 +428,11 @@ export function Game({
     <div className="game site bg-paper" style={{ ['--turn-color' as string]: playerColor }}>
       <header className="game-header">
         <span className="brand"><span className="brand-mark"><Hexagon size={18} strokeWidth={2.5} /></span> Trevalis</span>
-        <span className="turn-chip"><Clock size={13} /> Turno {turnCount}</span>
+        <span className="turn-chip"><Clock size={13} /> {t('game.turn', { n: turnCount })}</span>
         <div className="game-header-actions">
-          <button className="hbtn icon-only" title={muted ? 'Som desligado' : 'Som ligado'} onClick={() => { const m = !muted; setMutedState(m); setMuted(m); }}>{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button>
-          <button className="hbtn" onClick={() => setHelp(true)}><HelpCircle size={15} /> Ajuda</button>
-          <button className="ghost" onClick={onExit}><LogOut size={15} /> Sair</button>
+          <button className="hbtn icon-only" title={muted ? t('game.soundOff') : t('game.soundOn')} onClick={() => { const m = !muted; setMutedState(m); setMuted(m); }}>{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button>
+          <button className="hbtn" onClick={() => setHelp(true)}><HelpCircle size={15} /> {t('game.help')}</button>
+          <button className="ghost" onClick={onExit}><LogOut size={15} /> {t('game.exit')}</button>
         </div>
       </header>
 
@@ -432,7 +440,7 @@ export function Game({
         {/* ESQUERDA — Nobres */}
         <aside className="nobres">
           <div className="nobres-head">
-            <h2><Crown size={18} className="ic-primary" /> Nobres</h2>
+            <h2><Crown size={18} className="ic-primary" /> {t('game.nobles')}</h2>
             <span className="match-timer"><Clock size={13} /> {fmtTime(elapsed)}</span>
           </div>
           {state.players.map((p) => {
@@ -452,22 +460,22 @@ export function Game({
                     {/* Opções de jogador (perfil/amizade/bloquear) só para HUMANOS —
                         nunca para bots nem assentos controlados por bot ("🤖 assumiu"). */}
                     {(!isBot(p.color) && p.color !== online.viewerColor) ? (
-                      <button className="noble-nick as-link" title="Opções do jogador"
+                      <button className="noble-nick as-link" title={t('game.playerOptions')}
                         onClick={(e) => setPlayerMenu({ username: p.name, x: e.clientX, y: e.clientY })}>{p.name}</button>
                     ) : (
                       <span className="noble-nick">{p.name}</span>
                     )}
-                    {!isSpectator && p.color === localColor && <span className="you-tag">você</span>}
+                    {!isSpectator && p.color === localColor && <span className="you-tag">{t('game.you')}</span>}
                     {online && online.awayColors.includes(p.color) ? (
-                      <span className="bot-tag" title="Desconectado: um bot médio assumiu temporariamente">🤖 assumiu</span>
+                      <span className="bot-tag" title={t('game.botTookOverTitle')}>{t('game.botTookOver')}</span>
                     ) : (
-                      isBot(p.color) && <span className="bot-tag">bot</span>
+                      isBot(p.color) && <span className="bot-tag">{t('game.bot')}</span>
                     )}
                     {!isSpectator && p.color !== localColor && (() => {
                       const on = (state.embargoes ?? []).some((e) => e.by === localColor && e.target === p.color);
                       return (
                         <button className={`embargo-btn${on ? ' on' : ''}`}
-                          title={on ? 'Embargo ativo — clique para comerciar de novo' : 'Embargar: recusar comércio com este jogador'}
+                          title={on ? t('game.embargoOn') : t('game.embargoOff')}
                           onClick={() => dispatch({ t: 'setEmbargo', target: p.color, on: !on })}>
                           <Ban size={12} />
                         </button>
@@ -477,15 +485,15 @@ export function Game({
                   <div className="noble-stats">
                     {/* Oponentes vêm com mão/cartas OCULTAS na projeção; mostramos a
                         CONTAGEM (handSize usa hiddenHand; hiddenDevCount), não 0. */}
-                    <Stat icon={<Layers size={12} />} label={`${handSize(p)} recursos`} />
-                    <Stat icon={<Sparkles size={12} />} label={`${p.hiddenDevCount ?? p.progressCards.length} desenv.`} />
-                    <Stat icon={<Scroll size={12} />} label={`${longestRoadLength(state, p.color)} estradas`} hl={hasRoad} />
-                    <Stat icon={<Swords size={12} />} label={`${p.knightsPlayed} cav.`} hl={hasArmy} />
+                    <Stat icon={<Layers size={12} />} label={t('game.stat.resources', { n: handSize(p) })} />
+                    <Stat icon={<Sparkles size={12} />} label={t('game.stat.dev', { n: p.hiddenDevCount ?? p.progressCards.length })} />
+                    <Stat icon={<Scroll size={12} />} label={t('game.stat.roads', { n: longestRoadLength(state, p.color) })} hl={hasRoad} />
+                    <Stat icon={<Swords size={12} />} label={t('game.stat.knights', { n: p.knightsPlayed })} hl={hasArmy} />
                   </div>
                   {(hasRoad || hasArmy) && (
                     <div className="noble-badges">
-                      {hasRoad && <TitleBadge icon={<Scroll size={11} />} label="Maior Estrada" />}
-                      {hasArmy && <TitleBadge icon={<Swords size={11} />} label="Maior Exército" />}
+                      {hasRoad && <TitleBadge icon={<Scroll size={11} />} label={t('game.longestRoad')} />}
+                      {hasArmy && <TitleBadge icon={<Swords size={11} />} label={t('game.largestArmy')} />}
                     </div>
                   )}
                 </div>
@@ -494,12 +502,12 @@ export function Game({
           })}
 
           <div className="title-cards">
-            <TitleCard icon={<Scroll size={15} className="ic-primary" />} title="Maior Estrada"
-              owner={state.longestRoad.owner ? `${PLAYER_LABEL[state.longestRoad.owner]} · ${state.longestRoad.length} segmentos` : '— ainda em disputa'}
-              earned={!!state.longestRoad.owner} hint="5+ estradas conectadas = +2 PV" />
-            <TitleCard icon={<Swords size={15} className="ic-primary" />} title="Maior Exército"
-              owner={state.largestArmy.owner ? `${PLAYER_LABEL[state.largestArmy.owner]} · ${state.largestArmy.size} cavaleiros` : '— ainda em disputa'}
-              earned={!!state.largestArmy.owner} hint="3+ cavaleiros jogados = +2 PV" />
+            <TitleCard icon={<Scroll size={15} className="ic-primary" />} title={t('game.longestRoad')}
+              owner={state.longestRoad.owner ? t('game.roadOwner', { name: colorLabel(t, state.longestRoad.owner), n: state.longestRoad.length }) : t('game.inDispute')}
+              earned={!!state.longestRoad.owner} hint={t('game.longestRoadHint')} />
+            <TitleCard icon={<Swords size={15} className="ic-primary" />} title={t('game.largestArmy')}
+              owner={state.largestArmy.owner ? t('game.armyOwner', { name: colorLabel(t, state.largestArmy.owner), n: state.largestArmy.size }) : t('game.inDispute')}
+              earned={!!state.largestArmy.owner} hint={t('game.largestArmyHint')} />
           </div>
         </aside>
 
@@ -507,11 +515,11 @@ export function Game({
         <main className="center">
           <div className="center-top">
             <div>
-              <p className="eyebrow-turn">{myTurn ? 'Sua vez, nobre' : botTurn ? `Vez de ${cur.name}` : 'Aguardando'}</p>
-              <h2>{headline(state, myTurn, botTurn, cur.name)}</h2>
+              <p className="eyebrow-turn">{myTurn ? t('game.yourTurn') : botTurn ? t('game.turnOf', { name: cur.name }) : t('game.waiting')}</p>
+              <h2>{headline(state, myTurn, botTurn, cur.name, t)}</h2>
             </div>
             {secsLeft != null && (
-              <div className={`turn-timer${secsLeft <= 5 ? ' danger' : ''}`} title="Tempo para a sua jogada">
+              <div className={`turn-timer${secsLeft <= 5 ? ' danger' : ''}`} title={t('game.turnTimeTitle')}>
                 <Clock size={15} /> {fmtSecs(secsLeft)}
               </div>
             )}
@@ -528,7 +536,7 @@ export function Game({
             <Dice dice={state.dice} />
             {myRoll && (
               <button className="roll-btn roll-on-board pulse" onClick={() => dispatch({ t: 'rollDice' })}>
-                <Dices size={16} /> Rolar dados
+                <Dices size={16} /> {t('game.rollDice')}
               </button>
             )}
           </div>
@@ -536,24 +544,24 @@ export function Game({
           <div className="center-hand">
             <div className="hand-head">
               <div>
-                <p className="eyebrow">Sua mão</p>
+                <p className="eyebrow">{t('game.yourHand')}</p>
                 <p className="hand-count">
-                  {resourceCount + localPlayer.progressCards.length} cartas
-                  <span className="muted-note"> ({resourceCount} recursos)</span>
-                  {resourceCount > state.discardLimit && <span className="over-limit">acima do limite: ladrão pode roubar</span>}
+                  {t('game.cards', { n: resourceCount + localPlayer.progressCards.length })}
+                  <span className="muted-note"> {t('game.resourcesParens', { n: resourceCount })}</span>
+                  {resourceCount > state.discardLimit && <span className="over-limit">{t('game.overLimit')}</span>}
                 </p>
               </div>
               <div className="hand-actions">
-                <BuildButton label="Estrada" cost={COSTS.road} active={mode === 'buildRoad'} hand={localPlayer.hand}
+                <BuildButton label={t('game.btn.road')} cost={COSTS.road} active={mode === 'buildRoad'} hand={localPlayer.hand}
                   enabled={(myMain && canAffordUI(localPlayer.hand, COSTS.road)) || (myMain && state.pendingFreeRoads > 0)}
-                  free={state.pendingFreeRoads > 0} onClick={() => toggle('buildRoad')} />
-                <BuildButton label="Vila" cost={COSTS.settlement} active={mode === 'buildSettlement'} hand={localPlayer.hand}
-                  enabled={myMain && canAffordUI(localPlayer.hand, COSTS.settlement)} onClick={() => toggle('buildSettlement')} />
-                <BuildButton label="Cidade" cost={COSTS.city} active={mode === 'buildCity'} hand={localPlayer.hand}
-                  enabled={myMain && canAffordUI(localPlayer.hand, COSTS.city)} onClick={() => toggle('buildCity')} />
-                <BuildButton label="Carta" cost={COSTS.progressCard} hand={localPlayer.hand}
+                  free={state.pendingFreeRoads > 0} onClick={() => toggle('buildRoad')} t={t} />
+                <BuildButton label={t('game.btn.settlement')} cost={COSTS.settlement} active={mode === 'buildSettlement'} hand={localPlayer.hand}
+                  enabled={myMain && canAffordUI(localPlayer.hand, COSTS.settlement)} onClick={() => toggle('buildSettlement')} t={t} />
+                <BuildButton label={t('game.btn.city')} cost={COSTS.city} active={mode === 'buildCity'} hand={localPlayer.hand}
+                  enabled={myMain && canAffordUI(localPlayer.hand, COSTS.city)} onClick={() => toggle('buildCity')} t={t} />
+                <BuildButton label={t('game.btn.card')} cost={COSTS.progressCard} hand={localPlayer.hand}
                   enabled={myMain && canAffordUI(localPlayer.hand, COSTS.progressCard) && (state.devDeckCount ?? state.devDeck.length) > 0}
-                  onClick={() => dispatch({ t: 'buyProgressCard' })} />
+                  onClick={() => dispatch({ t: 'buyProgressCard' })} t={t} />
                 <span className="trade-bank">
                   <select value={give} onChange={(e) => setGive(e.target.value as Resource)} disabled={!myMain}>
                     {RESOURCES.map((r) => <option key={r} value={r}>{RESOURCE_ICON[r]}×{maritimeRate(state, localColor, r)}</option>)}
@@ -564,8 +572,8 @@ export function Game({
                   </select>
                   <button disabled={!myMain || localPlayer.hand[give] < bestRate} onClick={() => dispatch({ t: 'tradeBank', give, want })}>{bestRate}:1</button>
                 </span>
-                <button className="hbtn" disabled={!myMain || !!state.activeTrade} onClick={() => setArming('trade')}><ArrowLeftRight size={14} /> Trocar</button>
-                <button className="hbtn primary-soft" disabled={!myMain} onClick={() => dispatch({ t: 'endTurn' })}><Hand size={14} /> Passar</button>
+                <button className="hbtn" disabled={!myMain || !!state.activeTrade} onClick={() => setArming('trade')}><ArrowLeftRight size={14} /> {t('game.trade')}</button>
+                <button className="hbtn primary-soft" disabled={!myMain} onClick={() => dispatch({ t: 'endTurn' })}><Hand size={14} /> {t('game.pass')}</button>
               </div>
             </div>
             <div className="hand-error">{error && <>⚠ {error}</>}</div>
@@ -576,19 +584,19 @@ export function Game({
         {/* DIREITA — Pergaminho (log) + Chat + Banco */}
         <aside className="pergaminho">
           <div className="card scroll-card">
-            <h2><MessageSquare size={16} className="ic-primary" /> Pergaminho</h2>
+            <h2><MessageSquare size={16} className="ic-primary" /> {t('game.scroll')}</h2>
             <div className="log">{log.map((entry, i) => <LogLine key={i} entry={entry} names={logNames} />)}</div>
           </div>
 
           <div className="card chat-card">
-            <h3 className="chat-head"><MessageSquare size={14} className="ic-primary" /> Chat</h3>
+            <h3 className="chat-head"><MessageSquare size={14} className="ic-primary" /> {t('game.chat')}</h3>
             <div className="chat-log">
               {(() => {
                 // Esconde mensagens de quem eu BLOQUEEI (persistente) ou SILENCIEI (no jogo).
                 const visible = online.chat.filter(
                   (m) => !blockedNames.has(m.name.toLowerCase()) && !mutedNames.has(m.name.toLowerCase()),
                 );
-                if (visible.length === 0) return <p className="muted-note">Sem mensagens ainda</p>;
+                if (visible.length === 0) return <p className="muted-note">{t('game.noMessages')}</p>;
                 return [...visible].reverse().map((m, i) => (
                   <div key={i} className="log-chat"><b style={{ color: m.from ? PLAYER_FILL[m.from] : 'var(--muted)' }}>{m.name}:</b> {m.text}</div>
                 ));
@@ -596,24 +604,24 @@ export function Game({
             </div>
             <div className="chat-row">
               <input value={chatInput} maxLength={200} disabled={isSpectator}
-                placeholder={isSpectator ? 'Espectadores não enviam mensagens' : 'Mensagem…'}
+                placeholder={isSpectator ? t('game.spectatorNoChat') : t('game.messagePlaceholder')}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') sendChat(); }} />
-              <button onClick={sendChat} disabled={isSpectator} aria-label="Enviar"><Send size={15} /></button>
+              <button onClick={sendChat} disabled={isSpectator} aria-label={t('game.send')}><Send size={15} /></button>
             </div>
           </div>
 
           <div className="card bank-card" data-anchor="bank">
-            <h2><Landmark size={16} className="ic-primary" /> Banco</h2>
+            <h2><Landmark size={16} className="ic-primary" /> {t('game.bank')}</h2>
             <div className="bank-grid">
               {RESOURCES.map((r) => (
-                <div key={r} className="bank-pile" title={RESOURCE_LABEL[r]}>
-                  <img src={RES_IMG[r]} alt={RESOURCE_LABEL[r]} />
+                <div key={r} className="bank-pile" title={resLabel(t, r)}>
+                  <img src={RES_IMG[r]} alt={resLabel(t, r)} />
                   <span className="card-count">{state.bank[r]}</span>
                 </div>
               ))}
-              <div className="bank-pile" title="Cartas de desenvolvimento no baralho">
-                <img src={DEV_IMG.victoryPoint} alt="Desenvolvimento" />
+              <div className="bank-pile" title={t('game.devDeckTitle')}>
+                <img src={DEV_IMG.victoryPoint} alt={t('game.devAlt')} />
                 <span className="card-count">{state.devDeckCount ?? state.devDeck.length}</span>
               </div>
             </div>
@@ -626,7 +634,7 @@ export function Game({
 
       {help && <HelpModal onClose={() => setHelp(false)} />}
       {arming === 'monopoly' && (
-        <ResourcePickerModal title="Monopólio — escolha o recurso"
+        <ResourcePickerModal title={t('game.monopolyPick')}
           onPick={(r) => dispatch({ t: 'playMonopoly', resource: r })} onClose={() => setArming(null)} />
       )}
       {arming === 'yearOfPlenty' && (
@@ -710,6 +718,7 @@ function BuildButton({
   free,
   hand,
   onClick,
+  t,
 }: {
   label: string;
   cost: Partial<Record<Resource, number>>;
@@ -718,62 +727,67 @@ function BuildButton({
   free?: boolean;
   hand: Record<Resource, number>;
   onClick: () => void;
+  t: TFn;
 }) {
   return (
     <button className={`build-btn${active ? ' active' : ''}`} disabled={!enabled} onClick={onClick}
-      title={`Custo: ${costIcons(cost)}`}>
+      title={t('game.costTitle', { icons: costIcons(cost) })}>
       <span>{label}</span>
-      <small className={canAffordUI(hand, cost) || free ? '' : 'short'}>{free ? 'grátis' : costIcons(cost)}</small>
+      <small className={canAffordUI(hand, cost) || free ? '' : 'short'}>{free ? t('game.free') : costIcons(cost)}</small>
     </button>
   );
 }
 
 function HelpModal({ onClose }: { onClose: () => void }) {
-  const terr: [string, string][] = [
-    ['🌲', 'Floresta → Madeira'],
-    ['🧱', 'Colinas → Tijolo'],
-    ['🐑', 'Pasto → Lã'],
-    ['🌾', 'Campo → Trigo'],
-    ['⛰️', 'Montanha → Minério'],
+  const t = useT();
+  const terr: [string, string, string][] = [
+    ['🌲', 'terrain.forest', 'resource.wood'],
+    ['🧱', 'terrain.hills', 'resource.brick'],
+    ['🐑', 'terrain.pasture', 'resource.wool'],
+    ['🌾', 'terrain.field', 'resource.grain'],
+    ['⛰️', 'terrain.mountain', 'resource.ore'],
   ];
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Como jogar</h3>
-        <h4>Terrenos e recursos</h4>
-        <ul className="help-list">{terr.map(([i, t]) => <li key={t}>{i} {t}</li>)}</ul>
-        <h4>Custos</h4>
+        <h3>{t('game.help.title')}</h3>
+        <h4>{t('game.help.terrains')}</h4>
+        <ul className="help-list">{terr.map(([icon, tk, rk]) => (
+          <li key={tk}>{icon} {t('game.help.terrainArrow', { terrain: t(tk as MsgKey), resource: t(rk as MsgKey) })}</li>
+        ))}</ul>
+        <h4>{t('game.help.costs')}</h4>
         <ul className="help-list">
-          <li>Estrada: {costIcons(COSTS.road)}</li>
-          <li>Vila: {costIcons(COSTS.settlement)}</li>
-          <li>Cidade: {costIcons(COSTS.city)}</li>
-          <li>Carta: {costIcons(COSTS.progressCard)}</li>
+          <li>{t('game.btn.road')}: {costIcons(COSTS.road)}</li>
+          <li>{t('game.btn.settlement')}: {costIcons(COSTS.settlement)}</li>
+          <li>{t('game.btn.city')}: {costIcons(COSTS.city)}</li>
+          <li>{t('game.btn.card')}: {costIcons(COSTS.progressCard)}</li>
         </ul>
-        <h4>Portos</h4>
-        <p className="muted-note">3:1 troca 3 iguais por 1 qualquer · 2:1 troca 2 do recurso do porto.</p>
-        <h4>Controles</h4>
-        <p className="muted-note">Passe o mouse para ver alvos válidos · clique para colocar.</p>
-        <h4>Atalhos de teclado</h4>
+        <h4>{t('game.help.ports')}</h4>
+        <p className="muted-note">{t('game.help.portsText')}</p>
+        <h4>{t('game.help.controls')}</h4>
+        <p className="muted-note">{t('game.help.controlsText')}</p>
+        <h4>{t('game.help.shortcuts')}</h4>
         <ul className="help-list">
-          <li><b>Espaço</b> — rolar os dados / passar a vez</li>
-          <li><b>M</b> — ligar/desligar o som · <b>↑ / ↓</b> — volume</li>
-          <li><b>F</b> — tela cheia · <b>ESC</b> — cancelar</li>
+          <li><b>{t('game.help.keySpace')}</b> — {t('game.help.sc1')}</li>
+          <li><b>M</b> — {t('game.help.sc2')} · <b>↑ / ↓</b> — {t('game.help.scVolume')}</li>
+          <li><b>F</b> — {t('game.help.sc3full')} · <b>ESC</b> — {t('game.help.scEsc')}</li>
         </ul>
-        <button className="link" onClick={onClose}>Fechar (ESC)</button>
+        <button className="link" onClick={onClose}>{t('game.help.close')}</button>
       </div>
     </div>
   );
 }
 
 function ResourcePickerModal({ title, onPick, onClose }: { title: string; onPick: (r: Resource) => void; onClose: () => void }) {
+  const t = useT();
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>{title}</h3>
         <div className="hand">
-          {RESOURCES.map((r) => <button key={r} onClick={() => onPick(r)}>{RESOURCE_ICON[r]} {RESOURCE_LABEL[r]}</button>)}
+          {RESOURCES.map((r) => <button key={r} onClick={() => onPick(r)}>{RESOURCE_ICON[r]} {resLabel(t, r)}</button>)}
         </div>
-        <button className="link" onClick={onClose}>Cancelar (ESC)</button>
+        <button className="link" onClick={onClose}>{t('game.cancelEsc')}</button>
       </div>
     </div>
   );
@@ -804,6 +818,7 @@ function TradeBuilderModal({
   onPropose: (to: PlayerColor[]) => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const others = state.players.filter((p) => p.color !== proposer).map((p) => p.color);
   const [to, setTo] = useState<PlayerColor[]>(others);
   const cur = state.players.find((p) => p.color === proposer)!;
@@ -812,28 +827,28 @@ function TradeBuilderModal({
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal wide" onClick={(e) => e.stopPropagation()}>
-        <h3>{counter ? 'Contraproposta' : 'Propor troca'}</h3>
+        <h3>{counter ? t('game.counter') : t('game.proposeTrade')}</h3>
         <div className="trade-grid">
           <div>
-            <h4>Você dá</h4>
+            <h4>{t('game.youGive')}</h4>
             {RESOURCES.map((r) => (
               <div key={r} className="trade-row">
-                <span>{RESOURCE_ICON[r]} {RESOURCE_LABEL[r]} <small className="have">({cur.hand[r]})</small></span>
+                <span>{RESOURCE_ICON[r]} {resLabel(t, r)} <small className="have">({cur.hand[r]})</small></span>
                 <Stepper value={tradeGive[r]} max={cur.hand[r]} onChange={(v) => setTradeGive({ ...tradeGive, [r]: v })} />
               </div>
             ))}
           </div>
           <div>
-            <h4>Você quer</h4>
+            <h4>{t('game.youWant')}</h4>
             {RESOURCES.map((r) => (
               <div key={r} className="trade-row">
-                <span>{RESOURCE_ICON[r]} {RESOURCE_LABEL[r]}</span>
+                <span>{RESOURCE_ICON[r]} {resLabel(t, r)}</span>
                 <Stepper value={tradeWant[r]} max={19} onChange={(v) => setTradeWant({ ...tradeWant, [r]: v })} />
               </div>
             ))}
             {!counter && (
               <div className="trade-row trade-any">
-                <span title="Coringa: quem aceitar escolhe quais recursos dar">🃏 Qualquer recurso</span>
+                <span title={t('game.wildcardTitle')}>{t('game.anyResource')}</span>
                 <Stepper value={wantAny} max={9} onChange={setWantAny} />
               </div>
             )}
@@ -841,20 +856,20 @@ function TradeBuilderModal({
         </div>
         {!counter && (
           <div className="trade-recipients">
-            <span>Para:</span>
+            <span>{t('game.to')}</span>
             {others.map((c) => (
               <label key={c} className="chk">
                 <input type="checkbox" checked={to.includes(c)}
                   onChange={(e) => setTo((cur2) => (e.target.checked ? [...cur2, c] : cur2.filter((x) => x !== c)))} />
-                <span className="swatch" style={{ background: PLAYER_FILL[c] }} /> {PLAYER_LABEL[c]}
+                <span className="swatch" style={{ background: PLAYER_FILL[c] }} /> {colorLabel(t, c)}
               </label>
             ))}
           </div>
         )}
         <div className="modal-actions">
           <button className="primary" disabled={total(tradeGive) === 0 || wantTotal === 0 || (!counter && to.length === 0)}
-            onClick={() => onPropose(to)}>{counter ? 'Enviar contraproposta' : 'Propor'}</button>
-          <button onClick={onClose}>Cancelar (ESC)</button>
+            onClick={() => onPropose(to)}>{counter ? t('game.sendCounter') : t('game.propose')}</button>
+          <button onClick={onClose}>{t('game.cancelEsc')}</button>
         </div>
       </div>
     </div>
@@ -871,27 +886,28 @@ function WildcardPickModal({
   onConfirm: (resolveAny: Partial<Record<Resource, number>>) => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const hand = getPlayer(state, color).hand;
   const [picks, setPicks] = useState<Record<Resource, number>>(zeroRes);
   const total = RESOURCES.reduce((s, r) => s + picks[r], 0);
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>🃏 Escolha {count} recurso(s) para o coringa</h3>
-        <p className="muted-note">Selecionados: {total}/{count}</p>
+        <h3>{t('game.wildcardPick', { count })}</h3>
+        <p className="muted-note">{t('game.selected', { total, count })}</p>
         <div className="trade-grid" style={{ gridTemplateColumns: '1fr' }}>
           <div>
             {RESOURCES.map((r) => (
               <div key={r} className="trade-row">
-                <span>{RESOURCE_ICON[r]} {RESOURCE_LABEL[r]} ({hand[r]})</span>
+                <span>{RESOURCE_ICON[r]} {resLabel(t, r)} ({hand[r]})</span>
                 <Stepper value={picks[r]} max={Math.min(hand[r], picks[r] + Math.max(0, count - total))} onChange={(v) => setPicks((p) => ({ ...p, [r]: v }))} />
               </div>
             ))}
           </div>
         </div>
         <div className="modal-actions">
-          <button className="primary" disabled={total !== count} onClick={() => onConfirm(picks)}>Aceitar troca</button>
-          <button onClick={onClose}>Cancelar (ESC)</button>
+          <button className="primary" disabled={total !== count} onClick={() => onConfirm(picks)}>{t('game.acceptTrade')}</button>
+          <button onClick={onClose}>{t('game.cancelEsc')}</button>
         </div>
       </div>
     </div>
@@ -921,52 +937,53 @@ function ActiveTradePopup({
   onWildcardAccept: () => void;
   onRefuse: () => void;
 }) {
-  const t = state.activeTrade!;
+  const t = useT();
+  const tr = state.activeTrade!;
   const fmt = (m: Partial<Record<Resource, number>>) =>
     (Object.entries(m) as [Resource, number][]).filter(([, n]) => n > 0).map(([r, n]) => `${n}${RESOURCE_ICON[r]}`).join(' ') || '—';
-  const wantLabel = `${fmt(t.want)}${t.wantAny ? `${Object.values(t.want).some((n) => n > 0) ? ' + ' : ''}${t.wantAny}🃏` : ''}`;
-  const iAmProposer = t.from === localColor;
-  const iAmRecipient = t.to.includes(localColor);
+  const wantLabel = `${fmt(tr.want)}${tr.wantAny ? `${Object.values(tr.want).some((n) => n > 0) ? ' + ' : ''}${tr.wantAny}🃏` : ''}`;
+  const iAmProposer = tr.from === localColor;
+  const iAmRecipient = tr.to.includes(localColor);
   // Barra de tempo (20s): na oferta de um bot para mim, ou quando EU proponho.
   const showTimer = iAmProposer || (botOffer && iAmRecipient);
   return (
     <div className="trade-popup">
-      <h3>{PLAYER_LABEL[t.from]} quer trocar</h3>
-      <p className="trade-summary">Dá <b>{fmt(t.give)}</b> &nbsp;→&nbsp; quer <b>{wantLabel}</b></p>
+      <h3>{t('game.wantsToTrade', { name: colorLabel(t, tr.from) })}</h3>
+      <p className="trade-summary">{t('game.tradeGiveArrow')} <b>{fmt(tr.give)}</b> &nbsp;→&nbsp; {t('game.tradeWantArrow')} <b>{wantLabel}</b></p>
       {showTimer && (
         // key muda a cada nova proposta -> a barra remonta e o tempo reinicia em sincronia.
         <div className="trade-timer">
-          <span key={`${t.from}:${JSON.stringify(t.give)}:${JSON.stringify(t.want)}`} className="trade-timer-bar" />
+          <span key={`${tr.from}:${JSON.stringify(tr.give)}:${JSON.stringify(tr.want)}`} className="trade-timer-bar" />
         </div>
       )}
       {iAmProposer ? (
         <>
           <div className="trade-responders">
-            {t.to.map((c) => {
-              const accepted = t.accepted.includes(c);
+            {tr.to.map((c) => {
+              const accepted = tr.accepted.includes(c);
               return (
                 <div key={c} className="trade-row">
-                  <span><span className="swatch" style={{ background: PLAYER_FILL[c] }} /> {PLAYER_LABEL[c]} {accepted ? '✅' : '⏳'}</span>
-                  <button className="primary" disabled={!accepted} onClick={() => dispatch({ t: 'confirmTrade', with: c }, t.from)}>Fechar</button>
+                  <span><span className="swatch" style={{ background: PLAYER_FILL[c] }} /> {colorLabel(t, c)} {accepted ? '✅' : '⏳'}</span>
+                  <button className="primary" disabled={!accepted} onClick={() => dispatch({ t: 'confirmTrade', with: c }, tr.from)}>{t('game.close')}</button>
                 </div>
               );
             })}
           </div>
           <div className="modal-actions">
-            <button onClick={() => dispatch({ t: 'cancelTrade' }, t.from)}>Cancelar</button>
+            <button onClick={() => dispatch({ t: 'cancelTrade' }, tr.from)}>{t('common.cancel')}</button>
           </div>
         </>
       ) : iAmRecipient ? (
         <div className="modal-actions wrap">
-          <button onClick={onRefuse}>✗ Recusar</button>
-          <button onClick={onCounter}>✎ Contraproposta</button>
+          <button onClick={onRefuse}>{t('game.refuse')}</button>
+          <button onClick={onCounter}>{t('game.counterShort')}</button>
           <button className="primary"
-            onClick={() => (t.wantAny ? onWildcardAccept() : dispatch({ t: 'respondTrade', accept: true }, localColor))}>
-            ✓ Aceitar
+            onClick={() => (tr.wantAny ? onWildcardAccept() : dispatch({ t: 'respondTrade', accept: true }, localColor))}>
+            {t('game.accept')}
           </button>
         </div>
       ) : (
-        <p className="muted-note">Aguardando resposta…</p>
+        <p className="muted-note">{t('game.awaitingResponse')}</p>
       )}
     </div>
   );
@@ -982,14 +999,15 @@ function RobberVictimModal({
   victims: PlayerColor[];
   onPick: (victim: PlayerColor) => void;
 }) {
+  const t = useT();
   return (
     <div className="overlay">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Roubar de quem?</h3>
+        <h3>{t('game.robWhom')}</h3>
         <div className="dev-cards">
           {victims.map((c) => (
             <button key={c} onClick={() => onPick(c)}>
-              <span className="swatch" style={{ background: PLAYER_FILL[c] }} /> {PLAYER_LABEL[c]} · {handSize(getPlayer(state, c))} cartas
+              <span className="swatch" style={{ background: PLAYER_FILL[c] }} /> {t('game.victimCards', { name: colorLabel(t, c), n: handSize(getPlayer(state, c)) })}
             </button>
           ))}
         </div>
@@ -1013,6 +1031,7 @@ function DiscardModal({
   /** Envia a seleção tentativa ao servidor (usada se o tempo acabar). */
   onSelect: (resources: Partial<Record<Resource, number>>) => void;
 }) {
+  const t = useT();
   const hand = getPlayer(state, color).hand;
   const [picks, setPicks] = useState<Record<Resource, number>>({ wood: 0, brick: 0, wool: 0, grain: 0, ore: 0 });
   const total = RESOURCES.reduce((s, r) => s + picks[r], 0);
@@ -1025,13 +1044,13 @@ function DiscardModal({
   return (
     <div className="overlay">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Descartar {count} carta(s) — {PLAYER_LABEL[color]}</h3>
-        <p className="muted-note">Selecionadas: {total}/{count}</p>
+        <h3>{t('game.discardTitle', { count, name: colorLabel(t, color) })}</h3>
+        <p className="muted-note">{t('game.selectedF', { total, count })}</p>
         <div className="trade-grid" style={{ gridTemplateColumns: '1fr' }}>
           <div>
             {RESOURCES.map((r) => (
               <div key={r} className="trade-row">
-                <span>{RESOURCE_ICON[r]} {RESOURCE_LABEL[r]} ({hand[r]})</span>
+                <span>{RESOURCE_ICON[r]} {resLabel(t, r)} ({hand[r]})</span>
                 {/* Não deixa passar do necessário: o + trava ao atingir `count`
                     (diminua um recurso para liberar outro). */}
                 <Stepper value={picks[r]} max={Math.min(hand[r], picks[r] + Math.max(0, count - total))} onChange={(v) => setPicks((p) => ({ ...p, [r]: v }))} />
@@ -1040,7 +1059,7 @@ function DiscardModal({
           </div>
         </div>
         <div className="modal-actions">
-          <button className="primary" disabled={total !== count} onClick={() => onDiscard(picks)}>Descartar</button>
+          <button className="primary" disabled={total !== count} onClick={() => onDiscard(picks)}>{t('game.discard')}</button>
         </div>
       </div>
     </div>
@@ -1058,6 +1077,7 @@ function YearOfPlentyModal({
   onConfirm: (resources: [Resource, Resource]) => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const NEED = 2;
   const bank = state.bank;
   const [picks, setPicks] = useState<Record<Resource, number>>({ wood: 0, brick: 0, wool: 0, grain: 0, ore: 0 });
@@ -1070,13 +1090,13 @@ function YearOfPlentyModal({
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>+2 Recursos — escolha 2 para pegar</h3>
-        <p className="muted-note">Selecionados: {total}/{NEED}</p>
+        <h3>{t('game.yopTitle')}</h3>
+        <p className="muted-note">{t('game.selected', { total, count: NEED })}</p>
         <div className="trade-grid" style={{ gridTemplateColumns: '1fr' }}>
           <div>
             {RESOURCES.map((r) => (
               <div key={r} className="trade-row">
-                <span>{RESOURCE_ICON[r]} {RESOURCE_LABEL[r]} ({bank[r]})</span>
+                <span>{RESOURCE_ICON[r]} {resLabel(t, r)} ({bank[r]})</span>
                 {/* Trava ao atingir 2 (diminua um para liberar outro) e no que o
                     banco tem — o servidor recusa pegar recurso que o banco não tem. */}
                 <Stepper value={picks[r]} max={Math.min(bank[r], picks[r] + Math.max(0, NEED - total))} onChange={(v) => setPicks((p) => ({ ...p, [r]: v }))} />
@@ -1085,8 +1105,8 @@ function YearOfPlentyModal({
           </div>
         </div>
         <div className="modal-actions">
-          <button className="primary" disabled={total !== NEED} onClick={confirm}>Pegar</button>
-          <button className="link" onClick={onClose}>Cancelar (ESC)</button>
+          <button className="primary" disabled={total !== NEED} onClick={confirm}>{t('game.take')}</button>
+          <button className="link" onClick={onClose}>{t('game.cancelEsc')}</button>
         </div>
       </div>
     </div>
@@ -1125,6 +1145,7 @@ function EndGameOverlay({
   viewerColor: PlayerColor | null;
   onPlayer: (username: string, x: number, y: number) => void;
 }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const winner = state.winner!;
   const winnerName = getPlayer(state, winner).name;
@@ -1134,11 +1155,11 @@ function EndGameOverlay({
   async function share() {
     setBusy(true);
     try {
-      const blob = await renderResultBlob(state, elapsed, turns);
+      const blob = await renderResultBlob(state, elapsed, turns, t);
       if (!blob) return;
       const file = new File([blob], 'trevalis-resultado.png', { type: 'image/png' });
       const nav = navigator as Navigator & { canShare?: (d: unknown) => boolean; share?: (d: unknown) => Promise<void> };
-      const text = `🏆 ${winnerName} venceu no Trevalis! Jogue em trevalis.app`;
+      const text = t('game.shareText', { name: winnerName });
       if (nav.canShare?.({ files: [file] }) && nav.share) {
         try { await nav.share({ files: [file], title: 'Trevalis', text }); return; } catch { /* usuário cancelou / não suportado: baixa */ }
       }
@@ -1157,8 +1178,8 @@ function EndGameOverlay({
     <div className="overlay endgame-overlay">
       <div className="modal endgame-modal" onClick={(e) => e.stopPropagation()}>
         <div className="endgame-crown" style={{ background: PLAYER_FILL[winner] }}><Trophy size={30} /></div>
-        <h3 className="endgame-title">{iWon ? 'Você venceu!' : `${winnerName} venceu!`}</h3>
-        <p className="muted-note endgame-sub">{fmtTime(elapsed)} · {turns} turnos</p>
+        <h3 className="endgame-title">{iWon ? t('game.youWon') : t('game.playerWon', { name: winnerName })}</h3>
+        <p className="muted-note endgame-sub">{t('game.endSub', { time: fmtTime(elapsed), turns })}</p>
         <div className="endgame-standings">
           {standings.map((s, i) => {
             const human = !botColors.includes(s.color) && !awayColors.includes(s.color) && s.color !== viewerColor;
@@ -1170,7 +1191,7 @@ function EndGameOverlay({
                   <button className="endgame-nm as-link" title="Opções do jogador"
                     onClick={(e) => onPlayer(s.name, e.clientX, e.clientY)}>{s.name}</button>
                 ) : (
-                  <span className="endgame-nm">{s.name}{s.color === localColor && <small className="you-tag"> você</small>}</span>
+                  <span className="endgame-nm">{s.name}{s.color === localColor && <small className="you-tag"> {t('game.you')}</small>}</span>
                 )}
                 <b className="endgame-pts">{s.pts} pts</b>
               </div>
@@ -1179,9 +1200,9 @@ function EndGameOverlay({
         </div>
         <div className="modal-actions endgame-actions">
           <button className="primary" onClick={share} disabled={busy}>
-            {navigatorCanShare() ? <Share2 size={15} /> : <Download size={15} />} {busy ? 'Gerando…' : 'Compartilhar resultado'}
+            {navigatorCanShare() ? <Share2 size={15} /> : <Download size={15} />} {busy ? t('game.generating') : t('game.shareResult')}
           </button>
-          <button onClick={onExit}><LogOut size={15} /> Sair</button>
+          <button onClick={onExit}><LogOut size={15} /> {t('game.exit')}</button>
         </div>
       </div>
     </div>
@@ -1193,7 +1214,7 @@ function navigatorCanShare(): boolean {
 }
 
 /** Desenha um cartão de resultado (1200×630, formato de social card) e devolve um PNG. */
-function renderResultBlob(state: GameState, elapsed: number, turns: number): Promise<Blob | null> {
+function renderResultBlob(state: GameState, elapsed: number, turns: number, t: TFn): Promise<Blob | null> {
   const W = 1200, H = 630;
   const canvas = document.createElement('canvas');
   canvas.width = W;
@@ -1217,11 +1238,11 @@ function renderResultBlob(state: GameState, elapsed: number, turns: number): Pro
   const winnerName = getPlayer(state, winner).name;
   ctx.fillStyle = '#362e24';
   ctx.font = '700 62px Georgia, serif';
-  ctx.fillText(`🏆 ${winnerName} venceu!`, 60, 150);
+  ctx.fillText(t('game.head.won', { name: winnerName }), 60, 150);
 
   ctx.fillStyle = '#8a7a64';
   ctx.font = '400 26px Georgia, serif';
-  ctx.fillText(`${fmtTime(elapsed)} de partida · ${turns} turnos`, 60, 196);
+  ctx.fillText(t('game.endImgSub', { time: fmtTime(elapsed), turns }), 60, 196);
 
   // Placar.
   const standings = standingsOf(state);
@@ -1244,7 +1265,7 @@ function renderResultBlob(state: GameState, elapsed: number, turns: number): Pro
 
   ctx.fillStyle = '#c0563a';
   ctx.font = '700 28px Georgia, serif';
-  ctx.fillText('Jogue em trevalis.app', 60, H - 46);
+  ctx.fillText(t('game.playAt'), 60, H - 46);
 
   return new Promise((resolve) => canvas.toBlob((b) => resolve(b), 'image/png'));
 }
@@ -1385,17 +1406,17 @@ function phaseLabel(state: GameState): string {
 }
 
 /** Manchete serifada da barra central do tabuleiro. */
-function headline(state: GameState, myTurn: boolean, botTurn: boolean, curName: string): string {
-  if (state.phase === 'ended') return `🏆 ${PLAYER_LABEL[state.winner!]} venceu!`;
-  if (state.phase === 'discard') return 'Descarte o excesso de cartas';
-  if (botTurn) return `${curName} está jogando…`;
-  if (!myTurn) return 'Aguardando…';
-  if (state.phase === 'moveBlocker') return 'Mova o ladrão pela ilha';
+function headline(state: GameState, myTurn: boolean, botTurn: boolean, curName: string, t: TFn): string {
+  if (state.phase === 'ended') return t('game.head.won', { name: colorLabel(t, state.winner!) });
+  if (state.phase === 'discard') return t('game.head.discard');
+  if (botTurn) return t('game.head.botPlaying', { name: curName });
+  if (!myTurn) return t('game.head.waiting');
+  if (state.phase === 'moveBlocker') return t('game.head.moveRobber');
   if (state.phase === 'setup1' || state.phase === 'setup2') {
-    return state.setupLastVertex ? 'Posicione sua estrada' : 'Posicione sua vila';
+    return state.setupLastVertex ? t('game.head.placeRoad') : t('game.head.placeSettlement');
   }
-  if (state.phase === 'roll') return 'Role os dados do destino';
-  if (state.phase === 'main') return 'Erga o seu reino';
+  if (state.phase === 'roll') return t('game.head.roll');
+  if (state.phase === 'main') return t('game.head.main');
   return '';
 }
 
@@ -1477,43 +1498,43 @@ function soundForEvent(e: GameEvent): SoundKind | null {
   }
 }
 
-function toastForEvent(e: GameEvent, state: GameState): { text: string; tone: ToastTone } | null {
+function toastForEvent(e: GameEvent, state: GameState, t: TFn): { text: string; tone: ToastTone } | null {
   switch (e.t) {
     case 'produced': {
       const g = e.gains[state.currentPlayer];
       const items = (Object.entries(g) as [Resource, number][]).filter(([, n]) => n > 0).map(([r, n]) => `${n}${RESOURCE_ICON[r]}`);
-      return items.length ? { text: `Você recebeu ${items.join(' ')}`, tone: 'good' } : null;
+      return items.length ? { text: t('game.toast.received', { items: items.join(' ') }), tone: 'good' } : null;
     }
     case 'cardPlayed':
-      return { text: `${PLAYER_LABEL[e.owner]} jogou ${CARD_LABEL[e.card]}`, tone: 'info' };
+      return { text: t('game.toast.played', { name: colorLabel(t, e.owner), card: cardLabel(t, e.card) }), tone: 'info' };
     case 'monopoly':
-      return { text: `${PLAYER_LABEL[e.owner]} monopolizou ${RESOURCE_LABEL[e.resource]} (+${e.taken})`, tone: 'warn' };
+      return { text: t('game.toast.monopoly', { name: colorLabel(t, e.owner), resource: resLabel(t, e.resource), n: e.taken }), tone: 'warn' };
     case 'blockerMoved':
-      return e.stoleFrom ? { text: `Roubo de ${PLAYER_LABEL[e.stoleFrom]}`, tone: 'warn' } : null;
+      return e.stoleFrom ? { text: t('game.toast.robberSteal', { name: colorLabel(t, e.stoleFrom) }), tone: 'warn' } : null;
     case 'tradeExecuted':
-      return { text: `Troca fechada: ${PLAYER_LABEL[e.from]} ↔ ${PLAYER_LABEL[e.with]}`, tone: 'good' };
+      return { text: t('game.toast.tradeExecuted', { a: colorLabel(t, e.from), b: colorLabel(t, e.with) }), tone: 'good' };
     case 'longestRoad':
-      return e.owner ? { text: `📏 Estrada Mais Longa: ${PLAYER_LABEL[e.owner]}`, tone: 'good' } : null;
+      return e.owner ? { text: t('game.toast.longestRoad', { name: colorLabel(t, e.owner) }), tone: 'good' } : null;
     case 'largestArmy':
-      return e.owner ? { text: `⚔️ Maior Exército: ${PLAYER_LABEL[e.owner]}`, tone: 'good' } : null;
+      return e.owner ? { text: t('game.toast.largestArmy', { name: colorLabel(t, e.owner) }), tone: 'good' } : null;
     case 'turnEnded':
-      return { text: `Vez de ${PLAYER_LABEL[e.next]}`, tone: 'info' };
+      return { text: t('game.toast.turnOf', { name: colorLabel(t, e.next) }), tone: 'info' };
     case 'gameWon':
-      return { text: `🏆 ${PLAYER_LABEL[e.winner]} venceu!`, tone: 'good' };
+      return { text: t('game.toast.gameWon', { name: colorLabel(t, e.winner) }), tone: 'good' };
     default:
       return null;
   }
 }
 
 /** Nome do jogador (cai no rotulo da cor se nao achar). */
-function nm(state: GameState, color: PlayerColor): string {
-  return state.players.find((p) => p.color === color)?.name ?? PLAYER_LABEL[color];
+function nm(state: GameState, color: PlayerColor, t: TFn): string {
+  return state.players.find((p) => p.color === color)?.name ?? colorLabel(t, color);
 }
 
-function describeEvent(e: GameEvent, state: GameState): string {
+function describeEvent(e: GameEvent, state: GameState, t: TFn): string {
   switch (e.t) {
     case 'diceRolled':
-      return `🎲 ${e.dice[0]} + ${e.dice[1]} = ${e.sum}`;
+      return t('game.log.dice', { a: e.dice[0], b: e.dice[1], sum: e.sum });
     case 'produced': {
       const parts: string[] = [];
       for (const p of state.players) {
@@ -1521,51 +1542,45 @@ function describeEvent(e: GameEvent, state: GameState): string {
         const items = (Object.entries(g) as [Resource, number][]).filter(([, n]) => n > 0).map(([r, n]) => `${n}${RESOURCE_ICON[r]}`);
         if (items.length) parts.push(`${p.name}: ${items.join(' ')}`);
       }
-      return parts.length ? `Produção — ${parts.join(' · ')}` : 'Produção — nada';
+      return parts.length ? t('game.log.production', { parts: parts.join(' · ') }) : t('game.log.productionNothing');
     }
     case 'built':
-      return `${nm(state, e.owner)} construiu ${{ road: 'estrada', settlement: 'vila', city: 'cidade' }[e.kind]}`;
+      return t('game.log.built', { name: nm(state, e.owner, t), what: t(`build.${e.kind}` as MsgKey) });
     case 'progressCardBought':
-      return `${nm(state, e.owner)} comprou uma carta de progresso`;
+      return t('game.log.boughtCard', { name: nm(state, e.owner, t) });
     case 'cardPlayed':
-      return `${nm(state, e.owner)} jogou ${CARD_LABEL[e.card]}`;
+      return t('game.log.playedCard', { name: nm(state, e.owner, t), card: cardLabel(t, e.card) });
     case 'monopoly':
-      return `📦 ${nm(state, e.owner)} monopolizou ${RESOURCE_LABEL[e.resource]} (+${e.taken})`;
+      return t('game.log.monopoly', { name: nm(state, e.owner, t), resource: resLabel(t, e.resource), n: e.taken });
     case 'blockerMoved':
-      return e.stoleFrom ? `Bloqueador movido — roubou de ${nm(state, e.stoleFrom)}` : 'Bloqueador movido';
+      return e.stoleFrom ? t('game.log.robberSteal', { name: nm(state, e.stoleFrom, t) }) : t('game.log.robberMoved');
     case 'mustDiscard':
-      return `Rolou 7 — descarte: ${e.players.map((p) => nm(state, p.color)).join(', ')}`;
+      return t('game.log.mustDiscard', { names: e.players.map((p) => nm(state, p.color, t)).join(', ') });
     case 'discarded':
-      return `${nm(state, e.owner)} descartou`;
+      return t('game.log.discarded', { name: nm(state, e.owner, t) });
     case 'bankTrade':
-      return `${nm(state, e.owner)} trocou ${e.rate} ${RESOURCE_LABEL[e.give]} por 1 ${RESOURCE_LABEL[e.want]}`;
+      return t('game.log.bankTrade', { name: nm(state, e.owner, t), rate: e.rate, give: resLabel(t, e.give), want: resLabel(t, e.want) });
     case 'tradeProposed':
-      return `🤝 ${nm(state, e.from)} propôs uma troca`;
+      return t('game.log.tradeProposed', { name: nm(state, e.from, t) });
     case 'tradeCountered':
-      return `↩ ${nm(state, e.from)} fez uma contraproposta`;
+      return t('game.log.tradeCountered', { name: nm(state, e.from, t) });
     case 'tradeResponded':
-      return `${nm(state, e.player)} ${e.accept ? 'aceitou' : 'recusou'} a troca`;
+      return e.accept
+        ? t('game.log.tradeAccepted', { name: nm(state, e.player, t) })
+        : t('game.log.tradeRefused', { name: nm(state, e.player, t) });
     case 'tradeExecuted':
-      return `✅ Troca: ${nm(state, e.from)} ↔ ${nm(state, e.with)}`;
+      return t('game.log.tradeExecuted', { a: nm(state, e.from, t), b: nm(state, e.with, t) });
     case 'tradeCancelled':
-      return 'Troca cancelada';
+      return t('game.log.tradeCancelled');
     case 'longestRoad':
-      return e.owner ? `📏 Estrada Mais Longa: ${nm(state, e.owner)}` : 'Estrada Mais Longa perdida';
+      return e.owner ? t('game.log.longestRoad', { name: nm(state, e.owner, t) }) : t('game.log.longestRoadLost');
     case 'largestArmy':
-      return e.owner ? `⚔️ Maior Exército: ${nm(state, e.owner)}` : 'Maior Exército perdido';
+      return e.owner ? t('game.log.largestArmy', { name: nm(state, e.owner, t) }) : t('game.log.largestArmyLost');
     case 'turnEnded':
-      return `▶ Vez de ${nm(state, e.next)}`;
+      return t('game.log.turnEnded', { name: nm(state, e.next, t) });
     case 'gameWon':
-      return `🏆 ${nm(state, e.winner)} venceu!`;
+      return t('game.log.gameWon', { name: nm(state, e.winner, t) });
     default:
       return '';
   }
 }
-
-const CARD_LABEL: Record<ProgressCard, string> = {
-  knight: 'Cavaleiro',
-  roadBuilding: '2 Estradas',
-  yearOfPlenty: '+2 Recursos',
-  monopoly: 'Monopólio',
-  victoryPoint: 'Ponto de Vitória',
-};

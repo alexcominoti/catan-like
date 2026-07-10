@@ -4,11 +4,12 @@ import { authClient } from '../auth/client.js';
 import { joinRoomApi, listRooms, type RoomListItem } from './rooms.js';
 import { getMatchmakingStatus, joinQuickMatch, leaveQuickMatch } from './social.js';
 import { LoginGate } from './LoginGate.js';
+import { useT, type MsgKey } from '../i18n/index.js';
 
-const MAP_LABEL: Record<string, string> = {
-  standard: 'Clássico (3–4)',
-  large: 'Grande (5–6)',
-  huge: 'Enorme (7–8)',
+const MAP_LABEL: Record<string, MsgKey> = {
+  standard: 'map.standard',
+  large: 'map.large',
+  huge: 'map.huge',
 };
 
 export function RoomBrowser({
@@ -16,12 +17,13 @@ export function RoomBrowser({
   onEnterRoom,
   onNeedAuth,
 }: {
-  onCreate: () => void;
+  onCreate: (opts?: { isPrivate?: boolean }) => void;
   onEnterRoom: (code: string) => void;
   onNeedAuth: () => void;
 }) {
   const { data: session, isPending } = authClient.useSession();
   const loggedIn = Boolean(session?.user);
+  const t = useT();
 
   const [rooms, setRooms] = useState<RoomListItem[]>([]);
   const [friendRooms, setFriendRooms] = useState<RoomListItem[]>([]);
@@ -68,7 +70,7 @@ export function RoomBrowser({
     setError(null);
     const code = await joinQuickMatch();
     if (!code) {
-      setError('Não foi possível entrar na fila agora.');
+      setError(t('lobby.errQueue'));
       return;
     }
     setQueueCount(1);
@@ -96,13 +98,13 @@ export function RoomBrowser({
 
   // Lobby é rota protegida: sem sessão, redireciona ao login (a Home é a única pública).
   if (isPending) {
-    return <div className="page"><p className="muted-note">Carregando…</p></div>;
+    return <div className="page"><p className="muted-note">{t('common.loading')}</p></div>;
   }
   if (!loggedIn) {
     return (
       <LoginGate
-        title="Entre para ver o lobby"
-        hint="Você precisa de uma conta para navegar e entrar em salas."
+        title={t('lobby.gate.title')}
+        hint={t('lobby.gate.hint')}
         onNeedAuth={onNeedAuth}
       />
     );
@@ -131,16 +133,16 @@ export function RoomBrowser({
       <div key={r.code} className="room-row">
         <span className="room-name">
           <b>{r.isPrivate ? <Lock size={13} className="room-online" /> : <Globe size={13} className="room-online" />} {r.name}</b>
-          <small>por @{r.host}</small>
+          <small>{t('lobby.byHost', { host: r.host })}</small>
         </span>
-        <span>{MAP_LABEL[r.boardLayout] ?? r.boardLayout}</span>
+        <span>{MAP_LABEL[r.boardLayout] ? t(MAP_LABEL[r.boardLayout]!) : r.boardLayout}</span>
         <span className="seats">
           {Array.from({ length: r.max }, (_, i) => <i key={i} className={i < r.cur ? 'on' : ''} />)}
           <small> {r.cur}/{r.max}</small>
         </span>
         <span>
           <button className="cta sm" disabled={joining === r.code || r.cur >= r.max} onClick={() => enter(r.code)}>
-            {r.cur >= r.max ? 'Cheia' : joining === r.code ? 'Entrando…' : 'Entrar'}
+            {r.cur >= r.max ? t('lobby.full') : joining === r.code ? t('lobby.entering') : t('lobby.enter')}
           </button>
         </span>
       </div>
@@ -151,10 +153,10 @@ export function RoomBrowser({
     <div className="page">
       <div className="page-head">
         <div>
-          <span className="eyebrow">LOBBY</span>
-          <h1>Escolha uma mesa.</h1>
+          <span className="eyebrow">{t('lobby.eyebrow')}</span>
+          <h1>{t('lobby.title')}</h1>
         </div>
-        <button className="cta" onClick={onCreate}><Plus size={16} /> Criar salão</button>
+        <button className="cta" onClick={() => onCreate()}><Plus size={16} /> {t('lobby.createRoom')}</button>
       </div>
 
       <div className="quick-cards">
@@ -164,24 +166,24 @@ export function RoomBrowser({
         */}
         <div className="quick-card">
           <span className="quick-icon"><Zap size={18} /></span>
-          <h3>Jogo rápido</h3>
-          <p>Entramos numa mesa casual e completamos com bots.</p>
+          <h3>{t('lobby.quick.title')}</h3>
+          <p>{t('lobby.quick.text')}</p>
           <button className="dark" onClick={startQuickMatch} disabled={searching}>
-            {searching ? 'Procurando…' : 'Jogar'}
+            {searching ? t('lobby.quick.searching') : t('lobby.quick.play')}
           </button>
         </div>
         <div className="quick-card green disabled" aria-disabled="true">
-          <span className="soon-tag">Em breve</span>
+          <span className="soon-tag">{t('lobby.ranked.soon')}</span>
           <span className="quick-icon"><Users size={18} /></span>
-          <h3>Ranqueada</h3>
-          <p>Suba sua pontuação na temporada.</p>
-          <button className="dark" disabled>Encontrar partida</button>
+          <h3>{t('lobby.ranked.title')}</h3>
+          <p>{t('lobby.ranked.text')}</p>
+          <button className="dark" disabled>{t('lobby.ranked.cta')}</button>
         </div>
         <div className="quick-card">
           <span className="quick-icon"><Lock size={18} /></span>
-          <h3>Partida privada</h3>
-          <p>Crie um link e chame quem você quiser.</p>
-          <button className="dark" onClick={onCreate}>Criar salão</button>
+          <h3>{t('lobby.private.title')}</h3>
+          <p>{t('lobby.private.text')}</p>
+          <button className="dark" onClick={() => onCreate({ isPrivate: true })}>{t('lobby.createRoom')}</button>
         </div>
       </div>
 
@@ -195,11 +197,11 @@ export function RoomBrowser({
       {friendRooms.length > 0 && (
         <>
           <div className="room-bar">
-            <span className="eyebrow"><Users size={13} /> Salas de amigos</span>
+            <span className="eyebrow"><Users size={13} /> {t('lobby.friendRooms')}</span>
           </div>
           <div className="room-table live">
             <div className="room-row head">
-              <span>SALÃO</span><span>MAPA</span><span>JOGADORES</span><span></span>
+              <span>{t('lobby.col.room')}</span><span>{t('lobby.col.map')}</span><span>{t('lobby.col.players')}</span><span></span>
             </div>
             {friendRooms.map(roomRow)}
           </div>
@@ -207,21 +209,21 @@ export function RoomBrowser({
       )}
 
       <div className="room-bar">
-        <span className="eyebrow">Salas abertas</span>
-        <button className="ghost sm" onClick={refresh}><RefreshCw size={14} /> Atualizar</button>
+        <span className="eyebrow">{t('lobby.openRooms')}</span>
+        <button className="ghost sm" onClick={refresh}><RefreshCw size={14} /> {t('lobby.refresh')}</button>
       </div>
 
       {error && <div className="auth-error">{error}</div>}
 
       <div className="room-table live">
         <div className="room-row head">
-          <span>SALÃO</span><span>MAPA</span><span>JOGADORES</span><span></span>
+          <span>{t('lobby.col.room')}</span><span>{t('lobby.col.map')}</span><span>{t('lobby.col.players')}</span><span></span>
         </div>
         {loading ? (
-          <div className="room-empty">Carregando salas…</div>
+          <div className="room-empty">{t('lobby.loadingRooms')}</div>
         ) : rooms.length === 0 ? (
           <div className="room-empty">
-            Nenhuma sala pública agora. <button className="link" onClick={onCreate}>Crie a primeira!</button>
+            {t('lobby.noRooms')} <button className="link" onClick={() => onCreate()}>{t('lobby.noRoomsCta')}</button>
           </div>
         ) : (
           rooms.map(roomRow)
@@ -232,11 +234,11 @@ export function RoomBrowser({
         <div className="overlay">
           <div className="modal mm-modal" onClick={(e) => e.stopPropagation()}>
             <div className="mm-spinner"><Zap size={26} /></div>
-            <h3>Procurando partida…</h3>
+            <h3>{t('lobby.mm.title')}</h3>
             <p className="muted-note">
-              {queueCount > 1 ? `${queueCount} jogadores na fila` : 'Você entrou na fila'} · completamos com bots em alguns segundos.
+              {queueCount > 1 ? t('lobby.mm.queueCount', { n: queueCount }) : t('lobby.mm.queued')} · {t('lobby.mm.tail')}
             </p>
-            <button className="ghost" onClick={cancelQuickMatch}><X size={15} /> Cancelar</button>
+            <button className="ghost" onClick={cancelQuickMatch}><X size={15} /> {t('common.cancel')}</button>
           </div>
         </div>
       )}

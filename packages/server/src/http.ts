@@ -237,6 +237,27 @@ async function handleRequest(
     return;
   }
 
+  // --- idioma preferido (pt-BR | en): espelha a escolha do cliente p/ os e-mails ---
+  if (path === '/api/profile' && req.method === 'PATCH') {
+    const u = await authedUser(req, res);
+    if (!u) return;
+    let body: unknown;
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      sendJson(res, 400, { error: 'Corpo inválido.' });
+      return;
+    }
+    const lang = (body as { language?: unknown }).language;
+    if (lang !== 'pt-BR' && lang !== 'en') {
+      sendJson(res, 400, { error: 'Idioma inválido.' });
+      return;
+    }
+    await getDb().update(userTable).set({ language: lang, updatedAt: new Date() }).where(eq(userTable.id, u.id));
+    sendJson(res, 200, { language: lang });
+    return;
+  }
+
   // --- estatísticas do perfil (dados reais; vazio se não há partidas) ---
   if (path === '/api/profile/stats' && req.method === 'GET') {
     const u = await authedUser(req, res);

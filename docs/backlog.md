@@ -54,7 +54,7 @@ real. Para cada item: **o que era**, **por que saiu** e **o que falta para volta
 ### Colunas "Modo" e "Ping" da listagem de salas
 - **O que era:** colunas Modo (Casual/Ranqueada/Velocidade) e Ping (ms) na tabela de salas.
 - **Por que saiu:** ambas eram mockadas — não há modo ranqueado/velocidade nem medição
-  real de latência. A listagem agora mostra só dados reais (Salão, Mapa, Jogadores).
+  real de latência. A listagem agora mostra só dados reais (Sala, Mapa, Jogadores).
 - **Para voltar:** Modo depende do sistema de ranqueada/matchmaking; Ping exige medir
   latência real cliente↔servidor (ex.: RTT do WebSocket) e expor por sala.
 
@@ -104,12 +104,18 @@ real. Para cada item: **o que era**, **por que saiu** e **o que falta para volta
   salas sem nenhum humano conectado por 5 min (`EMPTY_ROOM_TTL_MS`) — o link passa a
   404. Salas `finished` não são marcadas `abandoned` (o resultado continua acessível).
 
-### Persistência de partidas em andamento — ainda pendente
-- **O que era / é:** o `GameState` vivo de uma sala fica só em memória no servidor.
-- **Por que importa:** um restart do servidor derruba partidas em andamento (quem
-  tentar reconectar recebe "sala não encontrada" mesmo com o registro no banco).
-- **Para voltar/evoluir:** persistir o estado (ou o log de ações para replay
-  determinístico) das salas `in_progress`, permitindo retomar após restart.
+### Persistência de partidas em andamento — FEITO
+- **O que era:** o `GameState` vivo de uma sala ficava só em memória no servidor, então
+  um restart/deploy derrubava partidas em andamento (quem tentasse reconectar recebia
+  "sala não encontrada" mesmo com o registro no banco).
+- **O que é agora:** persistência restart-safe do estado autoritativo
+  (`packages/server/src/snapshots.ts`). O `server.ts` grava o `GameState` completo em
+  JSON por `room_code` (upsert com debounce; tabela `game_snapshot`) e, ao reconectar
+  numa sala `in_progress`, o `loadGameForEnter` reconstrói o `RoomConfig` dos metadados
+  duráveis + carrega o snapshot salvo, recriando o `GameRoom` após o restart (sem
+  snapshot ainda → recria a partida do config). O snapshot é apagado ao terminar/
+  abandonar. Tudo protegido por `hasDatabase()` e coberto por
+  `packages/server/test/persistence.test.ts`. Um deploy causa só uma breve interrupção.
 
 ### Gravação de partidas/estatísticas — FEITO (Tier 1, item 1)
 - **O que era:** `match`/`match_player`/`player_stats` sem escrita — o perfil mostrava

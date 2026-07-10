@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { UserPlus, Check, X, Circle, Play, Eye, Users } from 'lucide-react';
 import { authClient } from '../auth/client.js';
 import { LoginGate } from './LoginGate.js';
+import { useT } from '../i18n/index.js';
 import {
   acceptFriend,
   getFriends,
@@ -25,6 +26,7 @@ export function Friends({
   onEnterRoom: (code: string) => void;
   onNeedAuth: () => void;
 }) {
+  const t = useT();
   const { data: session, isPending } = authClient.useSession();
   const loggedIn = Boolean(session?.user);
 
@@ -48,13 +50,13 @@ export function Friends({
   }, [loggedIn, refresh]);
 
   if (isPending) {
-    return <div className="page"><p className="muted-note">Carregando…</p></div>;
+    return <div className="page"><p className="muted-note">{t('common.loading')}</p></div>;
   }
   if (!loggedIn) {
     return (
       <LoginGate
-        title="Entre para ver seus amigos"
-        hint="Você precisa de uma conta para adicionar e acompanhar amigos."
+        title={t('friends.gate.title')}
+        hint={t('friends.gate.hint')}
         onNeedAuth={onNeedAuth}
       />
     );
@@ -71,7 +73,7 @@ export function Friends({
     setBusy(false);
     if (res.ok) {
       setName('');
-      setNotice(`Pedido enviado para @${username}.`);
+      setNotice(t('friends.requestSent', { username }));
       refresh();
     } else {
       setError(res.error);
@@ -80,7 +82,7 @@ export function Friends({
 
   async function act(fn: Promise<{ ok: boolean; error?: string }>) {
     const res = await fn;
-    if (!res.ok && 'error' in res) setError(res.error ?? 'Erro inesperado.');
+    if (!res.ok && 'error' in res) setError(res.error ?? t('common.unexpected'));
     refresh();
   }
 
@@ -88,25 +90,25 @@ export function Friends({
     <div className="page">
       <div className="page-head">
         <div>
-          <span className="eyebrow">SOCIAL</span>
-          <h1>Amigos.</h1>
+          <span className="eyebrow">{t('friends.eyebrow')}</span>
+          <h1>{t('friends.title')}</h1>
         </div>
       </div>
 
       <div className="card friend-add">
         <form onSubmit={submit}>
           <label className="pf-field">
-            Adicionar por nome de usuário
+            {t('friends.addByUsername')}
             <div className="friend-add-row">
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="ex.: colono42"
+                placeholder={t('friends.addPlaceholder')}
                 maxLength={20}
-                aria-label="Nome de usuário do amigo"
+                aria-label={t('friends.addAria')}
               />
               <button type="submit" className="cta" disabled={busy || !name.trim()}>
-                <UserPlus size={15} /> {busy ? 'Enviando…' : 'Adicionar'}
+                <UserPlus size={15} /> {busy ? t('friends.sending') : t('friends.add')}
               </button>
             </div>
           </label>
@@ -117,13 +119,13 @@ export function Friends({
 
       {data.incoming.length > 0 && (
         <div className="card">
-          <div className="card-head"><h2>Pedidos recebidos</h2></div>
+          <div className="card-head"><h2>{t('friends.incoming')}</h2></div>
           {data.incoming.map((p) => (
             <div key={p.userId} className="friend-row">
               <span className="friend-name">@{p.username}</span>
               <div className="friend-actions">
-                <button className="cta sm" onClick={() => act(acceptFriend(p.userId))}><Check size={14} /> Aceitar</button>
-                <button className="ghost sm" onClick={() => act(removeFriend(p.userId))}><X size={14} /> Recusar</button>
+                <button className="cta sm" onClick={() => act(acceptFriend(p.userId))}><Check size={14} /> {t('friends.accept')}</button>
+                <button className="ghost sm" onClick={() => act(removeFriend(p.userId))}><X size={14} /> {t('friends.decline')}</button>
               </div>
             </div>
           ))}
@@ -132,12 +134,12 @@ export function Friends({
 
       <div className="card">
         <div className="card-head">
-          <h2>Meus amigos {data.friends.length > 0 && <small className="muted-note">({data.friends.length})</small>}</h2>
+          <h2>{t('friends.myFriends')} {data.friends.length > 0 && <small className="muted-note">({data.friends.length})</small>}</h2>
         </div>
         {data.friends.length === 0 ? (
           <div className="soon-block">
             <Users size={26} className="ic-primary" />
-            <p className="muted-note">Você ainda não tem amigos. Adicione alguém pelo nome de usuário acima!</p>
+            <p className="muted-note">{t('friends.empty')}</p>
           </div>
         ) : (
           data.friends.map((f) => (
@@ -145,35 +147,35 @@ export function Friends({
               <span className="friend-name">
                 <Circle size={9} className={`presence-dot ${f.online ? 'on' : 'off'}`} fill="currentColor" />
                 @{f.username}
-                <small className="muted-note">{f.online ? (f.room ? 'em partida' : 'online') : 'offline'}</small>
+                <small className="muted-note">{f.online ? (f.room ? t('friends.inGame') : t('friends.online')) : t('friends.offline')}</small>
               </span>
               <div className="friend-actions">
                 {confirmRemove === f.userId ? (
                   <>
-                    <span className="muted-note">Desfazer amizade?</span>
+                    <span className="muted-note">{t('friends.removeConfirm')}</span>
                     <button
                       className="cta sm danger"
                       onClick={() => { setConfirmRemove(null); void act(removeFriend(f.userId)); }}
                     >
-                      <Check size={14} /> Remover
+                      <Check size={14} /> {t('friends.remove')}
                     </button>
-                    <button className="ghost sm" onClick={() => setConfirmRemove(null)}>Cancelar</button>
+                    <button className="ghost sm" onClick={() => setConfirmRemove(null)}>{t('common.cancel')}</button>
                   </>
                 ) : (
                   <>
                     {f.online && f.room && (
                       <button className="cta sm" onClick={() => onEnterRoom(f.room!)}>
-                        <Play size={14} /> Entrar
+                        <Play size={14} /> {t('friends.enter')}
                       </button>
                     )}
                     {f.online && !f.room && (
-                      <button className="ghost sm" disabled title="Online, fora de uma sala"><Eye size={14} /> Online</button>
+                      <button className="ghost sm" disabled title={t('friends.onlineTitle')}><Eye size={14} /> {t('friends.onlineBtn')}</button>
                     )}
                     <button
                       className="ghost sm danger"
                       onClick={() => setConfirmRemove(f.userId)}
-                      title="Desfazer amizade"
-                      aria-label={`Desfazer amizade com @${f.username}`}
+                      title={t('friends.removeTitle')}
+                      aria-label={t('friends.removeAria', { username: f.username })}
                     >
                       <X size={14} />
                     </button>
@@ -187,12 +189,12 @@ export function Friends({
 
       {data.outgoing.length > 0 && (
         <div className="card">
-          <div className="card-head"><h2>Pedidos enviados</h2></div>
+          <div className="card-head"><h2>{t('friends.outgoing')}</h2></div>
           {data.outgoing.map((p) => (
             <div key={p.userId} className="friend-row">
-              <span className="friend-name muted-note">@{p.username} · aguardando</span>
+              <span className="friend-name muted-note">@{p.username} · {t('friends.waiting')}</span>
               <div className="friend-actions">
-                <button className="ghost sm" onClick={() => act(removeFriend(p.userId))}><X size={14} /> Cancelar</button>
+                <button className="ghost sm" onClick={() => act(removeFriend(p.userId))}><X size={14} /> {t('common.cancel')}</button>
               </div>
             </div>
           ))}

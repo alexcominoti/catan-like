@@ -6,10 +6,11 @@ import {
 import { type BoardLayout, type PlayerColor } from '@trevalis/engine';
 import type { Difficulty } from '@trevalis/bot';
 import { authClient } from '../auth/client.js';
-import { PLAYER_FILL, PLAYER_LABEL } from '../game/theme.js';
+import { PLAYER_FILL } from '../game/theme.js';
 import { pickBotName } from '../game/botNames.js';
 import { Game } from '../Game.js';
 import { GameClient, type ChatMessage } from '../net/client.js';
+import { useT, type MsgKey } from '../i18n/index.js';
 import {
   addBotApi, createRoomApi, getRoomApi, joinRoomApi, leaveRoomApi, removeBotApi,
   roomLink, setBotDifficultyApi, startRoomApi, updateRoomApi,
@@ -18,21 +19,21 @@ import {
 import { getFriends, sendInvite, type FriendView } from './social.js';
 import { LoginGate } from './LoginGate.js';
 
-const MAP_LABEL: Record<string, string> = {
-  standard: 'Clássico (3–4)',
-  large: 'Grande (5–6)',
-  huge: 'Enorme (7–8)',
+const MAP_LABEL: Record<string, MsgKey> = {
+  standard: 'map.standard',
+  large: 'map.large',
+  huge: 'map.huge',
 };
 
 /** Crests por cor (mesmos do jogo) para a UI ficar coerente. */
 const CREST: Record<PlayerColor, string> = { red: '👑', blue: '🌿', white: '⚒️', orange: '🪓', green: '🍀', brown: '🐗', purple: '🔮', pink: '🌸' };
-const DIFF_LABEL: Record<Difficulty, string> = { easy: 'Fácil', medium: 'Médio', hard: 'Difícil' };
+const DIFF_KEY: Record<Difficulty, MsgKey> = { easy: 'room.diff.easy', medium: 'room.diff.medium', hard: 'room.diff.hard' };
 
 /** Os três mapas: cada um define o LIMITE de jogadores e o tabuleiro. */
-const MAPS: { key: BoardLayout; label: string; hint: string; limit: number }[] = [
-  { key: 'standard', label: '3–4 jogadores', hint: '19 hexágonos', limit: 4 },
-  { key: 'large', label: '5–6 jogadores', hint: '30 hexágonos · 2 desertos', limit: 6 },
-  { key: 'huge', label: '7–8 jogadores', hint: '37 hexágonos · 2 desertos', limit: 8 },
+const MAPS: { key: BoardLayout; labelKey: MsgKey; hintKey: MsgKey; limit: number }[] = [
+  { key: 'standard', labelKey: 'room.map.standard.label', hintKey: 'room.map.standard.hint', limit: 4 },
+  { key: 'large', labelKey: 'room.map.large.label', hintKey: 'room.map.large.hint', limit: 6 },
+  { key: 'huge', labelKey: 'room.map.huge.label', hintKey: 'room.map.huge.hint', limit: 8 },
 ];
 
 function mapLimit(boardLayout: string): number {
@@ -62,12 +63,15 @@ function hashSeed(s: string): number {
  */
 export function RoomScreen({
   code,
+  initialPrivate = false,
   onRoomCreated,
   onLeave,
   onNeedAuth,
   onFullscreenChange,
 }: {
   code: string | null;
+  /** Criar já como privada (veio do card "Partida privada" do lobby). */
+  initialPrivate?: boolean;
   /** Sala criada — o App sincroniza a URL para /room/CODE. */
   onRoomCreated: (code: string) => void;
   onLeave: () => void;
@@ -80,7 +84,7 @@ export function RoomScreen({
   }, [code, onFullscreenChange]);
 
   if (!code) {
-    return <CreateRoom onRoomCreated={onRoomCreated} onNeedAuth={onNeedAuth} onBack={onLeave} />;
+    return <CreateRoom isPrivate={initialPrivate} onRoomCreated={onRoomCreated} onNeedAuth={onNeedAuth} onBack={onLeave} />;
   }
   return <Room code={code} onLeave={onLeave} onNeedAuth={onNeedAuth} onFullscreenChange={onFullscreenChange} />;
 }
@@ -103,14 +107,17 @@ const DEFAULT_CONFIG = {
 };
 
 function CreateRoom({
+  isPrivate = false,
   onRoomCreated,
   onNeedAuth,
   onBack,
 }: {
+  isPrivate?: boolean;
   onRoomCreated: (code: string) => void;
   onNeedAuth: () => void;
   onBack: () => void;
 }) {
+  const t = useT();
   const { data: session, isPending } = authClient.useSession();
   const loggedIn = Boolean(session?.user);
   const [error, setError] = useState<string | null>(null);
@@ -119,10 +126,10 @@ function CreateRoom({
   useEffect(() => {
     if (!loggedIn || startedRef.current) return;
     startedRef.current = true;
-    const who = session?.user.name ?? 'você';
+    const who = session?.user.name ?? t('room.you');
     void createRoomApi({
-      name: `Sala de ${who}`.slice(0, 40),
-      isPrivate: false,
+      name: t('room.defaultName', { who }).slice(0, 40),
+      isPrivate,
       maxPlayers: 4,
       boardLayout: 'standard',
       config: { ...DEFAULT_CONFIG },
@@ -133,14 +140,14 @@ function CreateRoom({
         startedRef.current = false;
       }
     });
-  }, [loggedIn, session, onRoomCreated]);
+  }, [loggedIn, session, isPrivate, onRoomCreated, t]);
 
-  if (isPending) return <div className="page"><p className="muted-note">Carregando…</p></div>;
+  if (isPending) return <div className="page"><p className="muted-note">{t('common.loading')}</p></div>;
   if (!loggedIn) {
     return (
       <LoginGate
-        title="Entre para criar uma sala"
-        hint="Você precisa de uma conta para criar uma mesa (com bots ou com amigos)."
+        title={t('room.createGate.title')}
+        hint={t('room.createGate.hint')}
         onNeedAuth={onNeedAuth}
       />
     );
@@ -150,12 +157,12 @@ function CreateRoom({
       <div className="page">
         <div className="card wr-gate">
           <h2>{error}</h2>
-          <button className="ghost" onClick={onBack}><ArrowLeft size={15} /> Voltar ao lobby</button>
+          <button className="ghost" onClick={onBack}><ArrowLeft size={15} /> {t('room.backToLobby')}</button>
         </div>
       </div>
     );
   }
-  return <div className="page"><p className="muted-note">Criando sala…</p></div>;
+  return <div className="page"><p className="muted-note">{t('room.creating')}</p></div>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -186,6 +193,7 @@ function Room({
   onNeedAuth: () => void;
   onFullscreenChange: (fullscreen: boolean) => void;
 }) {
+  const t = useT();
   const { data: session, isPending } = authClient.useSession();
   const user = session?.user;
 
@@ -305,13 +313,13 @@ function Room({
 
   // --- estados de borda ---
   if (isPending) {
-    return <div className="page"><p className="muted-note">Carregando…</p></div>;
+    return <div className="page"><p className="muted-note">{t('common.loading')}</p></div>;
   }
   if (!user) {
     return (
       <LoginGate
-        title="Entre para acessar a sala"
-        hint="Você precisa de uma conta para entrar em uma sala."
+        title={t('room.gate.title')}
+        hint={t('room.gate.hint')}
         onNeedAuth={onNeedAuth}
       />
     );
@@ -321,23 +329,23 @@ function Room({
       <div className="page">
         <div className="card wr-gate">
           <h2>{error}</h2>
-          <button className="ghost" onClick={onLeave}><ArrowLeft size={15} /> Voltar ao lobby</button>
+          <button className="ghost" onClick={onLeave}><ArrowLeft size={15} /> {t('room.backToLobby')}</button>
         </div>
       </div>
     );
   }
   if (!room) {
-    return <div className="page"><p className="muted-note">Entrando na sala…</p></div>;
+    return <div className="page"><p className="muted-note">{t('room.joining')}</p></div>;
   }
 
   // Partida em andamento/finalizada: joga (ou assiste) em tela cheia.
   if (live) {
     if (!online?.state) {
-      return <div className="page"><p className="muted-note">Conectando à partida…</p></div>;
+      return <div className="page"><p className="muted-note">{t('room.connecting')}</p></div>;
     }
     return (
       <>
-        {wsDisconnected && <div className="wr-reconnect-banner">Conexão perdida — reconectando…</div>}
+        {wsDisconnected && <div className="wr-reconnect-banner">{t('room.reconnecting')}</div>}
         <Game
           onExit={exitGame}
           online={{
@@ -371,6 +379,7 @@ function Room({
 /* ------------------------------------------------------------------ */
 
 function LinkCard({ code }: { code: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   function copy() {
     void navigator.clipboard?.writeText(roomLink(code)).then(() => {
@@ -381,11 +390,11 @@ function LinkCard({ code }: { code: string }) {
   return (
     <>
       <div className="card wr-link">
-        <label>Link da sala — compartilhe para convidar</label>
+        <label>{t('room.link.label')}</label>
         <div className="wr-link-row">
           <input readOnly value={roomLink(code)} onFocus={(e) => e.target.select()} />
           <button className="cta" onClick={copy}>
-            {copied ? <><Check size={15} /> Copiado!</> : <><Copy size={15} /> Copiar link</>}
+            {copied ? <><Check size={15} /> {t('room.link.copied')}</> : <><Copy size={15} /> {t('room.link.copy')}</>}
           </button>
         </div>
       </div>
@@ -396,6 +405,7 @@ function LinkCard({ code }: { code: string }) {
 
 /** Convidar amigos online para esta sala (aparece só se houver amigos online). */
 function InviteFriends({ code }: { code: string }) {
+  const t = useT();
   const [online, setOnline] = useState<FriendView[]>([]);
   const [sent, setSent] = useState<Record<string, boolean>>({});
   useEffect(() => {
@@ -406,14 +416,14 @@ function InviteFriends({ code }: { code: string }) {
   if (online.length === 0) return null;
   return (
     <div className="card wr-invite">
-      <label>Convidar amigos online</label>
+      <label>{t('room.invite.label')}</label>
       <div className="wr-invite-list">
         {online.map((f) => (
           <div key={f.userId} className="wr-invite-row">
             <span className="friend-name"><Circle size={9} className="presence-dot on" fill="currentColor" /> @{f.username}</span>
             <button className="cta sm" disabled={sent[f.userId]}
               onClick={() => { void sendInvite(f.userId, code); setSent((s) => ({ ...s, [f.userId]: true })); }}>
-              {sent[f.userId] ? 'Convidado ✓' : <><Send size={13} /> Convidar</>}
+              {sent[f.userId] ? t('room.invite.sent') : <><Send size={13} /> {t('room.invite.send')}</>}
             </button>
           </div>
         ))}
@@ -432,23 +442,24 @@ function SeatRow({
   onRemove?: () => void;
   onDifficulty?: (d: Difficulty) => void;
 }) {
+  const t = useT();
   const c = seat.color as PlayerColor;
   return (
     <div className={`su-seat filled${seat.isBot ? ' bot' : ''}`} style={{ borderLeftColor: PLAYER_FILL[c] }}>
       <div className="su-seat-row">
-        <span className="su-crest" style={{ background: PLAYER_FILL[c] }} title={PLAYER_LABEL[c]}>{CREST[c]}</span>
+        <span className="su-crest" style={{ background: PLAYER_FILL[c] }} title={t(`color.${c}` as MsgKey)}>{CREST[c]}</span>
         <span className="su-name bot-name">
           {seat.isBot ? <Bot size={14} /> : null} {seat.name}
         </span>
-        {seat.isHost && <span className="su-tag host"><Crown size={12} /> Anfitrião</span>}
+        {seat.isHost && <span className="su-tag host"><Crown size={12} /> {t('room.host')}</span>}
         {onRemove && (
-          <button className="su-remove" title="Remover da sala" onClick={onRemove}><X size={15} /></button>
+          <button className="su-remove" title={t('room.removeSeat')} onClick={onRemove}><X size={15} /></button>
         )}
       </div>
       {seat.isBot && onDifficulty && (
         <div className="su-seg xs su-seat-diff">
           {(['easy', 'medium', 'hard'] as Difficulty[]).map((d) => (
-            <button key={d} className={seat.difficulty === d ? 'on' : ''} onClick={() => onDifficulty(d)}>{DIFF_LABEL[d]}</button>
+            <button key={d} className={seat.difficulty === d ? 'on' : ''} onClick={() => onDifficulty(d)}>{t(DIFF_KEY[d])}</button>
           ))}
         </div>
       )}
@@ -457,10 +468,11 @@ function SeatRow({
 }
 
 function OpenSeat({ onAddBot }: { onAddBot?: () => void }) {
+  const t = useT();
   return (
     <div className="su-seat open">
-      <span className="su-open-label"><UserPlus size={16} /> Vaga aberta <em>aguardando jogador</em></span>
-      {onAddBot && <button className="su-addbot" onClick={onAddBot}><Bot size={15} /> Adicionar bot</button>}
+      <span className="su-open-label"><UserPlus size={16} /> {t('room.openSeat')} <em>{t('room.openSeatWaiting')}</em></span>
+      {onAddBot && <button className="su-addbot" onClick={onAddBot}><Bot size={15} /> {t('room.addBot')}</button>}
     </div>
   );
 }
@@ -482,6 +494,7 @@ function HostRoom({
   onError: (e: string | null) => void;
   onLeave: () => void;
 }) {
+  const t = useT();
   // Regras editáveis: estado LOCAL (inicializado uma vez da sala), sincronizado
   // ao servidor por PATCH a cada mudança. O polling só atualiza o ROSTER (não
   // sobrescreve estes inputs enquanto o host mexe).
@@ -558,9 +571,9 @@ function HostRoom({
     <div className="page setup-page">
       <div className="page-head">
         <div>
-          <button className="back-link" onClick={onLeave}><ArrowLeft size={15} /> Voltar ao lobby</button>
-          <span className="eyebrow">SUA SALA</span>
-          <h1>Monte sua mesa.</h1>
+          <button className="back-link" onClick={onLeave}><ArrowLeft size={15} /> {t('room.backToLobby')}</button>
+          <span className="eyebrow">{t('room.yourRoom')}</span>
+          <h1>{t('room.buildTable')}</h1>
         </div>
       </div>
 
@@ -568,7 +581,7 @@ function HostRoom({
 
       <div className="setup-grid">
         <div className="card su-players">
-          <h2 className="su-h"><Users size={18} className="ic-primary" /> Jogadores <span className="su-count">{occupants}/{limit}</span></h2>
+          <h2 className="su-h"><Users size={18} className="ic-primary" /> {t('room.players')} <span className="su-count">{occupants}/{limit}</span></h2>
 
           <div className="su-maps">
             {MAPS.map((m) => {
@@ -578,16 +591,16 @@ function HostRoom({
                   key={m.key}
                   className={`su-map${mapKey === m.key ? ' on' : ''}`}
                   disabled={disabled}
-                  title={disabled ? `Remova jogadores para usar este mapa (máx. ${m.limit})` : undefined}
+                  title={disabled ? t('room.mapDisabled', { limit: m.limit }) : undefined}
                   onClick={() => chooseMap(m.key)}
                 >
-                  <b>{m.label}</b>
-                  <small>{m.hint}</small>
+                  <b>{t(m.labelKey)}</b>
+                  <small>{t(m.hintKey)}</small>
                 </button>
               );
             })}
           </div>
-          <p className="su-note">Convide amigos pelo link ou preencha as vagas com bots — jogue de 2 até {limit}.</p>
+          <p className="su-note">{t('room.inviteNote', { limit })}</p>
 
           {room.players.map((p) => (
             <SeatRow
@@ -603,17 +616,17 @@ function HostRoom({
         </div>
 
         <div className="card su-settings">
-          <h3 className="su-sub">Tabuleiro</h3>
+          <h3 className="su-sub">{t('room.board')}</h3>
           <div className="su-tiles">
-            <SetupTile icon={<Dices size={20} />} label="Números equilibrados" hint="6 e 8 nunca vizinhos"
+            <SetupTile icon={<Dices size={20} />} label={t('room.tile.balancedNumbers')} hint={t('room.tile.balancedNumbersHint')}
               active={numberLayout === 'balanced'}
               onClick={() => {
                 const v = numberLayout === 'balanced' ? 'random' : 'balanced';
                 setNumberLayout(v);
                 void patch({ numberLayout: v });
               }} />
-            <SetupTile icon={<Target size={20} />} label="Deserto no centro"
-              hint={mapKey === 'standard' ? 'ladrão começa no meio' : 'só no mapa 3–4'}
+            <SetupTile icon={<Target size={20} />} label={t('room.tile.desertCenter')}
+              hint={mapKey === 'standard' ? t('room.tile.desertCenterHint') : t('room.tile.desertCenterHintOnly')}
               disabled={mapKey !== 'standard'}
               active={mapKey === 'standard' && desert === 'center'}
               onClick={() => {
@@ -621,14 +634,14 @@ function HostRoom({
                 setDesert(v);
                 void patch({ desert: v });
               }} />
-            <SetupTile icon={<Shield size={20} />} label="Ladrão amigável" hint="não bloqueia quem tem < 3 PV"
+            <SetupTile icon={<Shield size={20} />} label={t('room.tile.friendlyRobber')} hint={t('room.tile.friendlyRobberHint')}
               active={friendlyRobber}
               onClick={() => {
                 const v = !friendlyRobber;
                 setFriendlyRobber(v);
                 void patch({ friendlyRobber: v });
               }} />
-            <SetupTile icon={<Dices size={20} />} label="Dados balanceados" hint="suaviza sequências de azar"
+            <SetupTile icon={<Dices size={20} />} label={t('room.tile.balancedDice')} hint={t('room.tile.balancedDiceHint')}
               active={balancedDice}
               onClick={() => {
                 const v = !balancedDice;
@@ -637,37 +650,37 @@ function HostRoom({
               }} />
           </div>
 
-          <h3 className="su-sub">Configurações avançadas</h3>
+          <h3 className="su-sub">{t('room.advanced')}</h3>
           <div className="su-pace">
-            <label>Ritmo (limite de tempo das ações)</label>
+            <label>{t('room.pace')}</label>
             <div className="su-seg sm">
-              <button className={pace === 'normal' ? 'on' : ''} onClick={() => { setPace('normal'); void patch({ pace: 'normal' }); }}>Normal</button>
-              <button className={pace === 'fast' ? 'on' : ''} onClick={() => { setPace('fast'); void patch({ pace: 'fast' }); }}>Rápido</button>
+              <button className={pace === 'normal' ? 'on' : ''} onClick={() => { setPace('normal'); void patch({ pace: 'normal' }); }}>{t('room.paceNormal')}</button>
+              <button className={pace === 'fast' ? 'on' : ''} onClick={() => { setPace('fast'); void patch({ pace: 'fast' }); }}>{t('room.paceFast')}</button>
             </div>
           </div>
           <div className="su-slider">
-            <label>Pontos para vencer <b>{pointsToWin}</b></label>
+            <label>{t('room.pointsToWin')} <b>{pointsToWin}</b></label>
             <input type="range" min={3} max={15} value={pointsToWin}
               onChange={(e) => { const v = +e.target.value; setPointsToWin(v); patchDebounced({ pointsToWin: v }); }} />
           </div>
           <div className="su-slider">
-            <label>Limite de cartas (descarte no 7) <b>{discardLimit}</b></label>
+            <label>{t('room.discardLimit')} <b>{discardLimit}</b></label>
             <input type="range" min={5} max={15} value={discardLimit}
               onChange={(e) => { const v = +e.target.value; setDiscardLimit(v); patchDebounced({ discardLimit: v }); }} />
           </div>
           <div className="su-slider">
-            <label>Seed (opcional)</label>
+            <label>{t('room.seed')}</label>
             <div className="su-seed">
-              <input value={seedText} placeholder="aleatória"
+              <input value={seedText} placeholder={t('room.seedPlaceholder')}
                 onChange={(e) => { setSeedText(e.target.value); patchDebounced({ seed: e.target.value.trim() === '' ? null : hashSeed(e.target.value.trim()) }); }} />
-              <button onClick={() => { setSeedText(''); void patch({ seed: null }); }}><Shuffle size={14} /> Aleatória</button>
+              <button onClick={() => { setSeedText(''); void patch({ seed: null }); }}><Shuffle size={14} /> {t('room.seedRandom')}</button>
             </div>
           </div>
 
           <div className="su-room-online">
-            <h3 className="su-sub">Sala</h3>
+            <h3 className="su-sub">{t('room.roomSection')}</h3>
             <div className="su-slider">
-              <label>Nome da sala</label>
+              <label>{t('room.roomName')}</label>
               <input
                 className="su-roomname"
                 value={roomName}
@@ -681,15 +694,15 @@ function HostRoom({
               type="button"
             >
               <span className="su-tile-icon"><Lock size={18} /></span>
-              <span className="su-tile-label">Sala privada</span>
-              <span className="su-tile-hint">{isPrivate ? 'só por link; fora da listagem' : 'aparece no lobby público'}</span>
+              <span className="su-tile-label">{t('room.private')}</span>
+              <span className="su-tile-hint">{isPrivate ? t('room.privateOn') : t('room.privateOff')}</span>
             </button>
           </div>
 
           <button className="cta big su-start" disabled={!canStart || starting} onClick={start}>
-            <Play size={16} /> {starting ? 'Iniciando…' : 'Começar partida'}
+            <Play size={16} /> {starting ? t('room.starting') : t('room.start')}
           </button>
-          {!canStart && <p className="su-note">Adicione um bot ou espere um amigo entrar pelo link para começar.</p>}
+          {!canStart && <p className="su-note">{t('room.startHint')}</p>}
         </div>
       </div>
     </div>
@@ -701,13 +714,14 @@ function HostRoom({
 /* ------------------------------------------------------------------ */
 
 function GuestRoom({ code, room, onLeave }: { code: string; room: RoomView; onLeave: () => void }) {
+  const t = useT();
   const openCount = Math.max(0, room.maxPlayers - room.players.length);
   return (
     <div className="page">
       <div className="page-head">
         <div>
-          <button className="back-link" onClick={onLeave}><ArrowLeft size={15} /> Sair da sala</button>
-          <span className="eyebrow">SALA DE ESPERA</span>
+          <button className="back-link" onClick={onLeave}><ArrowLeft size={15} /> {t('room.leaveRoom')}</button>
+          <span className="eyebrow">{t('room.waitingRoom')}</span>
           <h1>{room.name} {room.isPrivate && <Lock size={18} className="ic-muted" />}</h1>
         </div>
       </div>
@@ -716,10 +730,10 @@ function GuestRoom({ code, room, onLeave }: { code: string; room: RoomView; onLe
 
       <div className="card">
         <h2 className="su-h">
-          <Users size={18} className="ic-primary" /> Jogadores
+          <Users size={18} className="ic-primary" /> {t('room.players')}
           <span className="su-count">{room.players.length}/{room.maxPlayers}</span>
         </h2>
-        <p className="muted-note">Mapa: {MAP_LABEL[room.boardLayout] ?? room.boardLayout}</p>
+        <p className="muted-note">{t('room.mapPrefix')} {MAP_LABEL[room.boardLayout] ? t(MAP_LABEL[room.boardLayout]!) : room.boardLayout}</p>
         <div className="su-players">
           {room.players.map((p) => (
             <SeatRow key={p.color} seat={p} />
@@ -728,7 +742,7 @@ function GuestRoom({ code, room, onLeave }: { code: string; room: RoomView; onLe
             <OpenSeat key={`open-${i}`} />
           ))}
         </div>
-        <p className="muted-note wr-wait">Aguardando o anfitrião iniciar a partida…</p>
+        <p className="muted-note wr-wait">{t('room.waitingHost')}</p>
       </div>
     </div>
   );
