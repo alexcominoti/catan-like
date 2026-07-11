@@ -374,6 +374,8 @@ export const ptBR = {
   'game.btn.card': 'Carta',
   'game.free': 'grátis',
   'game.costTitle': 'Custo: {icons}',
+  'game.costStock': 'Custo: {icons} · {n} em estoque',
+  'game.noStock': 'sem estoque',
   'game.trade': 'Trocar',
   'game.pass': 'Passar',
   'game.scroll': 'Pergaminho',

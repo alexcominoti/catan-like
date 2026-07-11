@@ -368,6 +368,17 @@ input:not([type]) {
   color: #ff8a8a;
 }
 
+/* Estoque de peças no botão (vilas/cidades/estradas restantes) + estado "sem estoque". */
+.build-label { display: inline-flex; align-items: center; gap: 4px; }
+.build-stock {
+  min-width: 15px; height: 15px; padding: 0 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 999px; background: var(--panel-2); color: var(--muted);
+  font-size: 10px; font-weight: 700; letter-spacing: 0; font-variant-numeric: tabular-nums;
+}
+.build-btn.no-stock .build-stock { background: #ffd9d0; color: var(--accent-dark); }
+.build-btn small.no-stock-note { color: var(--accent); font-weight: 700; letter-spacing: 0; }
+
 .trade-bank {
   display: inline-flex;
   align-items: center;

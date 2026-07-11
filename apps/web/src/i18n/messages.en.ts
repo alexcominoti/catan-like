@@ -372,6 +372,8 @@ export const en: Record<MsgKey, string> = {
   'game.btn.card': 'Card',
   'game.free': 'free',
   'game.costTitle': 'Cost: {icons}',
+  'game.costStock': 'Cost: {icons} · {n} in stock',
+  'game.noStock': 'out of stock',
   'game.trade': 'Trade',
   'game.pass': 'Pass',
   'game.scroll': 'Scroll',

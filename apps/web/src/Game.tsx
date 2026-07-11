@@ -556,13 +556,19 @@ export function Game({
               </div>
               <div className="hand-actions">
                 <BuildButton label={t('game.btn.road')} cost={COSTS.road} active={mode === 'buildRoad'} hand={localPlayer.hand}
-                  enabled={(myMain && canAffordUI(localPlayer.hand, COSTS.road)) || (myMain && state.pendingFreeRoads > 0)}
+                  stock={localPlayer.pieces.roads}
+                  enabled={myMain && (canAffordUI(localPlayer.hand, COSTS.road) || state.pendingFreeRoads > 0) && localPlayer.pieces.roads > 0}
                   free={state.pendingFreeRoads > 0} onClick={() => toggle('buildRoad')} t={t} />
                 <BuildButton label={t('game.btn.settlement')} cost={COSTS.settlement} active={mode === 'buildSettlement'} hand={localPlayer.hand}
-                  enabled={myMain && canAffordUI(localPlayer.hand, COSTS.settlement)} onClick={() => toggle('buildSettlement')} t={t} />
+                  stock={localPlayer.pieces.settlements}
+                  enabled={myMain && canAffordUI(localPlayer.hand, COSTS.settlement) && localPlayer.pieces.settlements > 0}
+                  onClick={() => toggle('buildSettlement')} t={t} />
                 <BuildButton label={t('game.btn.city')} cost={COSTS.city} active={mode === 'buildCity'} hand={localPlayer.hand}
-                  enabled={myMain && canAffordUI(localPlayer.hand, COSTS.city)} onClick={() => toggle('buildCity')} t={t} />
+                  stock={localPlayer.pieces.cities}
+                  enabled={myMain && canAffordUI(localPlayer.hand, COSTS.city) && localPlayer.pieces.cities > 0}
+                  onClick={() => toggle('buildCity')} t={t} />
                 <BuildButton label={t('game.btn.card')} cost={COSTS.progressCard} hand={localPlayer.hand}
+                  stock={state.devDeckCount ?? state.devDeck.length}
                   enabled={myMain && canAffordUI(localPlayer.hand, COSTS.progressCard) && (state.devDeckCount ?? state.devDeck.length) > 0}
                   onClick={() => dispatch({ t: 'buyProgressCard' })} t={t} />
                 <span className="trade-bank">
@@ -726,6 +732,7 @@ function BuildButton({
   enabled,
   free,
   hand,
+  stock,
   onClick,
   t,
 }: {
@@ -735,14 +742,24 @@ function BuildButton({
   enabled: boolean;
   free?: boolean;
   hand: Record<Resource, number>;
+  /** Peças restantes no estoque (vilas/cidades/estradas; ou cartas no baralho). */
+  stock: number;
   onClick: () => void;
   t: TFn;
 }) {
+  const outOfStock = stock <= 0;
+  const affordable = canAffordUI(hand, cost) || free;
   return (
-    <button className={`build-btn${active ? ' active' : ''}`} disabled={!enabled} onClick={onClick}
-      title={t('game.costTitle', { icons: costIcons(cost) })}>
-      <span>{label}</span>
-      <small className={canAffordUI(hand, cost) || free ? '' : 'short'}>{free ? t('game.free') : costIcons(cost)}</small>
+    <button
+      className={`build-btn${active ? ' active' : ''}${outOfStock ? ' no-stock' : ''}`}
+      disabled={!enabled}
+      onClick={onClick}
+      title={t('game.costStock', { icons: costIcons(cost), n: stock })}
+    >
+      <span className="build-label">{label}<span className="build-stock">{stock}</span></span>
+      <small className={outOfStock ? 'no-stock-note' : affordable ? '' : 'short'}>
+        {outOfStock ? t('game.noStock') : free ? t('game.free') : costIcons(cost)}
+      </small>
     </button>
   );
 }
