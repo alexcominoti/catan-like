@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Bell, Check, CheckCheck, X, Play, Circle, UserPlus, LogIn } from 'lucide-react';
+import { Bell, Check, CheckCheck, X, Play, Circle, UserPlus, LogIn, Clock } from 'lucide-react';
 import {
   acceptFriend,
   getNotifications,
@@ -14,6 +14,17 @@ import { useT, useLang, type Lang } from '../i18n/index.js';
 const POLL_MS = 20_000;
 
 const EMPTY: Notifications = { notifications: [], onlineFriends: [], rejoin: [], unreadCount: 0 };
+
+/** Segundos restantes até um prazo ISO (>= 0), ou null se não há prazo. */
+function secondsLeft(deadlineAt: string | null, nowMs: number): number | null {
+  if (!deadlineAt) return null;
+  return Math.max(0, Math.round((new Date(deadlineAt).getTime() - nowMs) / 1000));
+}
+
+/** Formata segundos como "M:SS" (contador de reconexão). */
+function fmtCountdown(secs: number): string {
+  return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+}
 
 /** Tempo relativo curto ("há 5 min", "ontem") a partir de um ISO, no idioma atual. */
 function timeAgo(iso: string, lang: Lang, nowLabel: string): string {
@@ -38,6 +49,8 @@ export function NotificationsBell({ onEnterRoom }: { onEnterRoom: (code: string)
   const t = useT();
   const [data, setData] = useState<Notifications>(EMPTY);
   const [open, setOpen] = useState(false);
+  // "Tica" a cada segundo enquanto o painel está aberto (contador de reconexão).
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const ref = useRef<HTMLDivElement>(null);
 
   const refresh = useCallback(() => {
@@ -60,6 +73,14 @@ export function NotificationsBell({ onEnterRoom }: { onEnterRoom: (code: string)
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open]);
 
+  // Enquanto aberto, atualiza o "agora" a cada segundo (contador de reconexão).
+  useEffect(() => {
+    if (!open) return;
+    setNowMs(Date.now());
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [open]);
+
   const readOne = (id: string) => void markNotificationRead(id).then(refresh);
   const readAll = () => void markAllNotificationsRead().then(refresh);
 
@@ -69,7 +90,13 @@ export function NotificationsBell({ onEnterRoom }: { onEnterRoom: (code: string)
     if (n.data?.code) onEnterRoom(n.data.code);
   };
 
-  const hasAny = data.notifications.length > 0 || data.rejoin.length > 0 || data.onlineFriends.length > 0;
+  // Esconde na hora as salas cuja janela de reconexão já esgotou (o servidor
+  // também filtra a cada poll, mas o contador local é por segundo).
+  const rejoin = data.rejoin.filter((r) => {
+    const left = secondsLeft(r.deadlineAt, nowMs);
+    return left == null || left > 0;
+  });
+  const hasAny = data.notifications.length > 0 || rejoin.length > 0 || data.onlineFriends.length > 0;
 
   return (
     <div className="notif" ref={ref}>
@@ -87,16 +114,26 @@ export function NotificationsBell({ onEnterRoom }: { onEnterRoom: (code: string)
             )}
           </div>
 
-          {/* Reconectar (ao vivo — vale enquanto a sala existir e der para voltar). */}
-          {data.rejoin.length > 0 && (
+          {/* Reconectar (ao vivo — vale enquanto a janela de reconexão não esgota). */}
+          {rejoin.length > 0 && (
             <div className="notif-section notif-rejoin">
               <span className="notif-label"><LogIn size={12} /> {t('notif.reconnect')}</span>
-              {data.rejoin.map((r) => (
-                <div key={r.code} className="notif-row">
-                  <span className="notif-name">🎮 {r.name} <small className="muted-note">{t('notif.inProgress')}</small></span>
-                  <button className="cta sm" onClick={() => { setOpen(false); onEnterRoom(r.code); }}><LogIn size={13} /> {t('notif.back')}</button>
-                </div>
-              ))}
+              {rejoin.map((r) => {
+                const left = secondsLeft(r.deadlineAt, nowMs);
+                return (
+                  <div key={r.code} className="notif-row">
+                    <span className="notif-name">🎮 {r.name}{' '}
+                      <small className="muted-note">{t('notif.inProgress')}</small>
+                      {left != null && (
+                        <small className="notif-countdown" title={`${fmtCountdown(left)} ${t('notif.reconnectLeft')}`}>
+                          <Clock size={11} /> {fmtCountdown(left)}
+                        </small>
+                      )}
+                    </span>
+                    <button className="cta sm" onClick={() => { setOpen(false); onEnterRoom(r.code); }}><LogIn size={13} /> {t('notif.back')}</button>
+                  </div>
+                );
+              })}
             </div>
           )}
 

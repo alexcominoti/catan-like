@@ -128,6 +128,7 @@ export const en: Record<MsgKey, string> = {
   'notif.markAllRead': 'Mark all as read',
   'notif.reconnect': 'Reconnect',
   'notif.inProgress': 'in progress',
+  'notif.reconnectLeft': 'to reconnect',
   'notif.back': 'Return',
   'notif.onlineFriends': 'Friends online',
   'notif.inGame': 'in a game',

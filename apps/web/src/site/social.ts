@@ -110,6 +110,8 @@ export interface AppNotification {
 export interface RejoinRoom {
   code: string;
   name: string;
+  /** Prazo (ISO) até quando ainda dá para reconectar; null = sem contador. */
+  deadlineAt: string | null;
 }
 
 export interface Notifications {

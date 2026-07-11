@@ -448,10 +448,16 @@ async function handleRequest(
     const unread = await unreadCount(u.id);
     const onlineFriends = f.friends.filter((x) => x.online);
     // Reconexão: partidas em andamento das quais sou membro, MENOS a que estou
-    // jogando agora (presença) — é para voltar a uma sala da qual caí/saí.
-    // Ao vivo/derivada: vale enquanto a sala existir e der para voltar.
+    // jogando agora (presença). Só aparece enquanto AINDA dá para voltar — a janela
+    // de reconexão (10 min desde que caí) não expirou; passado o prazo, some (e o
+    // assento vira abandono). `deadlineAt` alimenta o contador na notificação.
+    const now = Date.now();
     const rejoinAll = await listRejoinableRooms(u.id);
-    const rejoin = rejoinAll.filter((r) => presence.roomOf(u.id) !== r.code);
+    const rejoin = rejoinAll
+      .filter((r) => presence.roomOf(u.id) !== r.code)
+      .map((r) => ({ ...r, deadline: manager.get(r.code)?.gameRoom?.reconnectDeadline(u.id) ?? null }))
+      .filter((r) => r.deadline == null || r.deadline > now)
+      .map((r) => ({ code: r.code, name: r.name, deadlineAt: r.deadline != null ? new Date(r.deadline).toISOString() : null }));
     sendJson(res, 200, {
       notifications,
       onlineFriends,

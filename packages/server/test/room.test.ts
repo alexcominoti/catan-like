@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RESOURCES, type PlayerColor } from '@trevalis/engine';
 import type { Difficulty } from '@trevalis/bot';
-import { EMPTY_ROOM_TTL_MS, GameRoom, LiveRoom, RECONNECT_GRACE_MS, RoomManager } from '../src/room.js';
+import { EMPTY_ROOM_TTL_MS, GameRoom, LiveRoom, RECONNECT_GRACE_MS, RECONNECT_WINDOW_MS, RoomManager } from '../src/room.js';
 import type { RoomConfig } from '../src/protocol.js';
 
 /** userId convencional nos testes: "u-<cor>". */
@@ -306,6 +306,24 @@ describe('LiveRoom (presenca, graca de reconexao, sala vazia)', () => {
     live.disconnect('espectador-1', 'conn-1', RECONNECT_GRACE_MS, onExpire);
     vi.advanceTimersByTime(RECONNECT_GRACE_MS + 10);
     expect(onExpire).not.toHaveBeenCalled();
+  });
+
+  it('janela de reconexao: reassume dentro de 10 min; vira espectador depois', () => {
+    const g = new GameRoom('RW', makeConfig({ humans: ['red', 'blue'] }));
+    expect(g.seat(uid('red'))).toBe('red'); // conecta
+    expect(g.reconnectDeadline(uid('red'))).toBeNull(); // conectado: sem prazo
+
+    g.markDisconnected(uid('red'));
+    const dl = g.reconnectDeadline(uid('red'))!;
+    expect(dl - Date.now()).toBeGreaterThan(RECONNECT_WINDOW_MS - 1000); // ~10 min de prazo
+
+    vi.advanceTimersByTime(RECONNECT_WINDOW_MS - 1000); // ainda dentro da janela
+    expect(g.seat(uid('red'))).toBe('red'); // reassume o assento
+    expect(g.reconnectDeadline(uid('red'))).toBeNull(); // reconectou: sem prazo
+
+    g.markDisconnected(uid('red'));
+    vi.advanceTimersByTime(RECONNECT_WINDOW_MS + 1); // janela esgotou
+    expect(g.seat(uid('red'))).toBeNull(); // nao pode mais reassumir (espectador)
   });
 
   it('isEmptyFor: so verdadeiro apos o TTL sem nenhum humano conectado', () => {

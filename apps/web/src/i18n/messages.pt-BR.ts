@@ -130,6 +130,7 @@ export const ptBR = {
   'notif.markAllRead': 'Marcar todas como lidas',
   'notif.reconnect': 'Reconectar',
   'notif.inProgress': 'em andamento',
+  'notif.reconnectLeft': 'para reconectar',
   'notif.back': 'Voltar',
   'notif.onlineFriends': 'Amigos online',
   'notif.inGame': 'em partida',

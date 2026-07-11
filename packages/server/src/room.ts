@@ -33,14 +33,26 @@ const BONUS_PER_ACTION = 15;
 /** Teto do bonus acumulado num mesmo turno. */
 const MAX_TURN_BONUS = 60;
 
-/** Segundos de "graca" apos uma desconexao antes de a vaga virar bot medio. */
+/** "Graca" apos uma desconexao antes de a vaga virar BOT medio (o jogo continua). */
 export const RECONNECT_GRACE_MS = 15_000;
+
+/**
+ * Janela para o jogador RECONECTAR e reassumir o assento apos cair. Depois dela,
+ * nao da mais para voltar (vira espectador) e a vaga fica como bot (abandono no
+ * fim). Diferente do grace acima: o bot assume aos 15s, mas o humano ainda pode
+ * retomar ate 10 min.
+ */
+export const RECONNECT_WINDOW_MS = 10 * 60 * 1000;
 
 /** Janela (s) para responder a uma proposta de BOT antes de ele resolver sozinho. */
 const BOT_TRADE_WINDOW_S = 8;
 
-/** Tempo (ms) de sala vazia (sem nenhum humano conectado) ate ser limpa. */
-export const EMPTY_ROOM_TTL_MS = 5 * 60 * 1000;
+/**
+ * Tempo de sala vazia (sem NENHUM humano conectado) ate ser limpa. Alinhado a
+ * janela de reconexao: uma partida solo-vs-bots sobrevive o tempo todo em que o
+ * jogador ainda poderia voltar.
+ */
+export const EMPTY_ROOM_TTL_MS = RECONNECT_WINDOW_MS;
 
 /**
  * Sala autoritativa: guarda UM GameState e e a unica autoridade sobre as regras.
@@ -56,8 +68,11 @@ export class GameRoom {
   readonly code: string;
   readonly config: RoomConfig;
   state: GameState;
-  /** Assentos humanos: cor + nome + dono (userId) + conectado agora ou nao. */
-  readonly humans: { color: PlayerColor; name: string; userId: string; connected: boolean }[];
+  /**
+   * Assentos humanos: cor + nome + dono (userId) + conectado agora ou nao +
+   * quando caiu (`disconnectedAt`, ms) para a janela de reconexao.
+   */
+  readonly humans: { color: PlayerColor; name: string; userId: string; connected: boolean; disconnectedAt?: number }[];
   private readonly botSet: Set<PlayerColor>;
   /** Turnos seguidos perdidos por tempo, por cor (zera ao agir manualmente). */
   private readonly timeoutStreak = new Map<PlayerColor, number>();
@@ -106,20 +121,43 @@ export class GameRoom {
     return this.humans.filter((h) => this.botSet.has(h.color)).map((h) => h.color);
   }
 
-  /** Conecta o dono da vaga (por userId). Reassume o controle se a vaga virou bot. Null = nao e jogador (espectador). */
+  /**
+   * Conecta o dono da vaga (por userId). Reassume o controle se a vaga virou bot.
+   * Null = nao e jogador OU a JANELA de reconexao ja expirou (>10 min): nesse caso
+   * entra como espectador e o assento fica como bot (abandono).
+   */
   seat(userId: string): PlayerColor | null {
     const slot = this.humans.find((h) => h.userId === userId);
     if (!slot) return null;
+    // Janela de reconexao esgotada: nao pode mais reassumir.
+    if (slot.disconnectedAt != null && Date.now() - slot.disconnectedAt >= RECONNECT_WINDOW_MS) {
+      return null;
+    }
     slot.connected = true;
+    slot.disconnectedAt = undefined;
     this.botSet.delete(slot.color); // humano reassume o controle (deixa de ser bot)
     this.timeoutStreak.set(slot.color, 0);
     return slot.color;
   }
 
-  /** Desconexao: so marca a vaga como offline. Quem decide QUANDO vira bot e o chamador (grace period). */
+  /** Desconexao: marca a vaga offline e carimba o instante (janela de reconexao). */
   markDisconnected(userId: string): void {
     const slot = this.humans.find((h) => h.userId === userId);
-    if (slot) slot.connected = false;
+    if (slot) {
+      slot.connected = false;
+      slot.disconnectedAt = Date.now();
+    }
+  }
+
+  /**
+   * Prazo (ms epoch) ate quando `userId` ainda pode reconectar e reassumir, ou
+   * null se esta conectado / nunca caiu / nao e assento. Passado o prazo, `seat()`
+   * ja recusa. Usado para exibir o contador na notificacao "Reconectar".
+   */
+  reconnectDeadline(userId: string): number | null {
+    const slot = this.humans.find((h) => h.userId === userId);
+    if (!slot || slot.disconnectedAt == null) return null;
+    return slot.disconnectedAt + RECONNECT_WINDOW_MS;
   }
 
   /** Estourou a graca de reconexao: a vaga vira BOT MEDIO. O servidor pilota (paced). */
