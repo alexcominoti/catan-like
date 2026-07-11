@@ -19,7 +19,7 @@ import {
 import {
   Hexagon, Crown, Clock, Layers, Sparkles, Scroll, Swords, Trophy,
   Dices, ArrowLeftRight, Hand, MessageSquare, Send, Landmark,
-  Volume2, VolumeX, HelpCircle, LogOut, Share2, Download, Ban,
+  Volume2, VolumeX, HelpCircle, LogOut, Share2, Download, Ban, X,
 } from 'lucide-react';
 import { suggestSetupSettlement } from '@trevalis/bot';
 import { Board, type InteractionMode } from './board/Board.js';
@@ -119,6 +119,9 @@ export function Game({
   // até o proponente resolver/expirar) para o popup não reaparecer a cada estado.
   const [dismissedTradeKey, setDismissedTradeKey] = useState<string | null>(null);
   const [help, setHelp] = useState(false);
+  // Fim de jogo: permite FECHAR o placar para inspecionar o tabuleiro (só leitura)
+  // e reabrir depois. Ao terminar, o board já fica não-interativo (effMode 'idle').
+  const [resultsDismissed, setResultsDismissed] = useState(false);
   // Quando o ladrao pode roubar de 2+ jogadores, o humano escolhe a vitima.
   const [robberChoice, setRobberChoice] = useState<{ hexId: string; victims: PlayerColor[] } | null>(null);
   // Confirmacao antes de construir.
@@ -685,10 +688,16 @@ export function Game({
           />
         );
       })()}
-      {state.phase === 'ended' && state.winner && (
+      {state.phase === 'ended' && state.winner && !resultsDismissed && (
         <EndGameOverlay state={state} localColor={localColor} elapsed={elapsed} turns={turnCount} onExit={onExit}
           botColors={online.bots} awayColors={online.awayColors} viewerColor={online.viewerColor}
+          onClose={() => setResultsDismissed(true)}
           onPlayer={(username, x, y) => setPlayerMenu({ username, x, y })} />
+      )}
+      {state.phase === 'ended' && state.winner && resultsDismissed && (
+        <button className="reopen-result" onClick={() => setResultsDismissed(false)}>
+          <Trophy size={15} /> {t('game.viewResult')}
+        </button>
       )}
       {playerMenu && (
         <PlayerMenu username={playerMenu.username} data={relations} x={playerMenu.x} y={playerMenu.y}
@@ -1133,7 +1142,7 @@ function standingsOf(state: GameState): { color: PlayerColor; name: string; pts:
  * quando disponível (celular), senão baixa o PNG.
  */
 function EndGameOverlay({
-  state, localColor, elapsed, turns, onExit, botColors, awayColors, viewerColor, onPlayer,
+  state, localColor, elapsed, turns, onExit, botColors, awayColors, viewerColor, onClose, onPlayer,
 }: {
   state: GameState;
   localColor: PlayerColor;
@@ -1143,6 +1152,8 @@ function EndGameOverlay({
   botColors: PlayerColor[];
   awayColors: PlayerColor[];
   viewerColor: PlayerColor | null;
+  /** Fecha o placar para inspecionar o tabuleiro (só leitura). */
+  onClose: () => void;
   onPlayer: (username: string, x: number, y: number) => void;
 }) {
   const t = useT();
@@ -1175,8 +1186,11 @@ function EndGameOverlay({
   }
 
   return (
-    <div className="overlay endgame-overlay">
+    <div className="overlay endgame-overlay" onClick={onClose}>
       <div className="modal endgame-modal" onClick={(e) => e.stopPropagation()}>
+        <button className="endgame-close" aria-label={t('game.closeResult')} title={t('game.viewBoard')} onClick={onClose}>
+          <X size={18} />
+        </button>
         <div className="endgame-crown" style={{ background: PLAYER_FILL[winner] }}><Trophy size={30} /></div>
         <h3 className="endgame-title">{iWon ? t('game.youWon') : t('game.playerWon', { name: winnerName })}</h3>
         <p className="muted-note endgame-sub">{t('game.endSub', { time: fmtTime(elapsed), turns })}</p>
@@ -1202,6 +1216,7 @@ function EndGameOverlay({
           <button className="primary" onClick={share} disabled={busy}>
             {navigatorCanShare() ? <Share2 size={15} /> : <Download size={15} />} {busy ? t('game.generating') : t('game.shareResult')}
           </button>
+          <button className="ghost" onClick={onClose}><Hexagon size={15} /> {t('game.viewBoard')}</button>
           <button onClick={onExit}><LogOut size={15} /> {t('game.exit')}</button>
         </div>
       </div>

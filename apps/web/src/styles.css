@@ -1628,7 +1628,23 @@ button.link {
 .ghost.sm.danger:hover { background: #fbe6d8; }
 
 /* ---- Tela de fim de jogo + compartilhar resultado (Tier 3) ---- */
-.endgame-modal { max-width: 460px; text-align: center; }
+.endgame-modal { max-width: 460px; text-align: center; position: relative; }
+/* Fechar o placar para inspecionar o tabuleiro (só leitura) + reabrir. */
+.endgame-close {
+  position: absolute; top: 12px; right: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: 9px;
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); cursor: pointer;
+}
+.endgame-close:hover { background: var(--border); color: var(--text); }
+.reopen-result {
+  position: fixed; top: 70px; left: 50%; transform: translateX(-50%); z-index: 60;
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 9px 18px; border-radius: 999px;
+  background: var(--accent); color: #fff; border: none; font-weight: 600; font-size: 14px; cursor: pointer;
+  box-shadow: 0 12px 30px -8px rgba(80, 40, 20, .5);
+}
+.reopen-result:hover { background: var(--accent-dark); }
 .endgame-crown { width: 68px; height: 68px; border-radius: 18px; display: flex; align-items: center; justify-content: center; color: #fff; margin: 0 auto 10px; box-shadow: 0 10px 24px -8px rgba(80,40,20,.5); }
 .endgame-title { margin: 0; font-size: 30px; }
 .endgame-sub { margin: 2px 0 14px; }
