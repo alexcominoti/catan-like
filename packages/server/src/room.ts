@@ -33,8 +33,12 @@ const BONUS_PER_ACTION = 15;
 /** Teto do bonus acumulado num mesmo turno. */
 const MAX_TURN_BONUS = 60;
 
-/** "Graca" apos uma desconexao antes de a vaga virar BOT medio (o jogo continua). */
-export const RECONNECT_GRACE_MS = 15_000;
+/**
+ * "Graca" apos uma desconexao antes de a vaga virar BOT medio (que joga de fato).
+ * Da 2 min ao jogador para voltar antes de um bot assumir as acoes. (O prazo de
+ * turno ainda pode auto-passar a vez de quem caiu — anti-travamento; ver PACE_TIMERS.)
+ */
+export const RECONNECT_GRACE_MS = 2 * 60 * 1000;
 
 /**
  * Janela para o jogador RECONECTAR e reassumir o assento apos cair. Depois dela,
