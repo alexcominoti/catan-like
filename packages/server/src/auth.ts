@@ -33,6 +33,19 @@ function trustedOrigins(): string[] {
     const t = o.trim();
     if (t) set.add(t);
   }
+  // DEV: aceita localhost <-> 127.0.0.1 e as portas comuns do Vite, para nao travar
+  // o cadastro/login por causa do host/porta usado no navegador. Producao NAO entra
+  // aqui (usa exatamente APP_URL + TRUSTED_ORIGINS).
+  if (process.env.NODE_ENV !== 'production') {
+    for (const o of [...set]) {
+      if (o.includes('://localhost')) set.add(o.replace('://localhost', '://127.0.0.1'));
+      else if (o.includes('://127.0.0.1')) set.add(o.replace('://127.0.0.1', '://localhost'));
+    }
+    for (const port of [5173, 5174, 8080]) {
+      set.add(`http://localhost:${port}`);
+      set.add(`http://127.0.0.1:${port}`);
+    }
+  }
   return [...set];
 }
 

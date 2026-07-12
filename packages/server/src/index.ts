@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './load-env.js'; // carrega o .env da raiz ANTES de qualquer import ler process.env
 import { createHttpServer } from './http.js';
 import { attachGameServer, RoomManager, WS_PATH } from './server.js';
 
