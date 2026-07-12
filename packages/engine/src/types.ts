@@ -17,10 +17,25 @@ export type PlayerColor = 'red' | 'blue' | 'white' | 'orange' | 'green' | 'brown
  */
 export const PLAYER_COLORS: readonly PlayerColor[] = ['red', 'blue', 'white', 'orange', 'green', 'brown', 'purple', 'pink'];
 
-/** Tipo de terreno de um hex. 'desert' nao produz e comeca com o bloqueador. */
-export type Terrain = 'forest' | 'hills' | 'pasture' | 'field' | 'mountain' | 'desert';
+/**
+ * Qual conjunto de regras/mapa da partida. 'base' = jogo classico (default; um
+ * estado sem `expansion` e tratado como base). 'sea' = Navegadores (mar, navios,
+ * ouro, pirata). Extensivel depois ('cities', 'traders'...).
+ */
+export type ExpansionId = 'base' | 'sea';
 
-/** Recurso produzido por cada terreno (desert = nenhum). */
+/**
+ * Tipo de terreno de um hex. 'desert' nao produz e comeca com o bloqueador.
+ * Expansao Navegadores: 'sea' (agua, nao produz, recebe navios/portos) e 'gold'
+ * (rende recurso a ESCOLHA do jogador ao sair o numero).
+ */
+export type Terrain = 'forest' | 'hills' | 'pasture' | 'field' | 'mountain' | 'desert' | 'sea' | 'gold';
+
+/**
+ * Recurso produzido por cada terreno. `null` = nao produz recurso fixo:
+ * `desert`/`sea` nao produzem; `gold` produz, mas o recurso e ESCOLHIDO (tratado
+ * a parte na producao, nunca por este mapa).
+ */
 export const TERRAIN_RESOURCE: Record<Terrain, Resource | null> = {
   forest: 'wood',
   hills: 'brick',
@@ -28,6 +43,8 @@ export const TERRAIN_RESOURCE: Record<Terrain, Resource | null> = {
   field: 'grain',
   mountain: 'ore',
   desert: null,
+  sea: null,
+  gold: null,
 };
 
 export type BuildingKind = 'settlement' | 'city';
@@ -39,6 +56,15 @@ export interface Building {
 }
 
 export interface Road {
+  owner: PlayerColor;
+  edgeId: string;
+}
+
+/**
+ * Navio (Navegadores): peca de rota em aresta de MAR. Analogo a `Road`, mas
+ * vive no mapa `ships` do estado e conta para a Maior Rota junto das estradas.
+ */
+export interface Ship {
   owner: PlayerColor;
   edgeId: string;
 }
@@ -61,8 +87,13 @@ export interface Player {
   progressCardsBoughtThisTurn: ProgressCard[];
   /** Cavaleiros jogados (Maior Exercito). */
   knightsPlayed: number;
-  /** Pecas restantes no estoque do jogador. */
-  pieces: { roads: number; settlements: number; cities: number };
+  /** Pecas restantes no estoque do jogador. `ships` so existe em Navegadores. */
+  pieces: { roads: number; settlements: number; cities: number; ships?: number };
+  /**
+   * Apenas Navegadores: ilhas em que este jogador ja ganhou o VP de colonizacao
+   * (para nao pontuar a mesma ilha duas vezes). Lista de islandIds. Ausente = base.
+   */
+  islandsScored?: number[];
   /** Apenas em estados PROJETADOS (fog of war): total de cartas na mao do adversario (composicao oculta). */
   hiddenHand?: number;
   /** Apenas em estados PROJETADOS: quantas cartas de progresso o adversario tem (identidades ocultas). */
@@ -76,6 +107,8 @@ export interface Player {
  *  - main: acoes livres (construir, comerciar, comprar, jogar cartas).
  *  - discard: alguem precisa descartar por causa do 7.
  *  - moveBlocker: jogador da vez precisa mover o bloqueador (apos 7 ou Cavaleiro).
+ *  - chooseGold: (Navegadores) um ou mais jogadores escolhem os recursos que a
+ *    producao de hex de OURO lhes rende, antes de a vez seguir para 'main'.
  *  - ended: ha um vencedor.
  */
 export type Phase =
@@ -85,6 +118,7 @@ export type Phase =
   | 'main'
   | 'discard'
   | 'moveBlocker'
+  | 'chooseGold'
   | 'ended';
 
 export interface RngState {
@@ -102,10 +136,16 @@ export interface Hex {
   cx: number;
   cy: number;
   terrain: Terrain;
-  /** Numero do token (2..12, sem 7). null no deserto. */
+  /** Numero do token (2..12, sem 7). null no deserto/mar. */
   number: number | null;
   /** IDs dos 6 vertices (cantos), em ordem. */
   corners: string[];
+  /**
+   * Apenas Navegadores: id da ilha (massa de terra) a que o hex pertence. A ilha
+   * "principal" (inicial) e a de id 0; colonizar as demais rende VP de ilha.
+   * Ausente no jogo-base (tabuleiro de uma unica massa de terra).
+   */
+  island?: number;
 }
 
 export interface Vertex {
@@ -176,6 +216,11 @@ export interface Embargo {
 
 export interface GameState {
   phase: Phase;
+  /**
+   * Conjunto de regras/mapa. Ausente = 'base' (retrocompat: snapshots antigos nao
+   * tem este campo). Liga as regras de Navegadores quando === 'sea'.
+   */
+  expansion?: ExpansionId;
   players: Player[];
   currentPlayer: PlayerColor;
   /** Indice da rodada de setup (controla a ordem serpente; 0..7 em jogo de 4). */
@@ -188,6 +233,11 @@ export interface GameState {
   pendingFreeRoads: number;
   /** Quantas cartas cada jogador ainda precisa descartar (apos um 7). */
   pendingDiscards: Partial<Record<PlayerColor, number>>;
+  /**
+   * Apenas Navegadores: quantos recursos cada jogador ainda escolhe da producao de
+   * hex(es) de OURO (fase 'chooseGold'). Molde de `pendingDiscards`. Ausente = base.
+   */
+  pendingGold?: Partial<Record<PlayerColor, number>>;
   /** Para onde voltar depois de mover o bloqueador ('roll' se veio de Cavaleiro pre-rolagem). */
   returnPhaseAfterBlocker: 'roll' | 'main' | null;
   /** Oferta de comercio entre jogadores ativa (ou null). */
@@ -205,11 +255,22 @@ export interface GameState {
   board: Board;
   buildings: Record<string, Building>; // por vertexId
   roads: Record<string, Road>; // por edgeId
+  /** Apenas Navegadores: navios por edgeId (arestas de mar). Ausente = base. */
+  ships?: Record<string, Ship>;
   bank: Record<Resource, number>;
   devDeck: ProgressCard[];
   /** Apenas em estados PROJETADOS: quantas cartas restam no baralho (ordem oculta). */
   devDeckCount?: number;
   blocker: { hexId: string };
+  /**
+   * Apenas Navegadores: o PIRATA (2o bloqueador), num hex de MAR. Bloqueia
+   * construir/mover navios adjacentes e permite roubar de quem tem navio vizinho.
+   * Ausente/null = sem pirata (jogo-base). Movido pelo mesmo fluxo de `moveBlocker`
+   * quando o hex-alvo e mar.
+   */
+  pirate?: { hexId: string } | null;
+  /** Apenas Navegadores: VP por colonizar uma ilha nova (config do cenario). */
+  islandBonus?: number;
   dice: [number, number] | null;
   /**
    * Dados balanceados (antídoto para sequências de azar, estilo Colonist): quando
@@ -231,6 +292,11 @@ export type GameEvent =
   | { t: 'diceRolled'; dice: [number, number]; sum: number }
   | { t: 'produced'; gains: Record<PlayerColor, Partial<Record<Resource, number>>> }
   | { t: 'built'; kind: 'road' | 'settlement' | 'city'; owner: PlayerColor; id: string }
+  | { t: 'shipBuilt'; owner: PlayerColor; edgeId: string }
+  | { t: 'shipMoved'; owner: PlayerColor; from: string; to: string }
+  | { t: 'pirateMoved'; hexId: string; by: PlayerColor; stoleFrom?: PlayerColor; resource?: Resource }
+  | { t: 'goldChosen'; owner: PlayerColor; resources: Partial<Record<Resource, number>> }
+  | { t: 'islandSettled'; owner: PlayerColor; island: number; bonus: number }
   | { t: 'progressCardBought'; owner: PlayerColor }
   | { t: 'progressCardPlayed'; owner: PlayerColor; card: ProgressCard }
   | { t: 'blockerMoved'; hexId: string; by: PlayerColor; stoleFrom?: PlayerColor; resource?: Resource }
@@ -257,6 +323,9 @@ export type Action =
   | { t: 'buildSettlement'; vertexId: string }
   | { t: 'buildRoad'; edgeId: string }
   | { t: 'buildCity'; vertexId: string }
+  | { t: 'buildShip'; edgeId: string }
+  | { t: 'moveShip'; from: string; to: string }
+  | { t: 'chooseGoldResource'; resources: Partial<Record<Resource, number>> }
   | { t: 'buyProgressCard' }
   | { t: 'playKnight' }
   | { t: 'playRoadBuilding' }

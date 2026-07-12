@@ -4,6 +4,7 @@ import {
   scoreOf,
   handSize,
   robberVictims,
+  pirateVictims,
   longestRoadLength,
   maritimeRate,
   COSTS,
@@ -316,9 +317,12 @@ export function Game({
   }
   function onHex(hid: string) {
     if (effMode !== 'moveBlocker') return;
-    // Mesma regra do servidor (robberVictims respeita o fog of war via hiddenHand).
-    // O servidor rouba sozinho quando ha 1 alvo; aqui so perguntamos se ha 2+.
-    const victims = robberVictims(state, hid, state.currentPlayer);
+    // Navegadores: um hex de MAR move o pirata (rouba de quem tem navio vizinho);
+    // terra move o ladrao. Mesma regra do servidor; aqui so perguntamos se ha 2+ alvos.
+    const seaHex = state.board.hexes[hid]?.terrain === 'sea';
+    const victims = seaHex
+      ? pirateVictims(state, hid, state.currentPlayer)
+      : robberVictims(state, hid, state.currentPlayer);
     if (victims.length >= 2) {
       setRobberChoice({ hexId: hid, victims }); // humano escolhe de quem roubar
     } else {
@@ -361,6 +365,8 @@ export function Game({
 
   const cur = getPlayer(state, state.currentPlayer);
   const myMain = myTurn && state.phase === 'main';
+  const isSea = state.expansion === 'sea';
+  const longestLabel = isSea ? t('game.longestRoute') : t('game.longestRoad');
   const myRoll = myTurn && state.phase === 'roll';
   const bestRate = maritimeRate(state, localColor, give);
   const playerColor = PLAYER_FILL[state.currentPlayer];
@@ -495,7 +501,7 @@ export function Game({
                   </div>
                   {(hasRoad || hasArmy) && (
                     <div className="noble-badges">
-                      {hasRoad && <TitleBadge icon={<Scroll size={11} />} label={t('game.longestRoad')} />}
+                      {hasRoad && <TitleBadge icon={<Scroll size={11} />} label={longestLabel} />}
                       {hasArmy && <TitleBadge icon={<Swords size={11} />} label={t('game.largestArmy')} />}
                     </div>
                   )}
@@ -505,7 +511,7 @@ export function Game({
           })}
 
           <div className="title-cards">
-            <TitleCard icon={<Scroll size={15} className="ic-primary" />} title={t('game.longestRoad')}
+            <TitleCard icon={<Scroll size={15} className="ic-primary" />} title={longestLabel}
               owner={state.longestRoad.owner ? t('game.roadOwner', { name: colorLabel(t, state.longestRoad.owner), n: state.longestRoad.length }) : t('game.inDispute')}
               earned={!!state.longestRoad.owner} hint={t('game.longestRoadHint')} />
             <TitleCard icon={<Swords size={15} className="ic-primary" />} title={t('game.largestArmy')}
@@ -567,6 +573,12 @@ export function Game({
                   stock={localPlayer.pieces.cities}
                   enabled={myMain && canAffordUI(localPlayer.hand, COSTS.city) && localPlayer.pieces.cities > 0}
                   onClick={() => toggle('buildCity')} t={t} />
+                {isSea && (
+                  <BuildButton label={t('game.btn.ship')} cost={COSTS.ship} active={mode === 'buildShip'} hand={localPlayer.hand}
+                    stock={localPlayer.pieces.ships ?? 0}
+                    enabled={myMain && (canAffordUI(localPlayer.hand, COSTS.ship) || state.pendingFreeRoads > 0) && (localPlayer.pieces.ships ?? 0) > 0}
+                    free={state.pendingFreeRoads > 0} onClick={() => toggle('buildShip')} t={t} />
+                )}
                 <BuildButton label={t('game.btn.card')} cost={COSTS.progressCard} hand={localPlayer.hand}
                   stock={state.devDeckCount ?? state.devDeck.length}
                   enabled={myMain && canAffordUI(localPlayer.hand, COSTS.progressCard) && (state.devDeckCount ?? state.devDeck.length) > 0}
@@ -691,6 +703,19 @@ export function Game({
             count={state.pendingDiscards[localColor]!}
             onDiscard={(resources) => dispatch({ t: 'discard', resources })}
             onSelect={(resources) => online.client.sendSelect({ t: 'discard', resources })}
+          />
+        );
+      })()}
+      {(() => {
+        // Navegadores: escolho os recursos do OURO só quando EU tenho pendência.
+        if (state.phase !== 'chooseGold' || isSpectator) return null;
+        if ((state.pendingGold?.[localColor] ?? 0) <= 0) return null;
+        return (
+          <GoldChoiceModal
+            state={state}
+            color={localColor}
+            pending={state.pendingGold![localColor]!}
+            onConfirm={(resources) => dispatch({ t: 'chooseGoldResource', resources })}
           />
         );
       })()}
@@ -1139,6 +1164,51 @@ function YearOfPlentyModal({
   );
 }
 
+/**
+ * Navegadores: o jogador escolhe os recursos que a produção de OURO lhe rende (do
+ * banco). O total exigido é o mínimo entre a pendência e o que o banco ainda tem
+ * (o motor limita igual — evita travar). Sem botão de cancelar: é obrigatório.
+ */
+function GoldChoiceModal({
+  state,
+  color,
+  pending,
+  onConfirm,
+}: {
+  state: GameState;
+  color: PlayerColor;
+  pending: number;
+  onConfirm: (resources: Partial<Record<Resource, number>>) => void;
+}) {
+  const t = useT();
+  const bank = state.bank;
+  const bankTotal = RESOURCES.reduce((s, r) => s + bank[r], 0);
+  const need = Math.min(pending, bankTotal);
+  const [picks, setPicks] = useState<Record<Resource, number>>({ wood: 0, brick: 0, wool: 0, grain: 0, ore: 0 });
+  const total = RESOURCES.reduce((s, r) => s + picks[r], 0);
+  return (
+    <div className="overlay">
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h3>{t('game.goldTitle')}</h3>
+        <p className="muted-note">{t('game.selectedF', { total, count: need })}</p>
+        <div className="trade-grid" style={{ gridTemplateColumns: '1fr' }}>
+          <div>
+            {RESOURCES.map((r) => (
+              <div key={r} className="trade-row">
+                <span>{RESOURCE_ICON[r]} {resLabel(t, r)} ({bank[r]})</span>
+                <Stepper value={picks[r]} max={Math.min(bank[r], picks[r] + Math.max(0, need - total))} onChange={(v) => setPicks((p) => ({ ...p, [r]: v }))} />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="modal-actions">
+          <button className="primary" disabled={total !== need} onClick={() => onConfirm(picks)}>{t('game.take')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 function getPlayer(state: GameState, color: PlayerColor) {
   return state.players.find((p) => p.color === color)!;
@@ -1441,6 +1511,7 @@ function phaseLabel(state: GameState): string {
 function headline(state: GameState, myTurn: boolean, botTurn: boolean, curName: string, t: TFn): string {
   if (state.phase === 'ended') return t('game.head.won', { name: colorLabel(t, state.winner!) });
   if (state.phase === 'discard') return t('game.head.discard');
+  if (state.phase === 'chooseGold') return t('game.head.chooseGold');
   if (botTurn) return t('game.head.botPlaying', { name: curName });
   if (!myTurn) return t('game.head.waiting');
   if (state.phase === 'moveBlocker') return t('game.head.moveRobber');
@@ -1604,6 +1675,16 @@ function describeEvent(e: GameEvent, state: GameState, t: TFn): string {
       return t('game.log.tradeExecuted', { a: nm(state, e.from, t), b: nm(state, e.with, t) });
     case 'tradeCancelled':
       return t('game.log.tradeCancelled');
+    case 'shipBuilt':
+      return t('game.log.shipBuilt', { name: nm(state, e.owner, t) });
+    case 'pirateMoved':
+      return e.stoleFrom ? t('game.log.pirateSteal', { name: nm(state, e.stoleFrom, t) }) : t('game.log.pirateMoved');
+    case 'goldChosen': {
+      const items = (Object.entries(e.resources) as [Resource, number][]).filter(([, n]) => n > 0).map(([r, n]) => `${n}${RESOURCE_ICON[r]}`);
+      return t('game.log.goldChosen', { name: nm(state, e.owner, t), items: items.join(' ') });
+    }
+    case 'islandSettled':
+      return t('game.log.islandSettled', { name: nm(state, e.owner, t), n: e.bonus });
     case 'longestRoad':
       return e.owner ? t('game.log.longestRoad', { name: nm(state, e.owner, t) }) : t('game.log.longestRoadLost');
     case 'largestArmy':

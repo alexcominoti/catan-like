@@ -2,9 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   COSTS,
   distanceRuleOk,
+  edgeTouchesLand,
+  isSeaEdge,
   robberAllowed,
   roadConnects,
-  vertexTouchesPlayerRoad,
+  shipConnects,
+  vertexTouchesPlayerNetwork,
   type Action,
   type GameState,
   type PlayerColor,
@@ -23,6 +26,7 @@ export type InteractionMode =
   | 'buildRoad'
   | 'buildSettlement'
   | 'buildCity'
+  | 'buildShip' // Navegadores: navio em aresta de mar (armado pelo botao)
   | 'moveBlocker';
 
 interface BoardProps {
@@ -44,7 +48,7 @@ type Cost = Partial<Record<Resource, number>>;
 interface BuildTarget {
   action: Action;
   cost: Cost;
-  kind: 'settlement' | 'city' | 'road';
+  kind: 'settlement' | 'city' | 'road' | 'ship';
 }
 
 /** Item clicado aguardando confirmacao (com a posicao do chip na tela). */
@@ -57,7 +61,7 @@ const NO_COST: Cost = {};
 /** Alvo de construcao num vertice para o modo atual (ou null). */
 function vertexTarget(state: GameState, mode: InteractionMode, vid: string, me: PlayerColor): BuildTarget | null {
   const b = state.buildings[vid];
-  const canSettle = distanceRuleOk(state, vid) && vertexTouchesPlayerRoad(state, me, vid);
+  const canSettle = distanceRuleOk(state, vid) && vertexTouchesPlayerNetwork(state, me, vid);
   const isOwnSettlement = !!b && b.owner === me && b.kind === 'settlement';
   switch (mode) {
     case 'placeSettlement':
@@ -77,12 +81,21 @@ function vertexTarget(state: GameState, mode: InteractionMode, vid: string, me: 
 
 /** Alvo de construcao numa aresta para o modo atual (ou null). */
 function edgeTarget(state: GameState, mode: InteractionMode, eid: string, me: PlayerColor): BuildTarget | null {
-  if (state.roads[eid]) return null;
+  if (state.roads[eid] || state.ships?.[eid]) return null;
   if (mode === 'placeRoad') {
     const ok = !!state.setupLastVertex && state.board.edges[eid]!.v.includes(state.setupLastVertex);
     return ok ? { action: { t: 'placeRoad', edgeId: eid }, cost: NO_COST, kind: 'road' } : null;
   }
+  // Navegadores: navio armado pelo botao — so em aresta de mar, conectado, livre do pirata.
+  if (mode === 'buildShip') {
+    const pirateBlocks = !!state.pirate && state.board.edges[eid]!.hexes.includes(state.pirate.hexId);
+    if (!isSeaEdge(state, eid) || pirateBlocks || !shipConnects(state, me, eid)) return null;
+    const cost = state.pendingFreeRoads > 0 ? NO_COST : COSTS.ship;
+    return { action: { t: 'buildShip', edgeId: eid }, cost, kind: 'ship' };
+  }
   if (mode === 'buildRoad' || mode === 'mainBuild') {
+    // Estrada so em aresta que toca terra (no mar, use um navio pelo botao).
+    if (!edgeTouchesLand(state, eid)) return null;
     // Estradas grátis da carta "2 Estradas" (pendingFreeRoads) não custam nada —
     // o chip de confirmação precisa refletir isso (senão trava por "falta tijolo").
     // Espelha a prioridade do reduce.ts (free road antes do pagamento).
@@ -129,19 +142,24 @@ function norm(v: Pt): Pt {
 export function Board({ state, mode, hintVertex, onBuild, onHex }: BoardProps) {
   const t = useT();
   const { board, buildings, roads, blocker } = state;
+  const ships = state.ships ?? {};
+  const pirate = state.pirate ?? null;
   const me = state.currentPlayer;
   const myHand = state.players.find((p) => p.color === me)?.hand;
   const hexMode = mode === 'moveBlocker';
   // Marcadores de spot disponivel: aparecem no setup e quando um tipo esta armado;
   // no modo livre da fase principal ('mainBuild') NAO aparecem (so no hover).
   const showMarkers = mode === 'placeSettlement' || mode === 'placeRoad'
-    || mode === 'buildRoad' || mode === 'buildSettlement' || mode === 'buildCity';
+    || mode === 'buildRoad' || mode === 'buildSettlement' || mode === 'buildCity' || mode === 'buildShip';
   // Ladrao amigavel: so destaca/permite hexes validos (se houver alternativa).
   const enforceFriendly =
     hexMode && state.friendlyRobber &&
     board.hexOrder.some((h) => h !== blocker.hexId && robberAllowed(state, h, me));
+  // Mover bloqueador: alvo != posicao atual do ladrao E do pirata (Navegadores: um
+  // hex de mar move o pirata; o motor decide pelo terreno do hex).
   const canBlock = (hid: string) =>
-    hexMode && hid !== blocker.hexId && (!enforceFriendly || robberAllowed(state, hid, me));
+    hexMode && hid !== blocker.hexId && pirate?.hexId !== hid &&
+    (!enforceFriendly || robberAllowed(state, hid, me));
   const [hoverV, setHoverV] = useState<string | null>(null);
   const [hoverE, setHoverE] = useState<string | null>(null);
   const [hoverH, setHoverH] = useState<string | null>(null);
@@ -296,7 +314,7 @@ export function Board({ state, mode, hintVertex, onBuild, onHex }: BoardProps) {
                 <g pointerEvents="none">
                   <path d={path} fill={active ? 'rgba(255,224,138,0.45)' : 'rgba(255,224,138,0.2)'} />
                   <path d={path} className={sel ? undefined : 'robber-ring'} fill="none" stroke={sel ? '#2e9e57' : '#f3c44b'} strokeWidth={sel ? 4 : 3} strokeLinejoin="round" />
-                  {active && <Blocker cx={hex.cx} cy={hex.cy - 26} />}
+                  {active && (hex.terrain === 'sea' ? <Pirate cx={hex.cx} cy={hex.cy - 22} /> : <Blocker cx={hex.cx} cy={hex.cy - 26} />)}
                 </g>
               );
             })()}
@@ -329,6 +347,7 @@ export function Board({ state, mode, hintVertex, onBuild, onHex }: BoardProps) {
           <g key={hid} pointerEvents="none">
             {hex.number !== null && <NumberToken cx={hex.cx} cy={hex.cy + 6} n={hex.number} />}
             {blocker.hexId === hid && <Blocker cx={hex.cx} cy={hex.cy - 26} />}
+            {pirate?.hexId === hid && <Pirate cx={hex.cx} cy={hex.cy - 22} />}
           </g>
         );
       })}
@@ -348,6 +367,10 @@ export function Board({ state, mode, hintVertex, onBuild, onHex }: BoardProps) {
               <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#ffffff" strokeOpacity={0.28} strokeWidth={2.2} strokeLinecap="round" />
             </g>
           );
+        }
+        const ship = ships[eid];
+        if (ship) {
+          return <ShipPiece key={eid} a={a} b={b} color={PLAYER_FILL[ship.owner]} />;
         }
         const target = edgeTarget(state, mode, eid, me);
         if (!target) return null;
@@ -566,6 +589,39 @@ function Blocker({ cx, cy }: { cx: number; cy: number }) {
   );
 }
 
+/** Pirata (Navegadores): barquinho escuro com bandeira — distinto do ladrão. */
+function Pirate({ cx, cy }: { cx: number; cy: number }) {
+  return (
+    <g pointerEvents="none" filter="url(#softShadow)">
+      <ellipse cx={cx} cy={cy + 12} rx={12} ry={3.4} fill="#000" opacity={0.3} />
+      {/* casco */}
+      <path d={`M ${cx - 12} ${cy + 3} Q ${cx - 13} ${cy + 12} ${cx} ${cy + 12} Q ${cx + 13} ${cy + 12} ${cx + 12} ${cy + 3} Z`} fill="#26303a" stroke="#0c1118" strokeWidth={1.3} />
+      {/* mastro */}
+      <line x1={cx} y1={cy + 3} x2={cx} y2={cy - 16} stroke="#0c1118" strokeWidth={1.8} strokeLinecap="round" />
+      {/* bandeira */}
+      <path d={`M ${cx} ${cy - 16} L ${cx + 12} ${cy - 13} L ${cx} ${cy - 10} Z`} fill="#12181f" stroke="#0c1118" strokeWidth={0.8} />
+      <circle cx={cx + 4.5} cy={cy - 13} r={1.6} fill="#f4ead2" />
+    </g>
+  );
+}
+
+/** Navio (Navegadores): linha na cor do dono com barquinho no meio (distinto da estrada). */
+function ShipPiece({ a, b, color }: { a: Pt; b: Pt; color: string }) {
+  const mx = (a.x + b.x) / 2;
+  const my = (a.y + b.y) / 2;
+  const ang = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+  return (
+    <g className="piece-enter" filter="url(#softShadow)">
+      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#0c1118" strokeWidth={9} strokeLinecap="round" opacity={0.5} />
+      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={color} strokeWidth={5.5} strokeLinecap="round" strokeDasharray="7 4" />
+      <g transform={`translate(${mx} ${my}) rotate(${ang})`}>
+        <path d="M -8 0 Q -9 6 -3 6 L 3 6 Q 9 6 8 0 Z" fill="#f4ead2" stroke="#0c1118" strokeWidth={1.1} />
+        <path d="M 0 -1 L 0 -9 L 6 -1 Z" fill={color} stroke="#0c1118" strokeWidth={0.8} />
+      </g>
+    </g>
+  );
+}
+
 /** Motivos vetoriais por terreno (maiores, atras do token). */
 function TerrainMotif({ terrain, cx, cy }: { terrain: Terrain; cx: number; cy: number }) {
   const y = cy - 14;
@@ -633,6 +689,32 @@ function TerrainMotif({ terrain, cx, cy }: { terrain: Terrain; cx: number; cy: n
             stroke="#5b8f4a" strokeWidth={4.5} strokeLinecap="round" strokeLinejoin="round" fill="none" />
         </g>
       );
+    case 'sea':
+      return (
+        <g pointerEvents="none" opacity={0.5} stroke="#e8f6ff" strokeWidth={2.4} strokeLinecap="round" fill="none">
+          {[y - 4, y + 6, y + 16].map((yy, i) => (
+            <path key={i} d={`M ${cx - 20} ${yy} q 5 -4 10 0 q 5 4 10 0 q 5 -4 10 0`} />
+          ))}
+        </g>
+      );
+    case 'gold': {
+      const coins = [
+        { x: cx - 10, y: y + 2 },
+        { x: cx + 9, y: y - 1 },
+        { x: cx - 1, y: y + 12 },
+        { x: cx + 4, y: y + 6 },
+      ];
+      return (
+        <g pointerEvents="none">
+          {coins.map((c, i) => (
+            <g key={i}>
+              <ellipse cx={c.x} cy={c.y} rx={8} ry={6} fill="#f4d13c" stroke="#a8791a" strokeWidth={1.3} />
+              <ellipse cx={c.x} cy={c.y - 1.5} rx={5} ry={3.4} fill="#ffe98a" opacity={0.85} />
+            </g>
+          ))}
+        </g>
+      );
+    }
     default:
       return null;
   }

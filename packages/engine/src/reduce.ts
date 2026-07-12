@@ -5,19 +5,28 @@ import {
   LARGEST_ARMY_MIN,
   LONGEST_ROAD_MIN,
   canAfford,
+  computeGoldPending,
   computeProduction,
   distanceRuleOk,
+  edgeTouchesLand,
   getPlayer,
   handTotal,
-  longestRoadLength,
+  islandsAtVertex,
+  isSeaEdge,
+  isSeaGame,
+  isSeaHex,
+  longestNetworkLength,
   maritimeRate,
   payToBank,
+  pirateVictims,
   publicScoreOf,
   roadConnects,
   robberAllowed,
   robberVictims,
   scoreOf,
-  vertexTouchesPlayerRoad,
+  shipConnects,
+  vertexTouchesMainIsland,
+  vertexTouchesPlayerNetwork,
 } from './rules.js';
 import type {
   Action,
@@ -62,6 +71,12 @@ export function reduce(state: GameState, by: PlayerColor, action: Action): Reduc
       return buildSettlement(state, by, action.vertexId);
     case 'buildCity':
       return buildCity(state, by, action.vertexId);
+    case 'buildShip':
+      return buildShip(state, by, action.edgeId);
+    case 'moveShip':
+      return moveShip(state, by, action.from, action.to);
+    case 'chooseGoldResource':
+      return chooseGoldResource(state, by, action.resources);
     case 'buyProgressCard':
       return buyProgressCard(state, by);
     case 'tradeBank':
@@ -107,6 +122,10 @@ function placeSetupSettlement(state: GameState, by: PlayerColor, vertexId: strin
   if (state.setupLastVertex) return err('Voce ja colocou a vila; agora coloque a estrada.');
   if (!state.board.vertices[vertexId]) return err('Vertice inexistente.');
   if (!distanceRuleOk(state, vertexId)) return err('Vertice ocupado ou viola a regra de distancia.');
+  // Navegadores: as colocacoes iniciais ficam restritas a ilha principal.
+  if (isSeaGame(state) && !vertexTouchesMainIsland(state, vertexId)) {
+    return err('No inicio, so da pra construir na ilha principal.');
+  }
 
   const next = clone(state);
   const p = getPlayer(next, by);
@@ -148,6 +167,8 @@ function placeSetupRoad(state: GameState, by: PlayerColor, edgeId: string): Redu
   const edge = state.board.edges[edgeId];
   if (!edge) return err('Aresta inexistente.');
   if (state.roads[edgeId]) return err('Aresta ja ocupada.');
+  // Navegadores: a estrada inicial fica em terra (a vila inicial é na ilha principal).
+  if (isSeaGame(state) && !edgeTouchesLand(state, edgeId)) return err('A estrada inicial precisa tocar terra.');
   if (!edge.v.includes(state.setupLastVertex)) {
     return err('A estrada precisa tocar a vila recem-colocada.');
   }
@@ -245,6 +266,18 @@ function rollDice(state: GameState, by: PlayerColor): ReduceResult {
     }
   }
   events.push({ t: 'produced', gains });
+
+  // Navegadores: hexes de OURO rendem recursos a ESCOLHER — antes de seguir para
+  // 'main', quem tem construcao adjacente a um ouro que saiu escolhe os recursos.
+  if (isSeaGame(next)) {
+    const goldPending = computeGoldPending(next, sum);
+    if (Object.keys(goldPending).length > 0) {
+      next.pendingGold = goldPending;
+      next.phase = 'chooseGold';
+      return ok(next, events);
+    }
+  }
+
   next.phase = 'main';
   return ok(next, events);
 }
@@ -288,6 +321,8 @@ function moveBlocker(
   if (state.phase !== 'moveBlocker') return err('Nao e hora de mover o bloqueador.');
   if (by !== state.currentPlayer) return err('Nao e a sua vez.');
   if (!state.board.hexes[hexId]) return err('Hex inexistente.');
+  // Navegadores: um hex de MAR move o PIRATA; um hex de TERRA move o LADRAO.
+  if (isSeaGame(state) && isSeaHex(state, hexId)) return movePirate(state, by, hexId, stealFrom);
   if (state.blocker.hexId === hexId) return err('O bloqueador precisa mudar de lugar.');
 
   // Ladrao amigavel: nao pode bloquear um hex que toca quem tem <3 PV se houver
@@ -339,6 +374,51 @@ function moveBlocker(
   return ok(next, events);
 }
 
+/**
+ * Navegadores: move o PIRATA para um hex de mar e rouba de quem tem navio vizinho.
+ * Autoridade no servidor (as vitimas saem de `pirateVictims`); `stealFrom` so
+ * desambigua com 2+ alvos. Compartilha o fluxo de retorno de fase de `moveBlocker`.
+ */
+function movePirate(state: GameState, by: PlayerColor, hexId: string, stealFrom?: PlayerColor): ReduceResult {
+  if (state.pirate?.hexId === hexId) return err('O pirata precisa mudar de lugar.');
+
+  const victims = pirateVictims(state, hexId, by);
+  let target: PlayerColor | undefined;
+  if (victims.length === 1) {
+    target = victims[0];
+  } else if (victims.length >= 2) {
+    if (!stealFrom || !victims.includes(stealFrom)) return err('Escolha de quem roubar.');
+    target = stealFrom;
+  }
+
+  const next = clone(state);
+  next.pirate = { hexId };
+  const events: GameEvent[] = [];
+  if (target) {
+    const resource = stealRandomResource(next, by, target);
+    events.push({ t: 'pirateMoved', hexId, by, stoleFrom: target, resource });
+  } else {
+    events.push({ t: 'pirateMoved', hexId, by });
+  }
+
+  next.phase = next.returnPhaseAfterBlocker ?? 'main';
+  next.returnPhaseAfterBlocker = null;
+  return ok(next, events);
+}
+
+/** Rouba uma carta aleatoria de `from` para `by` (usa o PRNG do estado). */
+function stealRandomResource(next: GameState, by: PlayerColor, from: PlayerColor): Resource {
+  const victim = getPlayer(next, from);
+  const pool: Resource[] = [];
+  for (const res of RESOURCES) for (let i = 0; i < victim.hand[res]; i++) pool.push(res);
+  const r = nextInt(next.rng, pool.length);
+  next.rng = r.rng;
+  const stolen = pool[r.value]!;
+  victim.hand[stolen] -= 1;
+  getPlayer(next, by).hand[stolen] += 1;
+  return stolen;
+}
+
 // ---------------------------------------------------------------------------
 // Construcao (fase principal)
 // ---------------------------------------------------------------------------
@@ -348,7 +428,9 @@ function buildRoad(state: GameState, by: PlayerColor, edgeId: string): ReduceRes
   if (by !== state.currentPlayer) return err('Nao e a sua vez.');
   const edge = state.board.edges[edgeId];
   if (!edge) return err('Aresta inexistente.');
-  if (state.roads[edgeId]) return err('Aresta ja ocupada.');
+  if (state.roads[edgeId] || state.ships?.[edgeId]) return err('Aresta ja ocupada.');
+  // Navegadores: estrada so em aresta que toca terra (o mar e para navios).
+  if (isSeaGame(state) && !edgeTouchesLand(state, edgeId)) return err('Estrada so em terra; use um navio no mar.');
   if (!roadConnects(state, by, edgeId)) return err('A estrada precisa conectar a algo seu.');
 
   const next = clone(state);
@@ -375,7 +457,7 @@ function buildSettlement(state: GameState, by: PlayerColor, vertexId: string): R
   if (by !== state.currentPlayer) return err('Nao e a sua vez.');
   if (!state.board.vertices[vertexId]) return err('Vertice inexistente.');
   if (!distanceRuleOk(state, vertexId)) return err('Vertice ocupado ou viola a regra de distancia.');
-  if (!vertexTouchesPlayerRoad(state, by, vertexId)) return err('Precisa de uma estrada sua ate aqui.');
+  if (!vertexTouchesPlayerNetwork(state, by, vertexId)) return err('Precisa de uma estrada ou navio seu ate aqui.');
 
   const next = clone(state);
   const p = getPlayer(next, by);
@@ -386,10 +468,27 @@ function buildSettlement(state: GameState, by: PlayerColor, vertexId: string): R
   next.buildings[vertexId] = { kind: 'settlement', owner: by, vertexId };
 
   const events: GameEvent[] = [{ t: 'built', kind: 'settlement', owner: by, id: vertexId }];
+  // Navegadores: colonizar uma ilha nova rende VP de ilha.
+  awardIslandVP(next, by, vertexId, events);
   // Uma vila nova pode cortar a estrada mais longa de um adversario.
   updateLongestRoad(next, events);
   checkWin(next, by, events);
   return ok(next, events);
+}
+
+/**
+ * Navegadores: se `vertexId` toca uma ilha MENOR que `by` ainda nao colonizou,
+ * registra-a e concede `islandBonus` PV (evento islandSettled).
+ */
+function awardIslandVP(state: GameState, by: PlayerColor, vertexId: string, events: GameEvent[]): void {
+  if (!state.islandBonus) return;
+  const p = getPlayer(state, by);
+  if (!p.islandsScored) p.islandsScored = [];
+  for (const isl of islandsAtVertex(state, vertexId)) {
+    if (p.islandsScored.includes(isl)) continue;
+    p.islandsScored.push(isl);
+    events.push({ t: 'islandSettled', owner: by, island: isl, bonus: state.islandBonus });
+  }
 }
 
 function buildCity(state: GameState, by: PlayerColor, vertexId: string): ReduceResult {
@@ -410,6 +509,88 @@ function buildCity(state: GameState, by: PlayerColor, vertexId: string): ReduceR
 
   const events: GameEvent[] = [{ t: 'built', kind: 'city', owner: by, id: vertexId }];
   checkWin(next, by, events);
+  return ok(next, events);
+}
+
+// ---------------------------------------------------------------------------
+// Navegadores: navios e escolha do ouro
+// ---------------------------------------------------------------------------
+
+function buildShip(state: GameState, by: PlayerColor, edgeId: string): ReduceResult {
+  if (state.phase !== 'main') return err('So da pra construir na fase principal.');
+  if (by !== state.currentPlayer) return err('Nao e a sua vez.');
+  if (!isSeaGame(state)) return err('Navios so existem em Navegadores.');
+  const edge = state.board.edges[edgeId];
+  if (!edge) return err('Aresta inexistente.');
+  if (state.roads[edgeId] || state.ships?.[edgeId]) return err('Aresta ja ocupada.');
+  if (!isSeaEdge(state, edgeId)) return err('Navio so em aresta de mar.');
+  if (state.pirate && edge.hexes.includes(state.pirate.hexId)) return err('O pirata bloqueia esse trecho de mar.');
+  if (!shipConnects(state, by, edgeId)) return err('O navio precisa conectar a algo seu no mar.');
+
+  const next = clone(state);
+  const p = getPlayer(next, by);
+  if ((p.pieces.ships ?? 0) <= 0) return err('Sem navios no estoque.');
+  // Estradas gratis (carta "2 Estradas") tambem pagam navios em Navegadores.
+  if (next.pendingFreeRoads > 0) {
+    next.pendingFreeRoads -= 1;
+  } else {
+    if (!canAfford(p, COSTS.ship)) return err('Recursos insuficientes para navio.');
+    payToBank(next, p, COSTS.ship);
+  }
+  p.pieces.ships = (p.pieces.ships ?? 0) - 1;
+  if (!next.ships) next.ships = {};
+  next.ships[edgeId] = { owner: by, edgeId };
+
+  const events: GameEvent[] = [{ t: 'shipBuilt', owner: by, edgeId }];
+  updateLongestRoad(next, events);
+  checkWin(next, by, events);
+  return ok(next, events);
+}
+
+/**
+ * Mover um navio "aberto" (Navegadores). Adiado nesta versao: o nucleo de
+ * Navegadores (construir navios, ilhas, ouro, pirata, Maior Rota) ja funciona sem
+ * mover navios; a regra do "navio aberto" entra numa iteracao seguinte.
+ */
+function moveShip(_state: GameState, _by: PlayerColor, _from: string, _to: string): ReduceResult {
+  return err('Mover navios ainda nao esta disponivel nesta versao.');
+}
+
+/**
+ * Navegadores: um jogador com ouro pendente (fase 'chooseGold') escolhe QUAIS
+ * recursos receber. Valida contra o que resta no banco (se o banco nao cobre tudo,
+ * o pendente e limitado ao total disponivel — evita travar). Quando todos resolvem,
+ * a vez volta para 'main'.
+ */
+function chooseGoldResource(
+  state: GameState,
+  by: PlayerColor,
+  resources: Partial<Record<Resource, number>>,
+): ReduceResult {
+  if (state.phase !== 'chooseGold') return err('Nao e hora de escolher recursos do ouro.');
+  const pendingRaw = state.pendingGold?.[by];
+  if (!pendingRaw) return err('Voce nao tem ouro a resolver.');
+
+  const bankTotal = RESOURCES.reduce((s, r) => s + state.bank[r], 0);
+  const required = Math.min(pendingRaw, bankTotal);
+  const clean = sanitizeResMap(resources);
+  if (totalRes(clean) !== required) return err(`Escolha exatamente ${required} recurso(s) do ouro.`);
+  for (const [r, n] of Object.entries(clean) as [Resource, number][]) {
+    if (state.bank[r] < n) return err('O banco nao tem esses recursos.');
+  }
+
+  const next = clone(state);
+  const p = getPlayer(next, by);
+  for (const [r, n] of Object.entries(clean) as [Resource, number][]) {
+    p.hand[r] += n;
+    next.bank[r] -= n;
+  }
+  delete next.pendingGold![by];
+
+  const events: GameEvent[] = [{ t: 'goldChosen', owner: by, resources: clean }];
+  if (Object.keys(next.pendingGold ?? {}).length === 0) {
+    next.phase = 'main';
+  }
   return ok(next, events);
 }
 
@@ -758,7 +939,7 @@ function endTurn(state: GameState, by: PlayerColor): ReduceResult {
 
 function updateLongestRoad(state: GameState, events: GameEvent[]): void {
   const lengths = new Map<PlayerColor, number>();
-  for (const p of state.players) lengths.set(p.color, longestRoadLength(state, p.color));
+  for (const p of state.players) lengths.set(p.color, longestNetworkLength(state, p.color));
   const maxLen = Math.max(...lengths.values());
   const leaders = [...lengths.entries()].filter(([, l]) => l === maxLen).map(([c]) => c);
 

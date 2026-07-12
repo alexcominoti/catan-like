@@ -34,6 +34,10 @@ export interface RoomSeatView {
 /** Regras da partida que o anfitrião ajusta ao vivo. */
 export interface RoomSettings {
   seed: number | null;
+  /** Expansão/regras da partida ('base' | 'sea'). Default 'base'. */
+  expansion?: string;
+  /** Cenário dentro da expansão (Navegadores). Opcional. */
+  scenario?: string;
   pace: 'fast' | 'normal';
   numberLayout: string;
   desert: string;

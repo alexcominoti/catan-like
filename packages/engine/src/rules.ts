@@ -9,6 +9,8 @@ import {
 /** Custos de construcao (recursos). */
 export const COSTS = {
   road: { wood: 1, brick: 1 } as Partial<Record<Resource, number>>,
+  /** Navio (Navegadores): madeira + lã. */
+  ship: { wood: 1, wool: 1 } as Partial<Record<Resource, number>>,
   settlement: { wood: 1, brick: 1, wool: 1, grain: 1 } as Partial<Record<Resource, number>>,
   city: { grain: 2, ore: 3 } as Partial<Record<Resource, number>>,
   progressCard: { wool: 1, grain: 1, ore: 1 } as Partial<Record<Resource, number>>,
@@ -76,6 +78,11 @@ export function publicScoreOf(state: GameState, color: PlayerColor): number {
   }
   if (state.longestRoad.owner === color) pts += 2;
   if (state.largestArmy.owner === color) pts += 2;
+  // Navegadores: VP por colonizar ilhas novas.
+  if (state.islandBonus) {
+    const p = state.players.find((pl) => pl.color === color);
+    pts += (p?.islandsScored?.length ?? 0) * state.islandBonus;
+  }
   return pts;
 }
 
@@ -149,6 +156,30 @@ export function vertexTouchesPlayerRoad(
   const v = state.board.vertices[vertexId];
   if (!v) return false;
   return v.edges.some((eid) => state.roads[eid]?.owner === color);
+}
+
+/** O vertice toca um NAVIO do jogador (Navegadores: vila no fim de uma rota de navio). */
+export function vertexTouchesPlayerShip(
+  state: GameState,
+  color: PlayerColor,
+  vertexId: string,
+): boolean {
+  const v = state.board.vertices[vertexId];
+  if (!v) return false;
+  const ships = state.ships ?? {};
+  return v.edges.some((eid) => ships[eid]?.owner === color);
+}
+
+/** O vertice toca uma rota do jogador (estrada, ou — em Navegadores — navio). */
+export function vertexTouchesPlayerNetwork(
+  state: GameState,
+  color: PlayerColor,
+  vertexId: string,
+): boolean {
+  return (
+    vertexTouchesPlayerRoad(state, color, vertexId) ||
+    (isSeaGame(state) && vertexTouchesPlayerShip(state, color, vertexId))
+  );
 }
 
 /**
@@ -237,6 +268,162 @@ function terrainResource(terrain: GameState['board']['hexes'][string]['terrain']
     default:
       return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Navegadores (expansao 'sea'): mar, navios, pirata, ouro e ilhas
+// ---------------------------------------------------------------------------
+
+/** A partida usa as regras de Navegadores? */
+export function isSeaGame(state: GameState): boolean {
+  return state.expansion === 'sea';
+}
+
+/** A aresta toca ao menos um hex de MAR (onde navios podem ir). */
+export function isSeaEdge(state: GameState, edgeId: string): boolean {
+  const e = state.board.edges[edgeId];
+  if (!e) return false;
+  return e.hexes.some((h) => state.board.hexes[h]?.terrain === 'sea');
+}
+
+/** A aresta toca ao menos um hex de TERRA (onde estradas podem ir). */
+export function edgeTouchesLand(state: GameState, edgeId: string): boolean {
+  const e = state.board.edges[edgeId];
+  if (!e) return false;
+  return e.hexes.some((h) => state.board.hexes[h] && state.board.hexes[h]!.terrain !== 'sea');
+}
+
+/** O hex e de mar (destino valido do pirata; nunca do ladrao). */
+export function isSeaHex(state: GameState, hexId: string): boolean {
+  return state.board.hexes[hexId]?.terrain === 'sea';
+}
+
+/**
+ * Uma aresta de mar pode receber navio do jogador se, num extremo, ha uma
+ * construcao propria OU um navio proprio — e esse extremo nao esta bloqueado por
+ * construcao de adversario. Espelha `roadConnects`, mas navios so se ligam a navios
+ * e construcoes (nunca a estradas, exceto atraves de uma construcao).
+ */
+export function shipConnects(state: GameState, color: PlayerColor, edgeId: string): boolean {
+  const e = state.board.edges[edgeId];
+  if (!e) return false;
+  const ships = state.ships ?? {};
+  for (const vid of e.v) {
+    const owner = buildingOwnerAt(state, vid);
+    if (owner && owner !== color) continue; // extremo bloqueado por adversario
+    if (owner === color) return true; // construcao propria no extremo
+    const v = state.board.vertices[vid]!;
+    if (v.edges.some((other) => other !== edgeId && ships[other]?.owner === color)) return true;
+  }
+  return false;
+}
+
+/** O vertice toca a ilha principal (island 0) — restricao das colocacoes iniciais. */
+export function vertexTouchesMainIsland(state: GameState, vertexId: string): boolean {
+  const v = state.board.vertices[vertexId];
+  if (!v) return false;
+  return v.hexes.some((h) => state.board.hexes[h]?.island === 0);
+}
+
+/** Ilhas MENORES (island > 0) que este vertice toca (para o VP de colonizacao). */
+export function islandsAtVertex(state: GameState, vertexId: string): number[] {
+  const v = state.board.vertices[vertexId];
+  if (!v) return [];
+  const out = new Set<number>();
+  for (const h of v.hexes) {
+    const isl = state.board.hexes[h]?.island;
+    if (isl !== undefined && isl > 0) out.add(isl);
+  }
+  return [...out];
+}
+
+/**
+ * Vitimas de quem `by` pode roubar ao mover o PIRATA para `hexId` (hex de mar): os
+ * que tem NAVIO numa aresta que toca o hex e ao menos uma carta (e, sob o ladrao
+ * amigavel, >= 3 PV publicos). O proprio `by` nunca e alvo.
+ */
+export function pirateVictims(state: GameState, hexId: string, by: PlayerColor): PlayerColor[] {
+  const ships = state.ships ?? {};
+  const victims = new Set<PlayerColor>();
+  for (const [eid, ship] of Object.entries(ships)) {
+    const e = state.board.edges[eid];
+    if (!e || !e.hexes.includes(hexId)) continue;
+    if (ship.owner === by) continue;
+    if (state.friendlyRobber && publicScoreOf(state, ship.owner) < 3) continue;
+    if (handSize(getPlayer(state, ship.owner)) <= 0) continue;
+    victims.add(ship.owner);
+  }
+  return [...victims];
+}
+
+/**
+ * Producao de OURO para uma soma: quantos recursos "a escolher" cada jogador ganha
+ * (1 por vila, 2 por cidade adjacente a um hex de ouro com o numero, nao bloqueado
+ * pelo ladrao). O jogador escolhe QUAIS recursos na fase 'chooseGold'.
+ */
+export function computeGoldPending(state: GameState, sum: number): Partial<Record<PlayerColor, number>> {
+  const pending: Partial<Record<PlayerColor, number>> = {};
+  for (const hid of state.board.hexOrder) {
+    const hex = state.board.hexes[hid]!;
+    if (hex.terrain !== 'gold' || hex.number !== sum) continue;
+    if (state.blocker.hexId === hid) continue;
+    for (const vid of hex.corners) {
+      const b = state.buildings[vid];
+      if (!b) continue;
+      pending[b.owner] = (pending[b.owner] ?? 0) + (b.kind === 'city' ? 2 : 1);
+    }
+  }
+  return pending;
+}
+
+/**
+ * Maior ROTA (Navegadores): maior trilha combinando estradas E navios do jogador. A
+ * rota so troca de estrada para navio (ou vice-versa) num vertice com construcao
+ * PROPRIA; construcoes de adversarios bloqueiam a passagem (como na estrada).
+ */
+export function longestRouteLength(state: GameState, color: PlayerColor): number {
+  const roadEdges = Object.values(state.roads).filter((r) => r.owner === color).map((r) => ({ edgeId: r.edgeId, kind: 'road' as const }));
+  const shipEdges = Object.values(state.ships ?? {}).filter((s) => s.owner === color).map((s) => ({ edgeId: s.edgeId, kind: 'ship' as const }));
+  const all = [...roadEdges, ...shipEdges];
+  if (all.length === 0) return 0;
+
+  const adj = new Map<string, { edgeId: string; other: string; kind: 'road' | 'ship' }[]>();
+  for (const { edgeId, kind } of all) {
+    const e = state.board.edges[edgeId]!;
+    const [a, b] = e.v;
+    if (!adj.has(a)) adj.set(a, []);
+    if (!adj.has(b)) adj.set(b, []);
+    adj.get(a)!.push({ edgeId, other: b, kind });
+    adj.get(b)!.push({ edgeId, other: a, kind });
+  }
+
+  const blockedAt = (vid: string): boolean => {
+    const owner = state.buildings[vid]?.owner;
+    return owner !== undefined && owner !== color;
+  };
+  const ownBuildingAt = (vid: string): boolean => state.buildings[vid]?.owner === color;
+
+  let best = 0;
+  const used = new Set<string>();
+  const dfs = (vid: string, lastKind: 'road' | 'ship' | null, len: number): void => {
+    if (len > best) best = len;
+    if (blockedAt(vid)) return;
+    for (const { edgeId, other, kind } of adj.get(vid) ?? []) {
+      if (used.has(edgeId)) continue;
+      // So troca estrada<->navio num vertice com construcao propria.
+      if (lastKind !== null && kind !== lastKind && !ownBuildingAt(vid)) continue;
+      used.add(edgeId);
+      dfs(other, kind, len + 1);
+      used.delete(edgeId);
+    }
+  };
+  for (const start of adj.keys()) dfs(start, null, 0);
+  return best;
+}
+
+/** Maior rota/estrada do jogador conforme a expansao (Navegadores conta navios). */
+export function longestNetworkLength(state: GameState, color: PlayerColor): number {
+  return state.ships ? longestRouteLength(state, color) : longestRoadLength(state, color);
 }
 
 /**

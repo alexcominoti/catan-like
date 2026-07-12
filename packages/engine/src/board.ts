@@ -86,10 +86,22 @@ function coordsFor(layout: BoardLayout): { q: number; r: number }[] {
 }
 
 /**
- * Constroi o grafo geometrico (sem terreno/numero — isso e atribuido no setup).
- * Hexes nascem com terrain 'desert' e number null como placeholders.
+ * Constroi o grafo geometrico da familia BASE (sem terreno/numero — isso e
+ * atribuido no setup). Wrapper fino sobre `buildBoardGraph` com as coords e o
+ * numero de portos do tamanho escolhido.
  */
 export function buildBoardGeometry(layout: BoardLayout = 'standard'): Board {
+  return buildBoardGraph(coordsFor(layout), PORT_COUNT_BY_LAYOUT[layout]);
+}
+
+/**
+ * Primitivo de geometria: monta o grafo (hexes/vertices/arestas) a partir de uma
+ * lista EXPLICITA de coordenadas axiais e coloca `portCount` portos genericos no
+ * anel costeiro externo (0 = nenhum — o cenario define os portos, caso de
+ * Navegadores). Hexes nascem com terrain 'desert' e number null como placeholders;
+ * o preenchimento (terreno/numero/tipo de porto) e feito pelo cenario/setup.
+ */
+export function buildBoardGraph(coords: { q: number; r: number }[], portCount: number): Board {
   const hexes: Record<string, Hex> = {};
   const hexOrder: string[] = [];
 
@@ -101,8 +113,6 @@ export function buildBoardGeometry(layout: BoardLayout = 'standard'): Board {
   >();
   const edgeKeyToId = new Map<string, string>();
   const edgeAccum = new Map<string, { v: [string, string]; hexes: Set<string> }>();
-
-  const coords = coordsFor(layout);
 
   // Centroide dos centros de hex: recentraliza o tabuleiro em (0,0) para que os
   // portos (normais radiais) e o enquadramento fiquem simetricos.
@@ -211,7 +221,7 @@ export function buildBoardGeometry(layout: BoardLayout = 'standard'): Board {
     hexes[hid]!.corners = hexes[hid]!.corners.map((v) => tmpToVid.get(v)!);
   }
 
-  const ports = buildPorts(edges, vertices, edgeOrder, PORT_COUNT_BY_LAYOUT[layout]);
+  const ports = buildPorts(edges, vertices, edgeOrder, portCount);
 
   return { hexes, vertices, edges, ports, hexOrder, vertexOrder, edgeOrder };
 }
@@ -227,6 +237,7 @@ function buildPorts(
   edgeOrder: string[],
   portCount: number,
 ): Port[] {
+  if (portCount <= 0) return []; // cenario define os portos (Navegadores)
   const coastal = edgeOrder.filter((e) => edges[e]!.hexes.length === 1);
 
   // Indexa arestas costeiras por vertice (na borda, cada vertice tem 2).

@@ -102,6 +102,8 @@ export class GameRoom {
       restoreState ??
       createInitialState({
         seed: config.seed,
+        expansion: config.expansion,
+        scenario: config.scenario,
         boardLayout: config.boardLayout,
         players: config.players,
         numberLayout: config.numberLayout,
@@ -229,6 +231,13 @@ export class GameRoom {
       }
       return null;
     }
+    // Navegadores: escolha do ouro — quem tem pendência (como o descarte).
+    if (s.phase === 'chooseGold') {
+      for (const h of this.humans) {
+        if (!this.isBot(h.color) && (s.pendingGold?.[h.color] ?? 0) > 0) return h.color;
+      }
+      return null;
+    }
     // Janela de resposta a uma oferta de troca: o proponente (humano) "segura" o turno.
     if (s.activeTrade && !this.isBot(s.activeTrade.from)) return s.activeTrade.from;
     return this.isBot(s.currentPlayer) ? null : s.currentPlayer;
@@ -244,6 +253,7 @@ export class GameRoom {
     if (s.activeTrade) return this.isBot(s.activeTrade.from) ? Math.min(t.trade, BOT_TRADE_WINDOW_S) : t.trade;
     if (!this.awaitedHuman()) return null; // quem age e bot -> sem timer
     if (s.phase === 'discard') return t.discard;
+    if (s.phase === 'chooseGold') return t.discard; // mesma janela do descarte
     if (s.phase === 'setup1' || s.phase === 'setup2') return s.setupLastVertex ? t.road : t.settlement;
     if (s.phase === 'roll') return t.dice;
     if (s.phase === 'moveBlocker') return t.robber;
@@ -284,6 +294,10 @@ export class GameRoom {
     }
     if (s.phase === 'moveBlocker') {
       return this.applySavedOr(who, 'moveBlocker', { t: 'moveBlocker', hexId: this.desertOrHarmlessHex() });
+    }
+    if (s.phase === 'chooseGold') {
+      // Default: pega os recursos mais abundantes no banco (nunca fica preso).
+      return this.applySavedOr(who, 'chooseGoldResource', { t: 'chooseGoldResource', resources: this.defaultGoldPick(who) });
     }
     if (s.phase === 'roll') {
       return this.applyForced(who, { t: 'rollDice' }); // sem cavaleiro
@@ -350,6 +364,25 @@ export class GameRoom {
     return out;
   }
 
+  /** Escolha padrao do OURO por tempo: os recursos mais abundantes do banco. */
+  private defaultGoldPick(color: PlayerColor): Partial<Record<Resource, number>> {
+    const s = this.state;
+    const need = Math.min(
+      s.pendingGold?.[color] ?? 0,
+      RESOURCES.reduce((sum, r) => sum + s.bank[r], 0),
+    );
+    const bank = { ...s.bank } as Record<Resource, number>;
+    const out: Partial<Record<Resource, number>> = {};
+    for (let i = 0; i < need; i++) {
+      let best: Resource = RESOURCES[0]!;
+      for (const r of RESOURCES) if (bank[r] > bank[best]) best = r;
+      if (bank[best] <= 0) break;
+      bank[best] -= 1;
+      out[best] = (out[best] ?? 0) + 1;
+    }
+    return out;
+  }
+
   /** Hex para mover o ladrao por tempo: um deserto (senao um hex sem construcoes). */
   private desertOrHarmlessHex(): string {
     const s = this.state;
@@ -412,6 +445,7 @@ export class GameRoom {
     const s = this.state;
     if (s.phase === 'ended') return false;
     if (s.phase === 'discard') return this.botColors().some((c) => (s.pendingDiscards[c] ?? 0) > 0);
+    if (s.phase === 'chooseGold') return this.botColors().some((c) => (s.pendingGold?.[c] ?? 0) > 0);
     if (s.activeTrade) return s.activeTrade.to.some((c) => this.isBot(c)) || this.isBot(s.currentPlayer);
     return this.isBot(s.currentPlayer);
   }

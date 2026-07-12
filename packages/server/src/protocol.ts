@@ -2,6 +2,7 @@ import type {
   Action,
   BoardLayout,
   DesertPlacement,
+  ExpansionId,
   GameEvent,
   GameState,
   NumberLayout,
@@ -21,6 +22,10 @@ export type Pace = 'fast' | 'normal';
 export interface RoomConfig {
   seed: number;
   boardLayout: BoardLayout;
+  /** Expansão/regras da partida (ausente = 'base'). */
+  expansion?: ExpansionId;
+  /** Cenário dentro da expansão (Navegadores). Opcional. */
+  scenario?: string;
   pace: Pace;
   players: { color: PlayerColor; name: string; userId?: string }[];
   bots: PlayerColor[];

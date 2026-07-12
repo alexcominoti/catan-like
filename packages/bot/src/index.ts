@@ -12,9 +12,13 @@ import {
   TERRAIN_RESOURCE,
   computeProduction,
   distanceRuleOk,
+  edgeTouchesLand,
   embargoed,
   handTotal,
-  longestRoadLength,
+  islandsAtVertex,
+  isSeaEdge,
+  isSeaGame,
+  longestNetworkLength,
   maritimeRate,
   publicScoreOf,
   reduce,
@@ -22,7 +26,9 @@ import {
   robberVictims,
   roadConnects,
   scoreOf,
-  vertexTouchesPlayerRoad,
+  shipConnects,
+  vertexTouchesMainIsland,
+  vertexTouchesPlayerNetwork,
   type Action,
   type GameState,
   type Player,
@@ -55,6 +61,15 @@ export function planBotAction(
     const color = botColorsWithDiscard(state, isBot)[0];
     if (color) return { by: color, action: { t: 'discard', resources: chooseDiscard(state, color) } };
     return null; // espera os humanos descartarem
+  }
+
+  // 1b. Escolha do OURO pendente de bots (Navegadores).
+  if (state.phase === 'chooseGold') {
+    const color = (Object.keys(state.pendingGold ?? {}) as PlayerColor[]).find(
+      (c) => isBot(c) && (state.pendingGold?.[c] ?? 0) > 0,
+    );
+    if (color) return { by: color, action: { t: 'chooseGoldResource', resources: chooseGold(state, color) } };
+    return null; // espera os humanos escolherem
   }
 
   // 2. Respostas de troca: o bot SO aceita (uma vez) quando favoravel.
@@ -168,8 +183,14 @@ function canAfford(hand: Record<Resource, number>, cost: Partial<Record<Resource
 // Setup
 // ---------------------------------------------------------------------------
 
+/** Vertice valido para a colocacao inicial (Navegadores: so na ilha principal). */
+function setupValid(state: GameState, vid: string): boolean {
+  if (!distanceRuleOk(state, vid)) return false;
+  return !isSeaGame(state) || vertexTouchesMainIsland(state, vid);
+}
+
 function bestSetupVertex(state: GameState, level: Difficulty): string {
-  const valid = state.board.vertexOrder.filter((vid) => distanceRuleOk(state, vid));
+  const valid = state.board.vertexOrder.filter((vid) => setupValid(state, vid));
   if (valid.length === 0) return state.board.vertexOrder[0]!;
   const scored = valid.map((vid) => ({ vid, s: vertexValue(state, vid, level) })).sort((a, b) => b.s - a.s);
   // Facil escolhe um vertice mediano (jogo mais fraco); os demais, o melhor.
@@ -180,10 +201,12 @@ function bestSetupVertex(state: GameState, level: Difficulty): string {
 function bestSetupRoad(state: GameState, _me: PlayerColor): string {
   const last = state.setupLastVertex!;
   const v = state.board.vertices[last]!;
-  let best = v.edges.find((e) => !state.roads[e]) ?? v.edges[0]!;
+  // Navegadores: a estrada inicial fica em terra (nunca no mar).
+  const landOk = (e: string): boolean => !isSeaGame(state) || edgeTouchesLand(state, e);
+  let best = v.edges.find((e) => !state.roads[e] && landOk(e)) ?? v.edges.find((e) => !state.roads[e]) ?? v.edges[0]!;
   let bestScore = -1;
   for (const eid of v.edges) {
-    if (state.roads[eid]) continue;
+    if (state.roads[eid] || !landOk(eid)) continue;
     const e = state.board.edges[eid]!;
     const other = e.v[0] === last ? e.v[1] : e.v[0];
     const s = vertexValue(state, other, 'medium');
@@ -206,10 +229,14 @@ function planMain(state: GameState, me: PlayerColor, level: Difficulty, humans: 
   const card = planPlayCard(state, me, level);
   if (card) return card;
 
-  // 2. Estrada gratis pendente (carta "2 Estradas").
-  if (state.pendingFreeRoads > 0 && p.pieces.roads > 0) {
-    const road = roadToUnlock(state, me, level) ?? bestRoadTowardLand(state, me, level) ?? anyLegalRoad(state, me);
+  // 2. Estrada/navio gratis pendente (carta "2 Estradas"; navio conta em Navegadores).
+  if (state.pendingFreeRoads > 0) {
+    const road = p.pieces.roads > 0 ? (roadToUnlock(state, me, level) ?? bestRoadTowardLand(state, me, level)) : null;
     if (road) return { t: 'buildRoad', edgeId: road };
+    const ship = shipToUnlock(state, me, level) ?? bestShipTowardLand(state, me, level);
+    if (ship) return { t: 'buildShip', edgeId: ship };
+    const any = p.pieces.roads > 0 ? anyLegalRoad(state, me) : null;
+    if (any) return { t: 'buildRoad', edgeId: any };
   }
 
   // 3. Cidade (2 PV).
@@ -230,6 +257,12 @@ function planMain(state: GameState, me: PlayerColor, level: Difficulty, humans: 
     if (road) return { t: 'buildRoad', edgeId: road };
   }
 
+  // 5b. Navio que destrava uma nova vila (Navegadores: rumo as ilhas).
+  if ((p.pieces.ships ?? 0) > 0 && p.pieces.settlements > 0 && canAfford(p.hand, COSTS.ship)) {
+    const ship = shipToUnlock(state, me, level);
+    if (ship) return { t: 'buildShip', edgeId: ship };
+  }
+
   // 6. Oferecer uma troca a um humano (uma por turno) rumo a expansao.
   const offer = planTradeProposal(state, me, level, humans);
   if (offer) return offer;
@@ -243,10 +276,16 @@ function planMain(state: GameState, me: PlayerColor, level: Difficulty, humans: 
     return { t: 'buyProgressCard' };
   }
 
-  // 9. Estender estrada (caca a Estrada Mais Longa) — mantem o jogo avancando.
+  // 9. Estender estrada (caca a Maior Rota) — mantem o jogo avancando.
   if (p.pieces.roads > 0 && canAfford(p.hand, COSTS.road)) {
     const road = roadToUnlock(state, me, level) ?? bestRoadTowardLand(state, me, level) ?? anyLegalRoad(state, me);
     if (road) return { t: 'buildRoad', edgeId: road };
+  }
+
+  // 9b. Estender navio (Navegadores: rumo as ilhas / Maior Rota).
+  if ((p.pieces.ships ?? 0) > 0 && canAfford(p.hand, COSTS.ship)) {
+    const ship = shipToUnlock(state, me, level) ?? bestShipTowardLand(state, me, level);
+    if (ship) return { t: 'buildShip', edgeId: ship };
   }
 
   return { t: 'endTurn' };
@@ -259,6 +298,8 @@ function expansionGoals(state: GameState, me: PlayerColor, level: Difficulty): P
   if (bestCityTarget(state, me, level) && p.pieces.cities > 0) goals.push(COSTS.city);
   if (bestSettlementTarget(state, me, level) && p.pieces.settlements > 0) goals.push(COSTS.settlement);
   if (roadToUnlock(state, me, level) && p.pieces.roads > 0 && p.pieces.settlements > 0) goals.push(COSTS.road);
+  // Navegadores: um navio que destrava ilha tambem e meta (custo madeira+la).
+  if ((p.pieces.ships ?? 0) > 0 && shipToUnlock(state, me, level)) goals.push(COSTS.ship);
   return goals;
 }
 
@@ -307,8 +348,10 @@ function bestSettlementTarget(state: GameState, me: PlayerColor, level: Difficul
   let bestScore = -1;
   for (const vid of state.board.vertexOrder) {
     if (!distanceRuleOk(state, vid)) continue;
-    if (!vertexTouchesPlayerRoad(state, me, vid)) continue;
-    const s = vertexValue(state, vid, level);
+    if (!vertexTouchesPlayerNetwork(state, me, vid)) continue;
+    // Navegadores: colonizar ilha nova vale mais (VP de ilha).
+    const islandBonus = state.islandBonus && islandsAtVertex(state, vid).length > 0 ? 2.5 : 0;
+    const s = vertexValue(state, vid, level) + islandBonus;
     if (s > bestScore) {
       bestScore = s;
       best = vid;
@@ -317,17 +360,23 @@ function bestSettlementTarget(state: GameState, me: PlayerColor, level: Difficul
   return best;
 }
 
+/** Uma aresta pode receber ESTRADA do jogador (livre, toca terra, conecta). */
+function roadPlaceable(state: GameState, me: PlayerColor, eid: string): boolean {
+  if (state.roads[eid] || state.ships?.[eid]) return false;
+  if (!edgeTouchesLand(state, eid)) return false; // no mar, so navio
+  return roadConnects(state, me, eid);
+}
+
 function roadToUnlock(state: GameState, me: PlayerColor, level: Difficulty): string | null {
   let best: string | null = null;
   let bestScore = -1;
   for (const eid of state.board.edgeOrder) {
-    if (state.roads[eid]) continue;
-    if (!roadConnects(state, me, eid)) continue;
+    if (!roadPlaceable(state, me, eid)) continue;
     const e = state.board.edges[eid]!;
     for (const far of e.v) {
       if (state.buildings[far]) continue;
       if (!distanceRuleOk(state, far)) continue;
-      if (vertexTouchesPlayerRoad(state, me, far)) continue;
+      if (vertexTouchesPlayerNetwork(state, me, far)) continue;
       const s = vertexValue(state, far, level);
       if (s > bestScore) {
         bestScore = s;
@@ -340,7 +389,7 @@ function roadToUnlock(state: GameState, me: PlayerColor, level: Difficulty): str
 
 function anyLegalRoad(state: GameState, me: PlayerColor): string | null {
   for (const eid of state.board.edgeOrder) {
-    if (!state.roads[eid] && roadConnects(state, me, eid)) return eid;
+    if (roadPlaceable(state, me, eid)) return eid;
   }
   return null;
 }
@@ -354,7 +403,7 @@ function bestRoadTowardLand(state: GameState, me: PlayerColor, level: Difficulty
   let best: string | null = null;
   let bestScore = -1;
   for (const eid of state.board.edgeOrder) {
-    if (state.roads[eid] || !roadConnects(state, me, eid)) continue;
+    if (!roadPlaceable(state, me, eid)) continue;
     const e = state.board.edges[eid]!;
     let s = -1;
     for (const v of e.v) {
@@ -365,6 +414,51 @@ function bestRoadTowardLand(state: GameState, me: PlayerColor, level: Difficulty
       bestScore = s;
       best = eid;
     }
+  }
+  return best;
+}
+
+/** Uma aresta de mar onde o bot PODE pôr navio (conectada, livre, longe do pirata). */
+function shipPlaceable(state: GameState, me: PlayerColor, eid: string): boolean {
+  if (state.roads[eid] || state.ships?.[eid]) return false;
+  if (!isSeaEdge(state, eid) || !shipConnects(state, me, eid)) return false;
+  if (state.pirate && state.board.edges[eid]!.hexes.includes(state.pirate.hexId)) return false;
+  return true;
+}
+
+/**
+ * Navegadores: navio que DESTRAVA uma nova vila (abre um vertice livre e legal —
+ * priorizando ilhas novas). Espelha `roadToUnlock`, mas no mar.
+ */
+function shipToUnlock(state: GameState, me: PlayerColor, level: Difficulty): string | null {
+  if (!isSeaGame(state) || (getPlayer(state, me).pieces.ships ?? 0) <= 0) return null;
+  let best: string | null = null;
+  let bestScore = -1;
+  for (const eid of state.board.edgeOrder) {
+    if (!shipPlaceable(state, me, eid)) continue;
+    for (const far of state.board.edges[eid]!.v) {
+      if (state.buildings[far] || !distanceRuleOk(state, far)) continue;
+      if (vertexTouchesPlayerNetwork(state, me, far)) continue;
+      const s = vertexValue(state, far, level) + (islandsAtVertex(state, far).length > 0 ? 3 : 0);
+      if (s > bestScore) { bestScore = s; best = eid; }
+    }
+  }
+  return best;
+}
+
+/** Navio que ESTENDE a rede rumo a boa terra/ilha (fallback quando nao ha unlock). */
+function bestShipTowardLand(state: GameState, me: PlayerColor, level: Difficulty): string | null {
+  if (!isSeaGame(state) || (getPlayer(state, me).pieces.ships ?? 0) <= 0) return null;
+  let best: string | null = null;
+  let bestScore = -1;
+  for (const eid of state.board.edgeOrder) {
+    if (!shipPlaceable(state, me, eid)) continue;
+    let s = -1;
+    for (const v of state.board.edges[eid]!.v) {
+      if (state.buildings[v]) continue;
+      s = Math.max(s, vertexValue(state, v, level) + (islandsAtVertex(state, v).length > 0 ? 2 : 0));
+    }
+    if (s > bestScore) { bestScore = s; best = eid; }
   }
   return best;
 }
@@ -458,7 +552,7 @@ function expansionReach(state: GameState, me: PlayerColor): { buildablePips: num
   let reachable1Pips = 0;
   for (const vid of state.board.vertexOrder) {
     if (state.buildings[vid] || !distanceRuleOk(state, vid)) continue;
-    if (vertexTouchesPlayerRoad(state, me, vid)) {
+    if (vertexTouchesPlayerNetwork(state, me, vid)) {
       buildablePips += vertexPips(state, vid);
       buildableCount += 1;
       continue;
@@ -507,7 +601,7 @@ function evaluate(state: GameState, me: PlayerColor): number {
     W.handSynergy * -handDistance(p.hand) +
     W.handCards * cards +
     W.overflow * Math.max(0, cards - 7) +
-    W.longestRoadLen * longestRoadLength(state, me) +
+    W.longestRoadLen * longestNetworkLength(state, me) +
     W.knights * p.knightsPlayed +
     W.devCards * p.progressCards.length
   );
@@ -583,7 +677,7 @@ function expectedValue(state: GameState, me: PlayerColor): number {
 
 /** Vertice de setup que maximiza o valor ESPERADO sobre a proxima rolagem. */
 function bestSetupVertexByValue(state: GameState, me: PlayerColor): string {
-  const valid = state.board.vertexOrder.filter((vid) => distanceRuleOk(state, vid));
+  const valid = state.board.vertexOrder.filter((vid) => setupValid(state, vid));
   if (valid.length === 0) return state.board.vertexOrder[0]!;
   let best = valid[0]!;
   let bestV = -Infinity;
@@ -634,10 +728,14 @@ function planMainByValue(state: GameState, me: PlayerColor, humans: PlayerColor[
   const card = planPlayCard(state, me, 'hard');
   if (card) return card;
 
-  // 2. Estrada gratis pendente (carta "2 Estradas").
-  if (state.pendingFreeRoads > 0 && p.pieces.roads > 0) {
-    const road = roadToUnlock(state, me, 'hard') ?? bestRoadTowardLand(state, me, 'hard') ?? anyLegalRoad(state, me);
+  // 2. Estrada/navio gratis pendente (carta "2 Estradas").
+  if (state.pendingFreeRoads > 0) {
+    const road = p.pieces.roads > 0 ? (roadToUnlock(state, me, 'hard') ?? bestRoadTowardLand(state, me, 'hard')) : null;
     if (road) return { t: 'buildRoad', edgeId: road };
+    const ship = shipToUnlock(state, me, 'hard') ?? bestShipTowardLand(state, me, 'hard');
+    if (ship) return { t: 'buildShip', edgeId: ship };
+    const any = p.pieces.roads > 0 ? anyLegalRoad(state, me) : null;
+    if (any) return { t: 'buildRoad', edgeId: any };
   }
 
   // 3. Cidade (2 PV): escolhe QUAL vila promover pela funcao de valor.
@@ -654,7 +752,7 @@ function planMainByValue(state: GameState, me: PlayerColor, humans: PlayerColor[
   if (p.pieces.settlements > 0 && canAfford(p.hand, COSTS.settlement)) {
     const cands: Action[] = [];
     for (const vid of state.board.vertexOrder) {
-      if (!state.buildings[vid] && distanceRuleOk(state, vid) && vertexTouchesPlayerRoad(state, me, vid)) {
+      if (!state.buildings[vid] && distanceRuleOk(state, vid) && vertexTouchesPlayerNetwork(state, me, vid)) {
         cands.push({ t: 'buildSettlement', vertexId: vid });
       }
     }
@@ -670,12 +768,18 @@ function planMainByValue(state: GameState, me: PlayerColor, humans: PlayerColor[
       const e = state.board.edges[eid]!;
       // So estradas que abrem um vertice novo e legal (rumo a expansao).
       const opens = e.v.some(
-        (far) => !state.buildings[far] && distanceRuleOk(state, far) && !vertexTouchesPlayerRoad(state, me, far),
+        (far) => !state.buildings[far] && distanceRuleOk(state, far) && !vertexTouchesPlayerNetwork(state, me, far),
       );
       if (opens) cands.push({ t: 'buildRoad', edgeId: eid });
     }
     const a = bestActionByValue(state, me, cands);
     if (a) return a;
+  }
+
+  // 5b. Navio que destrava uma nova vila (Navegadores: rumo as ilhas).
+  if ((p.pieces.ships ?? 0) > 0 && p.pieces.settlements > 0 && canAfford(p.hand, COSTS.ship)) {
+    const ship = shipToUnlock(state, me, 'hard');
+    if (ship) return { t: 'buildShip', edgeId: ship };
   }
 
   // 6. Oferecer troca a um humano (uma por turno) rumo a expansao.
@@ -689,10 +793,16 @@ function planMainByValue(state: GameState, me: PlayerColor, humans: PlayerColor[
   // 8. Sem expandir agora: usar a sobra comprando carta (PV/cavaleiro).
   if (state.devDeck.length > 0 && canAfford(p.hand, COSTS.progressCard)) return { t: 'buyProgressCard' };
 
-  // 9. Estender estrada (caca a Estrada Mais Longa).
+  // 9. Estender estrada (caca a Maior Rota).
   if (p.pieces.roads > 0 && canAfford(p.hand, COSTS.road)) {
     const road = roadToUnlock(state, me, 'hard') ?? bestRoadTowardLand(state, me, 'hard') ?? anyLegalRoad(state, me);
     if (road) return { t: 'buildRoad', edgeId: road };
+  }
+
+  // 9b. Estender navio (Navegadores).
+  if ((p.pieces.ships ?? 0) > 0 && canAfford(p.hand, COSTS.ship)) {
+    const ship = shipToUnlock(state, me, 'hard') ?? bestShipTowardLand(state, me, 'hard');
+    if (ship) return { t: 'buildShip', edgeId: ship };
   }
 
   return { t: 'endTurn' };
@@ -824,10 +934,13 @@ function planBlocker(state: GameState, me: PlayerColor, level: Difficulty): Acti
     state.friendlyRobber &&
     state.board.hexOrder.some((h) => h !== state.blocker.hexId && robberAllowed(state, h, me));
 
-  let bestHex = state.board.hexOrder.find((h) => h !== state.blocker.hexId && (!enforceFriendly || robberAllowed(state, h, me)))!;
+  // Navegadores: o bot move sempre o LADRAO (terra) — ignora hexes de mar (pirata).
+  const skipHex = (hid: string): boolean =>
+    hid === state.blocker.hexId || (isSeaGame(state) && state.board.hexes[hid]!.terrain === 'sea');
+  let bestHex = state.board.hexOrder.find((h) => !skipHex(h) && (!enforceFriendly || robberAllowed(state, h, me)))!;
   let bestScore = -Infinity;
   for (const hid of state.board.hexOrder) {
-    if (hid === state.blocker.hexId) continue;
+    if (skipHex(hid)) continue;
     if (enforceFriendly && !robberAllowed(state, hid, me)) continue;
     const hex = state.board.hexes[hid]!;
     let score = 0;
@@ -882,6 +995,35 @@ function chooseDiscard(state: GameState, color: PlayerColor): Partial<Record<Res
     for (const r of RESOURCES) if (hand[r] > hand[best]) best = r;
     hand[best] -= 1;
     out[best] = (out[best] ?? 0) + 1;
+  }
+  return out;
+}
+
+/**
+ * Navegadores: recursos que o bot escolhe do OURO — os que mais faltam para a
+ * meta de expansao mais barata (senao o mais abundante no banco). Limitado ao que
+ * o banco tem (igual ao motor), para nunca escolher a mais.
+ */
+function chooseGold(state: GameState, color: PlayerColor): Partial<Record<Resource, number>> {
+  const p = getPlayer(state, color);
+  const bankTotal = RESOURCES.reduce((s, r) => s + state.bank[r], 0);
+  const need = Math.min(state.pendingGold?.[color] ?? 0, bankTotal);
+  const goals = expansionGoals(state, color, 'medium');
+  const hand: Record<Resource, number> = { ...p.hand };
+  const out: Partial<Record<Resource, number>> = {};
+  const bankLeft = (r: Resource): number => state.bank[r] - (out[r] ?? 0);
+  for (let i = 0; i < need; i++) {
+    let pick: Resource | null = null;
+    for (const cost of goals) {
+      const r = RESOURCES.find((res) => (cost[res] ?? 0) - hand[res] > 0 && bankLeft(res) > 0);
+      if (r) { pick = r; break; }
+    }
+    if (!pick) {
+      for (const r of RESOURCES) if (bankLeft(r) > 0 && (pick === null || bankLeft(r) > bankLeft(pick))) pick = r;
+    }
+    if (!pick) break;
+    hand[pick] += 1;
+    out[pick] = (out[pick] ?? 0) + 1;
   }
   return out;
 }

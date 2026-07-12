@@ -1,4 +1,4 @@
-import type { BoardLayout, DesertPlacement, NumberLayout, PlayerColor } from '@trevalis/engine';
+import type { BoardLayout, DesertPlacement, ExpansionId, NumberLayout, PlayerColor } from '@trevalis/engine';
 import type { Difficulty } from '@trevalis/bot';
 
 /** Ritmo da partida (limite de tempo das ações; aplicado no jogo online). */
@@ -10,6 +10,10 @@ export interface GameConfig {
   botDifficulty: Record<PlayerColor, Difficulty>;
   seed: number;
   boardLayout: BoardLayout;
+  /** Expansão/regras da partida. Default 'base'. */
+  expansion: ExpansionId;
+  /** Cenário dentro da expansão (Navegadores). Opcional. */
+  scenario?: string;
   pace: Pace;
   numberLayout: NumberLayout;
   desert: DesertPlacement;

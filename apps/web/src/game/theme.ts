@@ -8,6 +8,9 @@ export const TERRAIN_FILL: Record<Terrain, string> = {
   field: '#e3b23c',
   mountain: '#8d97a3',
   desert: '#d9c79a',
+  // Navegadores: mar (agua) e ouro. Ajuste fino do visual na Fase C.
+  sea: '#2b6d8f',
+  gold: '#e6c34a',
 };
 
 // Os rótulos de terreno/recurso/cor agora vivem no dicionário i18n

@@ -56,6 +56,16 @@ export function mapLimit(boardLayout: string): number {
   return MAP_LIMIT[boardLayout] ?? 4;
 }
 
+/**
+ * Limite de jogadores da sala. No jogo-base = tamanho do tabuleiro (MAP_LIMIT).
+ * As expansoes (Navegadores) definirao o limite pelo CENARIO — este seam ja recebe
+ * `expansion`/`scenario` para que a Fase B preencha os limites sem mudar as chamadas.
+ */
+export function roomPlayerLimit(boardLayout: string, expansion = 'base', _scenario?: string): number {
+  if (expansion === 'sea') return 4; // cenário "Novas Terras" de Navegadores (3-4 jogadores)
+  return mapLimit(boardLayout);
+}
+
 /** Um bot sentado numa sala (mora na config da sala; muda ao vivo até a partida começar). */
 export interface BotSeat {
   color: PlayerColor;
@@ -130,6 +140,10 @@ export interface RoomSeatView {
 /** Regras da partida que o anfitrião ajusta ao vivo na sala (persistem na config). */
 export interface RoomSettings {
   seed: number | null;
+  /** Expansão/regras da partida ('base' | 'sea'...). Default 'base'. */
+  expansion: string;
+  /** Cenário dentro da expansão (Navegadores). Opcional. */
+  scenario?: string;
   pace: Pace;
   numberLayout: string;
   desert: string;
@@ -197,8 +211,13 @@ export interface CreateRoomInput {
 /** Cria uma sala 'waiting' já com o anfitrião sentado; bots começam vazios (o host adiciona ao vivo). */
 export async function createRoom(input: CreateRoomInput): Promise<RoomView> {
   const db = getDb();
-  // O mapa define o limite; a config guarda bots (começa vazia) e as regras.
-  const max = mapLimit(input.boardLayout);
+  // O mapa/cenário define o limite; a config guarda bots (começa vazia) e as regras.
+  const inCfg = (input.config ?? {}) as Record<string, unknown>;
+  const max = roomPlayerLimit(
+    input.boardLayout,
+    inCfg.expansion === 'sea' ? 'sea' : 'base',
+    typeof inCfg.scenario === 'string' ? inCfg.scenario : undefined,
+  );
   const config = { ...(input.config ?? {}), bots: botsOf(input.config) };
 
   // Código único (tenta de novo no caso raríssimo de colisão).
@@ -337,6 +356,8 @@ function settingsOf(config: unknown): RoomSettings {
   const c = (config ?? {}) as Record<string, unknown>;
   return {
     seed: typeof c.seed === 'number' ? c.seed : null,
+    expansion: c.expansion === 'sea' ? 'sea' : 'base',
+    scenario: typeof c.scenario === 'string' ? c.scenario : undefined,
     pace: (c.pace as Pace) === 'fast' ? 'fast' : 'normal',
     numberLayout: typeof c.numberLayout === 'string' ? c.numberLayout : 'balanced',
     desert: typeof c.desert === 'string' ? c.desert : 'random',
@@ -560,7 +581,9 @@ export async function updateRoomSettings(code: string, hostUserId: string, patch
   const cur = settingsOf(r.config);
 
   const nextLayout = typeof p.boardLayout === 'string' && MAP_LIMIT[p.boardLayout] ? p.boardLayout : r.boardLayout;
-  const nextMax = mapLimit(nextLayout);
+  const nextExpansion = p.expansion === 'sea' || p.expansion === 'base' ? p.expansion : cur.expansion;
+  const nextScenario = typeof p.scenario === 'string' ? p.scenario : cur.scenario;
+  const nextMax = roomPlayerLimit(nextLayout, nextExpansion, nextScenario);
   const { total } = await occupancyOf(db, r.id, r.config);
   if (total > nextMax) {
     return { ok: false, error: `Esse mapa comporta no máximo ${nextMax} jogadores.`, httpStatus: 409 };
@@ -569,6 +592,8 @@ export async function updateRoomSettings(code: string, hostUserId: string, patch
   const newConfig = {
     ...((r.config ?? {}) as Record<string, unknown>),
     boardLayout: nextLayout,
+    expansion: nextExpansion,
+    scenario: nextScenario,
     seed: has('seed') ? (typeof p.seed === 'number' ? p.seed : null) : cur.seed,
     pace: p.pace === 'fast' ? 'fast' : p.pace === 'normal' ? 'normal' : cur.pace,
     numberLayout: p.numberLayout === 'random' || p.numberLayout === 'balanced' ? p.numberLayout : cur.numberLayout,
@@ -748,6 +773,8 @@ export async function buildRoomConfig(code: string): Promise<RoomConfig | null> 
   return {
     seed,
     boardLayout: (raw.boardLayout as RoomConfig['boardLayout']) ?? 'standard',
+    expansion: raw.expansion === 'sea' ? 'sea' : 'base',
+    scenario: typeof raw.scenario === 'string' ? raw.scenario : undefined,
     pace: (raw.pace as Pace) ?? 'normal',
     players: [...humanEntries, ...botEntries],
     bots: bots.map((b) => b.color),

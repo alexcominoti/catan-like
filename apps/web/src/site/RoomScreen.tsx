@@ -95,6 +95,7 @@ export function RoomScreen({
 
 const DEFAULT_CONFIG = {
   boardLayout: 'standard',
+  expansion: 'base',
   pace: 'normal',
   numberLayout: 'balanced',
   desert: 'random',
@@ -500,6 +501,7 @@ function HostRoom({
   // sobrescreve estes inputs enquanto o host mexe).
   const s0 = room.settings;
   const [mapKey, setMapKey] = useState<BoardLayout>((room.boardLayout as BoardLayout) ?? 'standard');
+  const [expansion, setExpansion] = useState<'base' | 'sea'>(s0.expansion === 'sea' ? 'sea' : 'base');
   const [roomName, setRoomName] = useState(room.name);
   const [isPrivate, setIsPrivate] = useState(room.isPrivate);
   const [numberLayout, setNumberLayout] = useState(s0.numberLayout === 'random' ? 'random' : 'balanced');
@@ -513,7 +515,8 @@ function HostRoom({
   const [busy, setBusy] = useState(false);
   const [starting, setStarting] = useState(false);
 
-  const limit = mapLimit(mapKey);
+  const isSea = expansion === 'sea';
+  const limit = isSea ? 4 : mapLimit(mapKey);
   const occupants = room.players.length;
   const openCount = Math.max(0, limit - occupants);
   const canStart = occupants >= 2; // host + pelo menos 1 (bot ou humano)
@@ -536,6 +539,21 @@ function HostRoom({
     setMapKey(key);
     if (key !== 'standard') setDesert('random');
     void patch({ boardLayout: key });
+  }
+
+  /** Alterna base <-> Navegadores. Navegadores usa o cenário "Novas Terras" (3-4). */
+  function chooseExpansion(exp: 'base' | 'sea') {
+    if (exp === expansion) return;
+    if (exp === 'sea' && occupants > 4) return; // o cenário comporta no máximo 4
+    setExpansion(exp);
+    if (exp === 'sea') {
+      // Navegadores fixa o tamanho no cenário; volta o mapa-base para 'standard'.
+      setMapKey('standard');
+      setDesert('random');
+      void patch({ expansion: 'sea', boardLayout: 'standard' });
+    } else {
+      void patch({ expansion: 'base' });
+    }
   }
 
   async function addBot() {
@@ -583,23 +601,38 @@ function HostRoom({
         <div className="card su-players">
           <h2 className="su-h"><Users size={18} className="ic-primary" /> {t('room.players')} <span className="su-count">{occupants}/{limit}</span></h2>
 
-          <div className="su-maps">
-            {MAPS.map((m) => {
-              const disabled = occupants > m.limit;
-              return (
-                <button
-                  key={m.key}
-                  className={`su-map${mapKey === m.key ? ' on' : ''}`}
-                  disabled={disabled}
-                  title={disabled ? t('room.mapDisabled', { limit: m.limit }) : undefined}
-                  onClick={() => chooseMap(m.key)}
-                >
-                  <b>{t(m.labelKey)}</b>
-                  <small>{t(m.hintKey)}</small>
-                </button>
-              );
-            })}
+          <div className="su-seg" style={{ marginBottom: 10 }}>
+            <button className={!isSea ? 'on' : ''} onClick={() => chooseExpansion('base')}>{t('room.exp.base')}</button>
+            <button className={isSea ? 'on' : ''} disabled={occupants > 4} title={occupants > 4 ? t('room.mapDisabled', { limit: 4 }) : undefined}
+              onClick={() => chooseExpansion('sea')}>{t('room.exp.sea')}</button>
           </div>
+
+          {isSea ? (
+            <div className="su-maps">
+              <button className="su-map on" disabled>
+                <b>{t('room.exp.seaMap')}</b>
+                <small>{t('room.exp.seaHint')}</small>
+              </button>
+            </div>
+          ) : (
+            <div className="su-maps">
+              {MAPS.map((m) => {
+                const disabled = occupants > m.limit;
+                return (
+                  <button
+                    key={m.key}
+                    className={`su-map${mapKey === m.key ? ' on' : ''}`}
+                    disabled={disabled}
+                    title={disabled ? t('room.mapDisabled', { limit: m.limit }) : undefined}
+                    onClick={() => chooseMap(m.key)}
+                  >
+                    <b>{t(m.labelKey)}</b>
+                    <small>{t(m.hintKey)}</small>
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <p className="su-note">{t('room.inviteNote', { limit })}</p>
 
           {room.players.map((p) => (
@@ -626,9 +659,9 @@ function HostRoom({
                 void patch({ numberLayout: v });
               }} />
             <SetupTile icon={<Target size={20} />} label={t('room.tile.desertCenter')}
-              hint={mapKey === 'standard' ? t('room.tile.desertCenterHint') : t('room.tile.desertCenterHintOnly')}
-              disabled={mapKey !== 'standard'}
-              active={mapKey === 'standard' && desert === 'center'}
+              hint={mapKey === 'standard' && !isSea ? t('room.tile.desertCenterHint') : t('room.tile.desertCenterHintOnly')}
+              disabled={mapKey !== 'standard' || isSea}
+              active={mapKey === 'standard' && !isSea && desert === 'center'}
               onClick={() => {
                 const v = desert === 'center' ? 'random' : 'center';
                 setDesert(v);
