@@ -20,8 +20,9 @@ import {
   user as userTable,
   type Db,
 } from '@trevalis/db';
-import { PLAYER_COLORS, type PlayerColor } from '@trevalis/engine';
+import { PLAYER_COLORS, createRng, shuffle, type PlayerColor } from '@trevalis/engine';
 import type { Difficulty } from '@trevalis/bot';
+import { armRoomSweep } from './db-idle.js';
 import type { Pace, RoomConfig } from './protocol.js';
 
 /* ------------------------------------------------------------------ */
@@ -48,6 +49,21 @@ export function nextSeat(usedColors: readonly PlayerColor[]): { color: PlayerCol
   const color = PLAYER_COLORS.find((c) => !usedColors.includes(c));
   if (!color) return null;
   return { color, seatIndex: usedColors.length };
+}
+
+/**
+ * Sorteia a ORDEM DE JOGO. A lista que chega aqui vem da ordem de chegada na
+ * sala (anfitriao primeiro, depois quem entrou pelo link, depois os bots) — se
+ * fosse usada como esta, o anfitriao jogaria sempre em primeiro. O motor usa a
+ * ordem do array `players` como ordem de turno, entao embaralhamos aqui.
+ *
+ * O sorteio sai do rng determinístico do engine a partir do seed da partida:
+ * mesma seed => mesma ordem. Isso mantem a partida reproduzivel e faz o
+ * `restoreRoom` (que remonta o RoomConfig) devolver exatamente a mesma ordem.
+ * O `^` so separa este consumo do rng do tabuleiro (que parte do seed cru).
+ */
+export function shufflePlayerOrder<T>(players: readonly T[], seed: number): T[] {
+  return shuffle(createRng(seed ^ 0x9e3779b9), players).value;
 }
 
 /** Cada mapa define o LIMITE de jogadores (espelha os MAPS da UI). */
@@ -96,6 +112,19 @@ export function isStaleWaitingRoom(
   return r.status === 'waiting' && now - r.lastActivityAt >= ttlMs;
 }
 
+/**
+ * Gate de início: nome do primeiro humano CONVIDADO ainda não pronto, ou null se
+ * todos prontos. Bots e o anfitrião contam SEMPRE como prontos (o anfitrião
+ * confirma ao clicar em iniciar). Função pura — testável sem banco e reusada pela
+ * UI (que replica a mesma regra para desabilitar o botão).
+ */
+export function firstUnreadyName(
+  players: readonly { name: string; isBot: boolean; isHost: boolean; isReady: boolean }[],
+): string | null {
+  const unready = players.find((p) => !p.isBot && !p.isHost && !p.isReady);
+  return unready ? unready.name : null;
+}
+
 export interface JoinDecision {
   ok: boolean;
   error?: string;
@@ -123,6 +152,7 @@ export function decideJoin(
 /* ------------------------------------------------------------------ */
 
 export interface RoomPlayerView {
+  userId: string;
   username: string;
   color: PlayerColor;
   isHost: boolean;
@@ -135,6 +165,8 @@ export interface RoomSeatView {
   isHost: boolean;
   isBot: boolean;
   difficulty?: Difficulty;
+  /** Marcou "pronto"? Anfitrião e bots contam sempre como prontos. */
+  isReady: boolean;
 }
 
 /** Regras da partida que o anfitrião ajusta ao vivo na sala (persistem na config). */
@@ -164,6 +196,8 @@ export interface RoomView {
   isHost: boolean;
   /** Assentos ocupados (humanos + bots), em ordem de cor. */
   players: RoomSeatView[];
+  /** O viewer (se membro) marcou "pronto"? Usado pelo botão do convidado. */
+  viewerReady: boolean;
   settings: RoomSettings;
 }
 
@@ -187,6 +221,7 @@ function genId(): string {
 async function playersOf(db: Db, roomId: string): Promise<RoomPlayerView[]> {
   const rows = await db
     .select({
+      userId: roomPlayerTable.userId,
       username: sql<string>`coalesce(${userTable.username}, ${userTable.name})`,
       color: roomPlayerTable.color,
       isHost: roomPlayerTable.isHost,
@@ -196,7 +231,7 @@ async function playersOf(db: Db, roomId: string): Promise<RoomPlayerView[]> {
     .innerJoin(userTable, eq(userTable.id, roomPlayerTable.userId))
     .where(eq(roomPlayerTable.roomId, roomId))
     .orderBy(asc(roomPlayerTable.seatIndex));
-  return rows.map((r) => ({ username: r.username, color: r.color as PlayerColor, isHost: r.isHost }));
+  return rows.map((r) => ({ userId: r.userId, username: r.username, color: r.color as PlayerColor, isHost: r.isHost }));
 }
 
 export interface CreateRoomInput {
@@ -209,8 +244,20 @@ export interface CreateRoomInput {
 }
 
 /** Cria uma sala 'waiting' já com o anfitrião sentado; bots começam vazios (o host adiciona ao vivo). */
+/**
+ * Renova a atividade da sala: devolve o patch de `lastActivityAt` E arma a
+ * varredura periódica (db-idle.ts). Os dois andam juntos de propósito — quem
+ * adia a expiração de uma sala precisa manter o sweeper acordado, senão sobra
+ * sala fantasma no lobby. Use isto em vez de escrever `lastActivityAt` na mão.
+ */
+function touchedNow(): { lastActivityAt: Date } {
+  armRoomSweep();
+  return { lastActivityAt: new Date() };
+}
+
 export async function createRoom(input: CreateRoomInput): Promise<RoomView> {
   const db = getDb();
+  armRoomSweep(); // nasce uma sala 'waiting' (lastActivityAt vem do default do banco)
   // O mapa/cenário define o limite; a config guarda bots (começa vazia) e as regras.
   const inCfg = (input.config ?? {}) as Record<string, unknown>;
   const max = roomPlayerLimit(
@@ -351,6 +398,13 @@ function botColorsOf(config: unknown): PlayerColor[] {
   return botsOf(config).map((b) => b.color);
 }
 
+/** userIds que marcaram "pronto" (moram na config; some ao sair ou mudar as regras). */
+export function readyUserIdsOf(config: unknown): string[] {
+  const arr = (config as { readyUserIds?: unknown } | null)?.readyUserIds;
+  if (!Array.isArray(arr)) return [];
+  return arr.filter((x): x is string => typeof x === 'string');
+}
+
 /** Regras da partida guardadas na config (com defaults). */
 function settingsOf(config: unknown): RoomSettings {
   const c = (config ?? {}) as Record<string, unknown>;
@@ -376,9 +430,17 @@ async function buildRoomView(
 ): Promise<RoomView> {
   const humans = await playersOf(db, r.id);
   const bots = botsOf(r.config);
+  const readyIds = readyUserIdsOf(r.config);
   const players: RoomSeatView[] = [
-    ...humans.map((h) => ({ name: h.username, color: h.color, isHost: h.isHost, isBot: false })),
-    ...bots.map((b) => ({ name: b.name, color: b.color, isHost: false, isBot: true, difficulty: b.difficulty })),
+    // Anfitrião e bots contam sempre como prontos; convidados dependem do "pronto".
+    ...humans.map((h) => ({
+      name: h.username,
+      color: h.color,
+      isHost: h.isHost,
+      isBot: false,
+      isReady: h.isHost || readyIds.includes(h.userId),
+    })),
+    ...bots.map((b) => ({ name: b.name, color: b.color, isHost: false, isBot: true, difficulty: b.difficulty, isReady: true })),
   ];
   players.sort((a, b) => PLAYER_COLORS.indexOf(a.color) - PLAYER_COLORS.indexOf(b.color));
   return {
@@ -391,6 +453,7 @@ async function buildRoomView(
     hostUserId: r.hostUserId,
     isHost: viewerId === r.hostUserId,
     players,
+    viewerReady: viewerId != null && readyIds.includes(viewerId),
     settings: settingsOf(r.config),
   };
 }
@@ -446,7 +509,7 @@ export async function joinRoom(code: string, userId: string): Promise<JoinResult
   }
 
   // Entrar (ou reabrir o link) é atividade: adia a expiração da sala de espera.
-  await db.update(roomTable).set({ lastActivityAt: new Date() }).where(eq(roomTable.id, r.id));
+  await db.update(roomTable).set(touchedNow()).where(eq(roomTable.id, r.id));
 
   const room = await getRoom(code, userId);
   return { ok: true, room: room! };
@@ -462,7 +525,7 @@ export async function touchRoomActivity(code: string, userId: string): Promise<v
   const db = getDb();
   await db
     .update(roomTable)
-    .set({ lastActivityAt: new Date() })
+    .set(touchedNow())
     .where(
       and(
         eq(roomTable.code, code),
@@ -501,6 +564,13 @@ export async function startRoom(code: string, hostUserId: string): Promise<JoinR
   }
   if (r.status !== 'waiting') {
     return { ok: false, error: 'A partida já começou.', httpStatus: 409 };
+  }
+  // Gate de "pronto" (autoridade no servidor): todo humano convidado precisa ter
+  // marcado pronto. Bots e o anfitrião não bloqueiam.
+  const view = await buildRoomView(db, r, hostUserId);
+  const unready = firstUnreadyName(view.players);
+  if (unready) {
+    return { ok: false, error: `O jogador ${unready} ainda não está pronto.`, httpStatus: 409 };
   }
   await db
     .update(roomTable)
@@ -605,6 +675,22 @@ export async function updateRoomSettings(code: string, hostUserId: string, patch
     balancedDice: has('balancedDice') ? p.balancedDice === true : cur.balancedDice,
     bots: botsOf(r.config),
   };
+  // Se ALGUMA regra de jogo mudou (mapa, expansão, ritmo, pontos...), zera os
+  // "prontos": os convidados reconfirmam a mesa que combinaram. Mudar só o nome
+  // ou a privacidade da sala não reseta.
+  const gameplayChanged =
+    nextLayout !== r.boardLayout ||
+    nextExpansion !== cur.expansion ||
+    nextScenario !== cur.scenario ||
+    newConfig.seed !== cur.seed ||
+    newConfig.pace !== cur.pace ||
+    newConfig.numberLayout !== cur.numberLayout ||
+    newConfig.desert !== cur.desert ||
+    newConfig.pointsToWin !== cur.pointsToWin ||
+    newConfig.discardLimit !== cur.discardLimit ||
+    newConfig.friendlyRobber !== cur.friendlyRobber ||
+    newConfig.balancedDice !== cur.balancedDice;
+  const configToSave = { ...newConfig, readyUserIds: gameplayChanged ? [] : readyUserIdsOf(r.config) };
   await db
     .update(roomTable)
     .set({
@@ -612,8 +698,8 @@ export async function updateRoomSettings(code: string, hostUserId: string, patch
       isPrivate: has('isPrivate') ? p.isPrivate === true : r.isPrivate,
       boardLayout: nextLayout,
       maxPlayers: nextMax,
-      config: newConfig,
-      lastActivityAt: new Date(),
+      config: configToSave,
+      ...touchedNow(),
     })
     .where(eq(roomTable.id, r.id));
   return { ok: true, room: await reloadView(db, r.id, hostUserId) };
@@ -631,11 +717,13 @@ export async function addBot(code: string, hostUserId: string, opts: { name?: st
   if (!seat) return { ok: false, error: 'Sala cheia.', httpStatus: 409 };
   const difficulty: Difficulty = opts.difficulty === 'easy' || opts.difficulty === 'hard' ? opts.difficulty : 'medium';
   const name = (opts.name?.trim() || `Bot ${seat.color}`).slice(0, 16);
+  // Mudar a composição da mesa reseta os "prontos" (os convidados reconfirmam).
   const newConfig = {
     ...((r.config ?? {}) as Record<string, unknown>),
     bots: [...bots, { color: seat.color, name, difficulty }],
+    readyUserIds: [],
   };
-  await db.update(roomTable).set({ config: newConfig, lastActivityAt: new Date() }).where(eq(roomTable.id, r.id));
+  await db.update(roomTable).set({ config: newConfig, ...touchedNow() }).where(eq(roomTable.id, r.id));
   return { ok: true, room: await reloadView(db, r.id, hostUserId) };
 }
 
@@ -646,8 +734,8 @@ export async function removeBot(code: string, hostUserId: string, color: string)
   if (!loaded.ok) return loaded;
   const r = loaded.row;
   const bots = botsOf(r.config).filter((b) => b.color !== color);
-  const newConfig = { ...((r.config ?? {}) as Record<string, unknown>), bots };
-  await db.update(roomTable).set({ config: newConfig, lastActivityAt: new Date() }).where(eq(roomTable.id, r.id));
+  const newConfig = { ...((r.config ?? {}) as Record<string, unknown>), bots, readyUserIds: [] };
+  await db.update(roomTable).set({ config: newConfig, ...touchedNow() }).where(eq(roomTable.id, r.id));
   return { ok: true, room: await reloadView(db, r.id, hostUserId) };
 }
 
@@ -659,9 +747,33 @@ export async function updateBot(code: string, hostUserId: string, color: string,
   const r = loaded.row;
   const diff: Difficulty = difficulty === 'easy' || difficulty === 'hard' ? difficulty : 'medium';
   const bots = botsOf(r.config).map((b) => (b.color === color ? { ...b, difficulty: diff } : b));
-  const newConfig = { ...((r.config ?? {}) as Record<string, unknown>), bots };
-  await db.update(roomTable).set({ config: newConfig, lastActivityAt: new Date() }).where(eq(roomTable.id, r.id));
+  const newConfig = { ...((r.config ?? {}) as Record<string, unknown>), bots, readyUserIds: [] };
+  await db.update(roomTable).set({ config: newConfig, ...touchedNow() }).where(eq(roomTable.id, r.id));
   return { ok: true, room: await reloadView(db, r.id, hostUserId) };
+}
+
+/**
+ * Marca/desmarca o "pronto" de um membro humano da sala (só enquanto 'waiting').
+ * O anfitrião não precisa (é implicitamente pronto ao iniciar), mas a chamada é
+ * idempotente para qualquer membro. Persiste em `config.readyUserIds`.
+ */
+export async function setRoomReady(code: string, userId: string, ready: boolean): Promise<JoinResult> {
+  const db = getDb();
+  const [r] = await db.select().from(roomTable).where(eq(roomTable.code, code)).limit(1);
+  if (!r || r.status === 'abandoned') return { ok: false, error: 'Sala não encontrada.', httpStatus: 404 };
+  if (r.status !== 'waiting') return { ok: false, error: 'A partida já começou.', httpStatus: 409 };
+  const [seat] = await db
+    .select({ userId: roomPlayerTable.userId })
+    .from(roomPlayerTable)
+    .where(and(eq(roomPlayerTable.roomId, r.id), eq(roomPlayerTable.userId, userId)))
+    .limit(1);
+  if (!seat) return { ok: false, error: 'Você não está nesta sala.', httpStatus: 403 };
+
+  const current = readyUserIdsOf(r.config);
+  const next = ready ? Array.from(new Set([...current, userId])) : current.filter((id) => id !== userId);
+  const newConfig = { ...((r.config ?? {}) as Record<string, unknown>), readyUserIds: next };
+  await db.update(roomTable).set({ config: newConfig, ...touchedNow() }).where(eq(roomTable.id, r.id));
+  return { ok: true, room: await reloadView(db, r.id, userId) };
 }
 
 /** Sai da sala de espera: um convidado libera a vaga; o host encerra a sala inteira. */
@@ -675,7 +787,10 @@ export async function leaveRoom(code: string, userId: string): Promise<{ ok: tru
     return { ok: true };
   }
   await db.delete(roomPlayerTable).where(and(eq(roomPlayerTable.roomId, r.id), eq(roomPlayerTable.userId, userId)));
-  await db.update(roomTable).set({ lastActivityAt: new Date() }).where(eq(roomTable.id, r.id));
+  // Libera também o "pronto" dele (some do gate; ao reentrar volta como não-pronto).
+  const readyIds = readyUserIdsOf(r.config).filter((id) => id !== userId);
+  const newConfig = { ...((r.config ?? {}) as Record<string, unknown>), readyUserIds: readyIds };
+  await db.update(roomTable).set({ config: newConfig, ...touchedNow() }).where(eq(roomTable.id, r.id));
   return { ok: true };
 }
 
@@ -756,6 +871,9 @@ export async function abandonIfNotFinished(code: string): Promise<void> {
  * (cor + nome + dificuldade escolhidos pelo anfitriao). Vagas nunca ocupadas
  * simplesmente nao entram na partida (mesmo comportamento do modo local).
  * `null` se a sala nao existe ou nao tem config gravada.
+ *
+ * A ORDEM final e sorteada (`shufflePlayerOrder`): a ordem de chegada na sala
+ * nao decide mais quem joga primeiro.
  */
 export async function buildRoomConfig(code: string): Promise<RoomConfig | null> {
   const raw = await getRoomConfig(code);
@@ -776,7 +894,8 @@ export async function buildRoomConfig(code: string): Promise<RoomConfig | null> 
     expansion: raw.expansion === 'sea' ? 'sea' : 'base',
     scenario: typeof raw.scenario === 'string' ? raw.scenario : undefined,
     pace: (raw.pace as Pace) ?? 'normal',
-    players: [...humanEntries, ...botEntries],
+    // Ordem de turno sorteada — nao e a ordem de chegada na sala.
+    players: shufflePlayerOrder([...humanEntries, ...botEntries], seed),
     bots: bots.map((b) => b.color),
     botDifficulty,
     numberLayout: (raw.numberLayout as RoomConfig['numberLayout']) ?? 'balanced',

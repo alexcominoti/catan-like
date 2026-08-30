@@ -1579,6 +1579,15 @@ button.link {
 .su-remove:hover { color: var(--accent); background: var(--panel); }
 .su-start:disabled { opacity: 0.55; cursor: not-allowed; }
 
+/* Marcação de "pronto" ao lado de cada humano no roster. */
+.su-ready { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; color: var(--warn); white-space: nowrap; flex-shrink: 0; }
+.su-ready.on { color: var(--good); }
+/* Envólucro do botão iniciar: mantém o tooltip (title) ativo mesmo desabilitado. */
+.su-start-wrap { display: block; }
+/* Botão de "pronto" do convidado: verde quando já marcado (clique cancela). */
+.su-ready-toggle.ready { background: var(--good); }
+.su-ready-toggle.ready:hover { background: var(--forest); }
+
 /* Assento de bot: nome em cima, dificuldade embaixo */
 .su-seat.bot { flex-direction: column; align-items: stretch; gap: 8px; }
 .su-seat-row { display: flex; align-items: center; gap: 10px; }

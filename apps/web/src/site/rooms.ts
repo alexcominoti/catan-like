@@ -29,6 +29,8 @@ export interface RoomSeatView {
   isHost: boolean;
   isBot: boolean;
   difficulty?: BotDifficulty;
+  /** Marcou "pronto"? Anfitrião e bots contam sempre como prontos. */
+  isReady: boolean;
 }
 
 /** Regras da partida que o anfitrião ajusta ao vivo. */
@@ -57,6 +59,8 @@ export interface RoomView {
   hostUserId: string;
   isHost: boolean;
   players: RoomSeatView[];
+  /** O viewer (se membro) marcou "pronto"? Usado pelo botão do convidado. */
+  viewerReady: boolean;
   settings: RoomSettings;
 }
 
@@ -111,6 +115,15 @@ export function joinRoomApi(code: string): Promise<RoomResult> {
 
 export function startRoomApi(code: string): Promise<RoomResult> {
   return roomCall(`/api/rooms/${encodeURIComponent(code)}/start`, { method: 'POST' });
+}
+
+/** Convidado marca/desmarca "pronto" (gate para o anfitrião iniciar a partida). */
+export function setReadyApi(code: string, ready: boolean): Promise<RoomResult> {
+  return roomCall(`/api/rooms/${encodeURIComponent(code)}/ready`, {
+    method: 'POST',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ ready }),
+  });
 }
 
 /** Anfitrião altera regras/mapa/nome/privacidade ao vivo. */

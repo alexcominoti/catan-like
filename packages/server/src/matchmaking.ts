@@ -12,6 +12,7 @@ import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import { getDb, room as roomTable, roomPlayer as roomPlayerTable, type Db } from '@trevalis/db';
 import type { PlayerColor } from '@trevalis/engine';
 import { botsOf, buildRoomConfig, createRoom, forceStartRoom, joinRoom, leaveRoom, nextSeat } from './rooms.js';
+import { armMatchmaking, disarmMatchmaking, matchmakingArmed } from './db-idle.js';
 import type { RoomManager } from './room.js';
 
 /* ------------------------------------------------------------------ */
@@ -80,6 +81,7 @@ async function humanColors(db: Db, roomId: string): Promise<PlayerColor[]> {
  */
 export async function joinQuickMatch(userId: string): Promise<{ code: string }> {
   const db = getDb();
+  armMatchmaking(); // há fila: o tick periódico volta a consultar o banco
 
   // Já está sentado numa mesa matchmade em espera? (idempotente)
   const mine = await db
@@ -155,19 +157,29 @@ export async function leaveQuickMatch(userId: string): Promise<void> {
  * Tick do matchmaking: varre as mesas matchmade em espera e, nas que já podem
  * começar, completa com bots e liga o motor autoritativo (manager.startGame).
  * `now` injetável para testes.
+ *
+ * Sem fila, NÃO consulta o banco (ver db-idle.ts): sai antes da query enquanto
+ * ninguém entra no "Jogo rápido", e volta a dormir assim que não sobra nenhuma
+ * mesa com humano — só `joinQuickMatch` pode criar trabalho novo.
  */
 export async function matchmakingTick(manager: RoomManager, now = Date.now()): Promise<void> {
+  if (!matchmakingArmed()) return;
   const db = getDb();
   const rooms = await db
     .select({ id: roomTable.id, code: roomTable.code, config: roomTable.config, createdAt: roomTable.createdAt, max: roomTable.maxPlayers })
     .from(roomTable)
     .where(and(eq(roomTable.status, 'waiting'), IS_MATCHMADE));
 
+  // Mesas que continuam esperando alguém: enquanto houver uma, o tick segue vivo.
+  let pending = 0;
   for (const r of rooms) {
     const humans = await humansIn(db, r.id);
     if (humans === 0) continue; // ninguém sentado (host saiu): deixa a limpeza normal cuidar
     const waited = now - new Date(r.createdAt).getTime();
-    if (!shouldStartMatch(humans, waited)) continue;
+    if (!shouldStartMatch(humans, waited)) {
+      pending++; // ainda juntando gente: precisa de outro tick
+      continue;
+    }
 
     // Completa com bots até o alvo (respeitando o limite do mapa).
     const existingBots = botsOf(r.config);
@@ -185,6 +197,11 @@ export async function matchmakingTick(manager: RoomManager, now = Date.now()): P
     if (await forceStartRoom(r.code)) {
       const gameConfig = await buildRoomConfig(r.code);
       if (gameConfig) manager.startGame(r.code, gameConfig);
+    } else {
+      pending++; // não conseguiu iniciar agora: tenta de novo no próximo tick
     }
   }
+
+  // Nada mais pode avançar sozinho (mesas vazias só somem pela varredura).
+  if (pending === 0) disarmMatchmaking();
 }

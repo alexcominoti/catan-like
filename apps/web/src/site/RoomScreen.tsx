@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Copy, Check, Crown, Lock, Play, ArrowLeft, Users, Bot, Dices, Target, Shield,
-  Shuffle, UserPlus, X, Circle, Send,
+  Shuffle, UserPlus, X, Circle, Send, Clock,
 } from 'lucide-react';
 import { type BoardLayout, type PlayerColor } from '@trevalis/engine';
 import type { Difficulty } from '@trevalis/bot';
@@ -13,7 +13,7 @@ import { GameClient, type ChatMessage } from '../net/client.js';
 import { useT, type MsgKey } from '../i18n/index.js';
 import {
   addBotApi, createRoomApi, getRoomApi, joinRoomApi, leaveRoomApi, removeBotApi,
-  roomLink, setBotDifficultyApi, startRoomApi, updateRoomApi,
+  roomLink, setBotDifficultyApi, setReadyApi, startRoomApi, updateRoomApi,
   type RoomSeatView, type RoomView,
 } from './rooms.js';
 import { getFriends, sendInvite, type FriendView } from './social.js';
@@ -371,7 +371,7 @@ function Room({
   return room.isHost ? (
     <HostRoom code={code} room={room} onRoom={setRoom} onError={setError} onLeave={leaveWaiting} />
   ) : (
-    <GuestRoom code={code} room={room} onLeave={leaveWaiting} />
+    <GuestRoom code={code} room={room} onRoom={setRoom} onLeave={leaveWaiting} />
   );
 }
 
@@ -453,6 +453,11 @@ function SeatRow({
           {seat.isBot ? <Bot size={14} /> : null} {seat.name}
         </span>
         {seat.isHost && <span className="su-tag host"><Crown size={12} /> {t('room.host')}</span>}
+        {!seat.isBot && (
+          <span className={`su-ready${seat.isReady ? ' on' : ''}`}>
+            {seat.isReady ? <><Check size={13} /> {t('room.ready')}</> : <><Clock size={13} /> {t('room.notReady')}</>}
+          </span>
+        )}
         {onRemove && (
           <button className="su-remove" title={t('room.removeSeat')} onClick={onRemove}><X size={15} /></button>
         )}
@@ -519,7 +524,16 @@ function HostRoom({
   const limit = isSea ? 4 : mapLimit(mapKey);
   const occupants = room.players.length;
   const openCount = Math.max(0, limit - occupants);
-  const canStart = occupants >= 2; // host + pelo menos 1 (bot ou humano)
+  // 1º humano convidado ainda não pronto (bots e o anfitrião nunca bloqueiam).
+  const unreadyName = room.players.find((p) => !p.isBot && !p.isHost && !p.isReady)?.name ?? null;
+  const enoughPlayers = occupants >= 2; // host + pelo menos 1 (bot ou humano)
+  const canStart = enoughPlayers && !unreadyName;
+  // Motivo do bloqueio (tooltip + nota): falta de jogadores ou alguém não-pronto.
+  const startBlockReason = !enoughPlayers
+    ? t('room.startHint')
+    : unreadyName
+      ? t('room.startNotReady', { name: unreadyName })
+      : null;
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** Envia um patch de regras ao servidor e adota a sala devolvida. */
@@ -732,10 +746,13 @@ function HostRoom({
             </button>
           </div>
 
-          <button className="cta big su-start" disabled={!canStart || starting} onClick={start}>
-            <Play size={16} /> {starting ? t('room.starting') : t('room.start')}
-          </button>
-          {!canStart && <p className="su-note">{t('room.startHint')}</p>}
+          {/* Envolvido num span com `title`: o tooltip aparece no hover mesmo com o botão desabilitado. */}
+          <span className="su-start-wrap" title={startBlockReason ?? undefined}>
+            <button className="cta big su-start" disabled={!canStart || starting} onClick={start}>
+              <Play size={16} /> {starting ? t('room.starting') : t('room.start')}
+            </button>
+          </span>
+          {startBlockReason && <p className="su-note">{startBlockReason}</p>}
         </div>
       </div>
     </div>
@@ -746,9 +763,19 @@ function HostRoom({
 /* Sala do CONVIDADO: vê a mesa e aguarda o anfitrião                   */
 /* ------------------------------------------------------------------ */
 
-function GuestRoom({ code, room, onLeave }: { code: string; room: RoomView; onLeave: () => void }) {
+function GuestRoom({ code, room, onRoom, onLeave }: { code: string; room: RoomView; onRoom: (r: RoomView) => void; onLeave: () => void }) {
   const t = useT();
+  const [busy, setBusy] = useState(false);
   const openCount = Math.max(0, room.maxPlayers - room.players.length);
+
+  async function toggleReady() {
+    if (busy) return;
+    setBusy(true);
+    const res = await setReadyApi(code, !room.viewerReady);
+    setBusy(false);
+    if (res.ok) onRoom(res.room);
+  }
+
   return (
     <div className="page">
       <div className="page-head">
@@ -775,7 +802,14 @@ function GuestRoom({ code, room, onLeave }: { code: string; room: RoomView; onLe
             <OpenSeat key={`open-${i}`} />
           ))}
         </div>
-        <p className="muted-note wr-wait">{t('room.waitingHost')}</p>
+        <button
+          className={`cta big su-start su-ready-toggle${room.viewerReady ? ' ready' : ''}`}
+          disabled={busy}
+          onClick={() => void toggleReady()}
+        >
+          {room.viewerReady ? <><Check size={16} /> {t('room.readyCancel')}</> : <><Circle size={16} /> {t('room.readyConfirm')}</>}
+        </button>
+        <p className="muted-note wr-wait">{room.viewerReady ? t('room.waitingHost') : t('room.readyHint')}</p>
       </div>
     </div>
   );

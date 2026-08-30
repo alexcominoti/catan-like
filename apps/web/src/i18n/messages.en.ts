@@ -324,6 +324,12 @@ export const en: Record<MsgKey, string> = {
   'room.waitingRoom': 'WAITING ROOM',
   'room.mapPrefix': 'Map:',
   'room.waitingHost': 'Waiting for the host to start the match…',
+  'room.ready': 'Ready',
+  'room.notReady': 'Not ready',
+  'room.startNotReady': "Player {name} isn't ready yet.",
+  'room.readyConfirm': "I'm ready",
+  'room.readyCancel': 'Cancel ready',
+  'room.readyHint': 'Mark yourself ready so the host can start.',
 
   // Progress cards
   'card.knight': 'Knight',

@@ -8,6 +8,8 @@ import {
   STALE_WAITING_ROOM_TTL_MS,
   mapLimit,
   botsOf,
+  firstUnreadyName,
+  shufflePlayerOrder,
 } from '../src/rooms.js';
 
 describe('makeRoomCode', () => {
@@ -36,6 +38,32 @@ describe('nextSeat', () => {
   it('retorna null quando todas as cores estão ocupadas', () => {
     const all = ['red', 'blue', 'white', 'orange', 'green', 'brown', 'purple', 'pink'] as const;
     expect(nextSeat(all)).toBeNull();
+  });
+});
+
+describe('shufflePlayerOrder (ordem de jogo sorteada)', () => {
+  const seats = ['host', 'p2', 'p3', 'bot'];
+
+  it('é determinístico: a mesma seed devolve a mesma ordem', () => {
+    expect(shufflePlayerOrder(seats, 12345)).toEqual(shufflePlayerOrder(seats, 12345));
+  });
+
+  it('preserva todos os jogadores (só permuta)', () => {
+    for (let seed = 0; seed < 50; seed++) {
+      expect([...shufflePlayerOrder(seats, seed)].sort()).toEqual([...seats].sort());
+    }
+  });
+
+  it('não deixa o anfitrião sempre em primeiro', () => {
+    const firsts = new Set<string>();
+    for (let seed = 0; seed < 100; seed++) firsts.add(shufflePlayerOrder(seats, seed)[0]!);
+    expect(firsts).toEqual(new Set(seats));
+  });
+
+  it('não muta a lista de entrada', () => {
+    const input = [...seats];
+    shufflePlayerOrder(input, 7);
+    expect(input).toEqual(seats);
   });
 });
 
@@ -112,6 +140,34 @@ describe('mapLimit (mapa -> limite de jogadores)', () => {
     expect(mapLimit('large')).toBe(6);
     expect(mapLimit('huge')).toBe(8);
     expect(mapLimit('inexistente')).toBe(4);
+  });
+});
+
+describe('firstUnreadyName (gate de "pronto" para iniciar)', () => {
+  const host = { name: 'Ana', isBot: false, isHost: true, isReady: false };
+  const bot = { name: 'Bot Rex', isBot: true, isHost: false, isReady: false };
+
+  it('null quando todos os humanos convidados estão prontos', () => {
+    expect(firstUnreadyName([host, { name: 'Beto', isBot: false, isHost: false, isReady: true }])).toBeNull();
+  });
+
+  it('anfitrião e bots nunca bloqueiam (contam como prontos)', () => {
+    // Host não-pronto e bot não-pronto, mas sem convidados humanos pendentes → libera.
+    expect(firstUnreadyName([host, bot])).toBeNull();
+  });
+
+  it('retorna o nome do 1º convidado humano não-pronto', () => {
+    const players = [
+      host,
+      { name: 'Beto', isBot: false, isHost: false, isReady: true },
+      { name: 'Carla', isBot: false, isHost: false, isReady: false },
+      { name: 'Dan', isBot: false, isHost: false, isReady: false },
+    ];
+    expect(firstUnreadyName(players)).toBe('Carla');
+  });
+
+  it('sala só de bots (sem convidados) libera o início', () => {
+    expect(firstUnreadyName([host, bot, { ...bot, name: 'Bot Zed' }])).toBeNull();
   });
 });
 

@@ -326,6 +326,12 @@ export const ptBR = {
   'room.waitingRoom': 'SALA DE ESPERA',
   'room.mapPrefix': 'Mapa:',
   'room.waitingHost': 'Aguardando o anfitrião iniciar a partida…',
+  'room.ready': 'Pronto',
+  'room.notReady': 'Não está pronto',
+  'room.startNotReady': 'O jogador {name} ainda não está pronto.',
+  'room.readyConfirm': 'Estou pronto',
+  'room.readyCancel': 'Cancelar pronto',
+  'room.readyHint': 'Marque que você está pronto para o anfitrião poder iniciar.',
 
   // Cartas de progresso
   'card.knight': 'Cavaleiro',

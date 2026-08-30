@@ -2,7 +2,8 @@ import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { fromNodeHeaders } from 'better-auth/node';
 import { getAuth } from './auth.js';
-import { getRoom, finishRoom } from './rooms.js';
+import { getRoom, finishRoom, STALE_WAITING_ROOM_TTL_MS } from './rooms.js';
+import { noteRoomSweepDone, roomSweepArmed } from './db-idle.js';
 import { EMPTY_ROOM_TTL_MS, RECONNECT_GRACE_MS, RoomManager, type LiveRoom } from './room.js';
 import { presence } from './presence.js';
 import { summarizeMatch, type MatchSummary } from './match.js';
@@ -16,8 +17,14 @@ import type { ClientMessage, RoomConfig, ServerMessage } from './protocol.js';
 /** Caminho do WebSocket quando anexado ao servidor HTTP unico (producao). */
 export const WS_PATH = '/ws';
 
-/** A cada quanto tempo o servidor varre salas vazias (item 6). */
+/** A cada quanto tempo o servidor varre as salas vazias EM MEMÓRIA (item 6). */
 const SWEEP_INTERVAL_MS = 30_000;
+/**
+ * A cada quanto tempo varre as salas 'waiting' inativas NO BANCO. Bem mais
+ * espaçado que a varredura em memória (que é de graça): aqui cada ciclo é uma
+ * query, e o TTL da sala é de 15 min — não há pressa. Ver db-idle.ts.
+ */
+const STALE_SWEEP_INTERVAL_MS = 5 * 60_000;
 /** Heartbeat ws (ping/pong): detecta quedas "silenciosas" (sem `close` limpo). */
 const HEARTBEAT_INTERVAL_MS = 10_000;
 /** Com que frequência o matchmaking tenta formar/iniciar mesas (Tier 2). */
@@ -106,6 +113,7 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
     await deleteGameSnapshot(code); // sala abandonada: descarta o snapshot vivo
   });
   const onSweepStaleRooms = deps.onSweepStaleRooms ?? (async () => {
+    if (!hasDatabase()) return []; // sem banco (ex.: testes) não há o que varrer
     const { sweepStaleWaitingRooms } = await import('./rooms.js');
     return sweepStaleWaitingRooms();
   });
@@ -202,9 +210,8 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
   }, HEARTBEAT_INTERVAL_MS);
   wss.on('close', () => clearInterval(heartbeat));
 
-  // Limpeza de sala vazia (item 6): a cada SWEEP_INTERVAL_MS varre tanto as salas
-  // AO VIVO sem ninguém (in_progress abandonadas, via presença em memória) quanto
-  // as salas de espera inativas no BANCO (waiting expiradas, que nunca abrem WS).
+  // Limpeza de sala vazia (item 6), parte EM MEMÓRIA: salas ao vivo sem ninguém
+  // (in_progress abandonadas, via presença). Não custa query, então roda sempre.
   const sweeper = setInterval(() => {
     manager.sweep(EMPTY_ROOM_TTL_MS, (code) => {
       const bt = botTimers.get(code);
@@ -214,12 +221,22 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
       manager.remove(code);
       void onRoomExpired(code);
     });
-    void onSweepStaleRooms().catch((err) => {
-      // eslint-disable-next-line no-console
-      console.error('[trevalis][sweep] falha ao limpar salas inativas:', err);
-    });
   }, SWEEP_INTERVAL_MS);
   wss.on('close', () => clearInterval(sweeper));
+
+  // Parte NO BANCO: salas 'waiting' inativas (expiradas sem nunca abrir WS).
+  // Só roda enquanto existe sala que possa vencer o TTL — passado isso o banco
+  // fica em paz e o compute do Neon suspende (ver db-idle.ts).
+  const staleSweeper = setInterval(() => {
+    if (!roomSweepArmed()) return;
+    void onSweepStaleRooms()
+      .then(() => noteRoomSweepDone(STALE_WAITING_ROOM_TTL_MS))
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error('[trevalis][sweep] falha ao limpar salas inativas:', err);
+      });
+  }, STALE_SWEEP_INTERVAL_MS);
+  wss.on('close', () => clearInterval(staleSweeper));
 
   // Matchmaking (Tier 2): forma/inicia as mesas de "Jogo rápido" periodicamente.
   const matchmaker = setInterval(() => {

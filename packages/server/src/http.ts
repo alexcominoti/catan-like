@@ -24,6 +24,7 @@ import {
   listOpenRooms,
   listRejoinableRooms,
   removeBot,
+  setRoomReady,
   startRoom,
   touchRoomActivity,
   updateBot,
@@ -585,7 +586,7 @@ async function handleRequest(
   }
 
   // --- salas: detalhe / editar / entrar / sair / bots / iniciar (por código) ---
-  const roomMatch = /^\/api\/rooms\/([A-Za-z0-9]{4,12})(\/join|\/leave|\/start|\/bots)?$/.exec(path);
+  const roomMatch = /^\/api\/rooms\/([A-Za-z0-9]{4,12})(\/join|\/leave|\/start|\/bots|\/ready)?$/.exec(path);
   if (roomMatch) {
     const code = roomMatch[1]!.toUpperCase();
     const sub = roomMatch[2];
@@ -673,6 +674,27 @@ async function handleRequest(
       if (b.action === 'remove') result = await removeBot(code, u.id, color);
       else if (b.action === 'difficulty') result = await updateBot(code, u.id, color, difficulty ?? 'medium');
       else result = await addBot(code, u.id, { name: typeof b.name === 'string' ? b.name : undefined, difficulty });
+      if (!result.ok) {
+        sendJson(res, result.httpStatus, { error: result.error });
+        return;
+      }
+      sendJson(res, 200, { room: result.room });
+      return;
+    }
+
+    // Convidado marca/desmarca "pronto" (gate para o anfitrião iniciar).
+    if (sub === '/ready' && req.method === 'POST') {
+      const u = await authedUser(req, res);
+      if (!u) return;
+      let body: unknown;
+      try {
+        body = await readJsonBody(req);
+      } catch {
+        sendJson(res, 400, { error: 'Corpo inválido.' });
+        return;
+      }
+      const ready = (body as { ready?: unknown }).ready === true;
+      const result = await setRoomReady(code, u.id, ready);
       if (!result.ok) {
         sendJson(res, result.httpStatus, { error: result.error });
         return;
