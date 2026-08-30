@@ -1,6 +1,7 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Hexagon } from 'lucide-react';
 import { authClient, resetRedirectUrl } from '../auth/client.js';
+import { captchaHeaders, renderTurnstile } from '../auth/turnstile.js';
 import { validateUsername } from '../auth/username.js';
 import { useT, useLang, type MsgKey } from '../i18n/index.js';
 import './auth.css';
@@ -32,26 +33,57 @@ export function Auth({ onAuthed }: { onAuthed: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // Turnstile: o widget só aparece se o servidor tiver as chaves configuradas
+  // (GET /api/config). Sem elas, `captchaRef` fica vazio e o cabeçalho não vai —
+  // exatamente o fluxo antigo.
+  const captchaBox = useRef<HTMLDivElement | null>(null);
+  const captchaWidget = useRef<{ reset: () => void } | null>(null);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  useEffect(() => {
+    const el = captchaBox.current;
+    if (!el || captchaWidget.current) return;
+    let vivo = true;
+    void renderTurnstile(el, (tk) => vivo && setCaptchaToken(tk)).then((w) => {
+      if (vivo) captchaWidget.current = w;
+    });
+    return () => {
+      vivo = false;
+    };
+  }, []);
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setNotice(null);
     setBusy(true);
+    // O plugin de captcha do Better Auth lê este cabeçalho no cadastro, login e
+    // pedido de redefinição. Sem captcha configurado, vai vazio.
+    const fetchOptions = { headers: captchaHeaders(captchaToken) };
     try {
       if (mode === 'login') {
-        const { error } = await authClient.signIn.email({ email, password });
+        const { error } = await authClient.signIn.email({ email, password, fetchOptions });
         if (error) throw new Error(error.message ?? t('auth.err.login'));
         onAuthed();
       } else if (mode === 'signup') {
         // O "nome" no cadastro É o username: valida a regex antes de enviar.
         const vErr = validateUsername(name);
         if (vErr) throw new Error(vErr);
-        const { error } = await authClient.signUp.email({ email, password, name: name.trim(), language: lang });
+        const { error } = await authClient.signUp.email({
+          email,
+          password,
+          name: name.trim(),
+          language: lang,
+          fetchOptions,
+        });
         if (error) throw new Error(error.message ?? t('auth.err.signup'));
         setNotice(t('auth.notice.signup'));
         setMode('login');
       } else if (mode === 'forgot') {
-        const { error } = await authClient.requestPasswordReset({ email, redirectTo: resetRedirectUrl() });
+        const { error } = await authClient.requestPasswordReset({
+          email,
+          redirectTo: resetRedirectUrl(),
+          fetchOptions,
+        });
         if (error) throw new Error(error.message ?? t('auth.err.forgot'));
         setNotice(t('auth.notice.forgot'));
       } else if (mode === 'reset') {
@@ -63,6 +95,9 @@ export function Auth({ onAuthed }: { onAuthed: () => void }) {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('auth.err.unexpected'));
+      // Token do Turnstile é de uso único: falhou, gera outro para a retentativa.
+      captchaWidget.current?.reset();
+      setCaptchaToken(null);
     } finally {
       setBusy(false);
     }
@@ -123,6 +158,9 @@ export function Auth({ onAuthed }: { onAuthed: () => void }) {
             />
           </label>
         )}
+
+        {/* Turnstile: fica vazio (e sem ocupar espaço) se não houver chave. */}
+        <div className="auth-captcha" ref={captchaBox} />
 
         <button className="cta auth-submit" type="submit" disabled={busy}>
           {busy ? '...' : title}

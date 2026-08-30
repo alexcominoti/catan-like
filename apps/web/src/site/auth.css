@@ -84,3 +84,13 @@
   padding: 0;
   text-decoration: underline;
 }
+
+/* Widget do Turnstile. Fica com altura zero quando não há captcha configurado
+   (o container vem vazio), então o formulário não ganha buraco à toa. */
+.auth-captcha:empty {
+  display: none;
+}
+.auth-captcha {
+  display: flex;
+  justify-content: center;
+}

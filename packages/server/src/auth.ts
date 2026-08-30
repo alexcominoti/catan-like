@@ -10,6 +10,9 @@
 import { betterAuth, type BetterAuthOptions } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { APIError } from 'better-auth/api';
+import { captcha } from 'better-auth/plugins';
+import { captchaEnabled, turnstileSecretKey } from './captcha.js';
+import { sanitizeUserUpdate } from './user-update.js';
 import { sql } from 'drizzle-orm';
 import { getDb, hasDatabase, schema, user as userTable } from '@trevalis/db';
 import { sendEmail, actionEmail } from './mailer.js';
@@ -143,6 +146,26 @@ function buildOptions(): BetterAuthOptions {
             return { data: { ...u, name, username: name } };
           },
         },
+        update: {
+          /**
+           * `POST /api/auth/update-user` aceita `name` e os additionalFields com
+           * `input: true` — ou seja, dava para gravar `username` direto por ali,
+           * pulando a regex de validacao, a checagem de unicidade
+           * case-insensitive e a cota de troca UNICA (que so existe em
+           * `/api/profile/username`). Como o indice unico e sensivel a
+           * maiusculas, dava ate para registrar a variante de capitalizacao do
+           * nome de outro jogador.
+           *
+           * A troca de nome tem uma porta so: a rota do perfil (que escreve
+           * direto pelo Drizzle e nao passa por aqui). Aqui a gente fecha as
+           * outras — e de quebra sanitiza os campos que sobram.
+           */
+          before: async (data) => {
+            const decision = sanitizeUserUpdate(data as Record<string, unknown>);
+            if (!decision.ok) throw new APIError('BAD_REQUEST', { message: decision.error });
+            return { data: decision.data };
+          },
+        },
       },
     },
     session: {
@@ -154,7 +177,19 @@ function buildOptions(): BetterAuthOptions {
       enabled: true,
       window: 60,
       max: 30, // por janela; o Better Auth aplica limites menores no login
+      customRules: {
+        // Cadastro e reset criam conta / disparam e-mail: bem mais apertados.
+        '/sign-up/email': { window: 60, max: 5 },
+        '/request-password-reset': { window: 60, max: 5 },
+        // Login errado em rajada = tentativa de forca bruta.
+        '/sign-in/email': { window: 60, max: 10 },
+      },
     },
+    // Turnstile no cadastro/login/reset — só entra quando as duas chaves estão
+    // configuradas (ver captcha.ts). Sem elas, o fluxo fica como era.
+    plugins: captchaEnabled()
+      ? [captcha({ provider: 'cloudflare-turnstile', secretKey: turnstileSecretKey()! })]
+      : [],
     advanced: {
       useSecureCookies: isProd,
       defaultCookieAttributes: { sameSite: 'lax' },

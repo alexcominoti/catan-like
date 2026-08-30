@@ -18,6 +18,7 @@ import {
   buildRoomConfig,
   createRoom,
   getRoom,
+  isRoomMember,
   joinRoom,
   leaveRoom,
   listFriendRooms,
@@ -35,6 +36,7 @@ import { getProfileStats, getPublicProfileByUsername } from './stats.js';
 import { presence } from './presence.js';
 import {
   acceptFriendRequest,
+  areFriends,
   blockUser,
   listFriends,
   removeFriend,
@@ -53,9 +55,22 @@ import { reportUser } from './reports.js';
 import type { RoomManager } from './room.js';
 import { metricsSnapshot } from './metrics.js';
 import { BUCKETS, RateLimiter, bucketFor, clientIp } from './rate-limit.js';
+import { securityHeaders } from './security-headers.js';
+import { captchaEnabled, turnstileSiteKey } from './captcha.js';
 
 /** Limitador de taxa das rotas /api (em memória — rodamos numa máquina só). */
 const limiter = new RateLimiter();
+
+/** Cabeçalhos de segurança (mesmos para toda resposta; montados uma vez). */
+let _securityHeaders: Record<string, string> | null = null;
+function headers(): Record<string, string> {
+  _securityHeaders ??= securityHeaders({
+    appUrl: process.env.APP_URL,
+    isProd: process.env.NODE_ENV === 'production',
+    captcha: captchaEnabled(),
+  });
+  return _securityHeaders;
+}
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -149,6 +164,10 @@ async function handleRequest(
   const url = new URL(req.url ?? '/', 'http://localhost');
   const path = decodeURIComponent(url.pathname);
 
+  // Cabeçalhos de segurança em TODA resposta (JSON, estáticos e o fallback da
+  // SPA). `setHeader` antes do `writeHead` — o Node mescla os dois.
+  for (const [k, v] of Object.entries(headers())) res.setHeader(k, v);
+
   // --- rate limit (antes de qualquer I/O) ---
   // Cada rota de API toca o Postgres, e a cota de compute do Neon é o teto real
   // da produção: sem isto um laço simples queima a cota e derruba o login junto.
@@ -177,7 +196,15 @@ async function handleRequest(
   //     Sem dados de usuário. Se METRICS_TOKEN estiver definido, exige o token. ---
   if (path === '/api/metrics') {
     const token = process.env.METRICS_TOKEN;
-    if (token) {
+    // FALHA FECHADA em produção: sem METRICS_TOKEN a rota simplesmente não
+    // existe. Antes ela ficava ABERTA quando o token não estava configurado —
+    // que era exatamente o caso em produção, expondo carga, memória e uptime.
+    if (!token) {
+      if (process.env.NODE_ENV === 'production') {
+        sendJson(res, 404, { error: 'Rota nao encontrada.' });
+        return;
+      }
+    } else {
       const provided =
         url.searchParams.get('token') ?? (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
       if (provided !== token) {
@@ -186,6 +213,13 @@ async function handleRequest(
       }
     }
     sendJson(res, 200, metricsSnapshot(manager.stats()));
+    return;
+  }
+
+  // --- configuração pública do cliente (o que a SPA precisa saber do servidor) ---
+  // Hoje só a site key do Turnstile, que é pública por definição.
+  if (path === '/api/config' && req.method === 'GET') {
+    sendJson(res, 200, { turnstileSiteKey: turnstileSiteKey() });
     return;
   }
 
@@ -537,6 +571,16 @@ async function handleRequest(
     const room = await getRoom(code);
     if (!room || room.status !== 'waiting') {
       sendJson(res, 409, { error: 'A sala não está mais aberta.' });
+      return;
+    }
+    // Convite só de quem está na mesa, e só para amigo. Sem estes dois gates,
+    // qualquer usuário logado disparava notificação para qualquer userId.
+    if (!(await isRoomMember(code, u.id))) {
+      sendJson(res, 403, { error: 'Você precisa estar na sala para convidar alguém.' });
+      return;
+    }
+    if (!(await areFriends(u.id, toUserId))) {
+      sendJson(res, 403, { error: 'Você só pode convidar amigos.' });
       return;
     }
     // Convite persistido como notificação (sobrevive a restart; dedup por sala).

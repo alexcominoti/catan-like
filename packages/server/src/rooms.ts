@@ -895,6 +895,28 @@ export async function getSeatedPlayers(
   return rows.map((row) => ({ userId: row.userId, color: row.color as PlayerColor, username: row.username }));
 }
 
+/**
+ * O usuário está sentado nesta sala (ou é o anfitrião)?
+ *
+ * Gate do convite: só quem está na mesa pode chamar alguém para ela.
+ */
+export async function isRoomMember(code: string, userId: string): Promise<boolean> {
+  const db = getDb();
+  const [r] = await db
+    .select({ id: roomTable.id, hostUserId: roomTable.hostUserId })
+    .from(roomTable)
+    .where(eq(roomTable.code, code))
+    .limit(1);
+  if (!r) return false;
+  if (r.hostUserId === userId) return true;
+  const [seat] = await db
+    .select({ userId: roomPlayerTable.userId })
+    .from(roomPlayerTable)
+    .where(and(eq(roomPlayerTable.roomId, r.id), eq(roomPlayerTable.userId, userId)))
+    .limit(1);
+  return seat != null;
+}
+
 /** Configuracao bruta (jsonb) gravada na criacao da sala — usada para montar o RoomConfig final ao iniciar. */
 export async function getRoomConfig(code: string): Promise<Record<string, unknown> | null> {
   const db = getDb();

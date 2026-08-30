@@ -21,7 +21,11 @@ async function main(): Promise<void> {
   if (!url) throw new Error('DATABASE_URL nao definida.');
   const pool = new pg.Pool({
     connectionString: url,
-    ssl: url.includes('localhost') ? undefined : { rejectUnauthorized: false },
+    // Mesma regra do pool da aplicacao (src/index.ts): TLS com verificacao do
+    // certificado. `DB_SSL_INSECURE=true` so para Postgres auto-assinado local.
+    ssl: url.includes('localhost')
+      ? undefined
+      : { rejectUnauthorized: process.env.DB_SSL_INSECURE !== 'true' },
     max: 1,
   });
   const db = drizzle(pool);

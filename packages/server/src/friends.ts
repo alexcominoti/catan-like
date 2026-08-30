@@ -93,6 +93,30 @@ export type FriendActionResult =
   | { ok: true }
   | { ok: false; error: string; httpStatus: number };
 
+/**
+ * Os dois são amigos (aresta 'accepted', em qualquer direção)?
+ *
+ * Usado pelo convite de sala: sem isto, qualquer usuário logado conseguia
+ * disparar notificação para QUALQUER userId — spam/assédio com o nome do jogo.
+ */
+export async function areFriends(userId: string, otherId: string): Promise<boolean> {
+  const db = getDb();
+  const [edge] = await db
+    .select({ status: friendshipTable.status })
+    .from(friendshipTable)
+    .where(
+      and(
+        eq(friendshipTable.status, 'accepted'),
+        or(
+          and(eq(friendshipTable.requesterId, userId), eq(friendshipTable.addresseeId, otherId)),
+          and(eq(friendshipTable.requesterId, otherId), eq(friendshipTable.addresseeId, userId)),
+        ),
+      ),
+    )
+    .limit(1);
+  return edge != null;
+}
+
 /** Envia (ou auto-aceita) um pedido de amizade para um username. */
 export async function sendFriendRequest(fromUserId: string, toUsername: string): Promise<FriendActionResult> {
   const target = await resolveUsername(toUsername.trim());
