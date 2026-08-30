@@ -98,6 +98,38 @@ describe('servidor WebSocket (ponta a ponta)', () => {
     ws.close();
   });
 
+  it('sobrevive a mensagens malformadas e continua atendendo', async () => {
+    // Regressão: {"t":"action","action":null} fazia o reduce lançar; a exceção
+    // escapava do handler assíncrono como unhandled rejection e o Node encerrava
+    // o processo — derrubando TODAS as partidas da máquina. O mesmo valia para
+    // um `enter` sem código. Agora essas mensagens são simplesmente ignoradas.
+    const { ws, inbox } = await connectAndEnter(port, ROOM_CODE);
+    await nextMessage(inbox, (m) => m.t === 'joined');
+
+    for (const lixo of [
+      { t: 'action', action: null },
+      { t: 'select', action: null },
+      { t: 'enter' },
+      { t: 'action' },
+      { t: 'chat', text: 42 },
+      { t: 'admin', drop: 'tudo' },
+      'nem json de objeto',
+      42,
+    ]) {
+      ws.send(JSON.stringify(lixo));
+    }
+    ws.send('{ isto nem e json');
+
+    // O servidor continua de pé: uma ação legítima ainda é atendida.
+    inbox.length = 0;
+    ws.send(JSON.stringify({ t: 'action', action: { t: 'endTurn' } }));
+    const resposta = await nextMessage(inbox, (m) => m.t === 'state' || m.t === 'error');
+    expect(resposta).toBeDefined();
+    expect(wss.clients.size).toBeGreaterThan(0);
+
+    ws.close();
+  });
+
   it('sala inexistente responde com erro', async () => {
     const { inbox } = await connectAndEnter(port, 'NAOEXISTE');
     const err = await nextMessage(inbox, (m) => m.t === 'error');

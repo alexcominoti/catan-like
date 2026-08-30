@@ -103,7 +103,6 @@ const DEFAULT_CONFIG = {
   discardLimit: 7,
   friendlyRobber: false,
   balancedDice: false,
-  seed: null,
   bots: [] as unknown[],
 };
 

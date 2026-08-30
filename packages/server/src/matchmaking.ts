@@ -116,7 +116,7 @@ export async function joinQuickMatch(userId: string): Promise<{ code: string }> 
     isPrivate: true,
     maxPlayers: DEFAULT_TUNING.target,
     boardLayout: 'standard',
-    config: { matchmade: true },
+    matchmade: true, // flag interna: o cliente nunca consegue criar uma mesa dessas
   });
   return { code: room.code };
 }

@@ -169,9 +169,16 @@ export interface RoomSeatView {
   isReady: boolean;
 }
 
-/** Regras da partida que o anfitrião ajusta ao vivo na sala (persistem na config). */
+/**
+ * Regras da partida que o anfitrião ajusta ao vivo na sala (persistem na config).
+ *
+ * A `seed` NAO mora aqui de proposito: ela e escrita pelo anfitriao mas nunca
+ * volta ao cliente. Com a seed em maos qualquer um roda `createInitialState`
+ * localmente e sabe o tabuleiro, a ordem do baralho de progresso e as proximas
+ * rolagens — o que anularia toda a projecao de informacao oculta do motor.
+ * Use `seedOf(config)` no servidor quando precisar dela.
+ */
 export interface RoomSettings {
-  seed: number | null;
   /** Expansão/regras da partida ('base' | 'sea'...). Default 'base'. */
   expansion: string;
   /** Cenário dentro da expansão (Navegadores). Opcional. */
@@ -240,7 +247,13 @@ export interface CreateRoomInput {
   isPrivate: boolean;
   maxPlayers: number;
   boardLayout: string;
+  /** Config vinda do cliente — sempre filtrada por `sanitizeRoomConfig`. */
   config?: Record<string, unknown>;
+  /**
+   * Mesa do "Jogo rápido". Flag INTERNA: só o matchmaking a define, nunca o
+   * cliente (senão qualquer um forjaria uma mesa que recebe estranhos).
+   */
+  matchmade?: boolean;
 }
 
 /** Cria uma sala 'waiting' já com o anfitrião sentado; bots começam vazios (o host adiciona ao vivo). */
@@ -265,7 +278,10 @@ export async function createRoom(input: CreateRoomInput): Promise<RoomView> {
     inCfg.expansion === 'sea' ? 'sea' : 'base',
     typeof inCfg.scenario === 'string' ? inCfg.scenario : undefined,
   );
-  const config = { ...(input.config ?? {}), bots: botsOf(input.config) };
+  const config = {
+    ...sanitizeRoomConfig(input.config),
+    ...(input.matchmade ? { matchmade: true } : {}),
+  };
 
   // Código único (tenta de novo no caso raríssimo de colisão).
   let code = makeRoomCode();
@@ -380,6 +396,11 @@ export async function listFriendRooms(userId: string): Promise<RoomListItem[]> {
   }));
 }
 
+/** Dificuldade válida de bot (o valor vem do cliente e alimenta o pool de IA). */
+function isDifficulty(v: unknown): v is Difficulty {
+  return v === 'easy' || v === 'medium' || v === 'hard';
+}
+
 /** Bots sentados na sala (moram na config; mudam ao vivo). Tolera formato antigo (só cores). */
 export function botsOf(config: unknown): BotSeat[] {
   const bots = (config as { bots?: unknown } | null)?.bots;
@@ -388,7 +409,11 @@ export function botsOf(config: unknown): BotSeat[] {
     .map((b): BotSeat => {
       if (typeof b === 'string') return { color: b as PlayerColor, name: 'Bot', difficulty: 'medium' };
       const o = b as Partial<BotSeat>;
-      return { color: o.color as PlayerColor, name: o.name ?? 'Bot', difficulty: o.difficulty ?? 'medium' };
+      return {
+        color: o.color as PlayerColor,
+        name: typeof o.name === 'string' ? o.name.slice(0, 16) : 'Bot',
+        difficulty: isDifficulty(o.difficulty) ? o.difficulty : 'medium',
+      };
     })
     .filter((b) => PLAYER_COLORS.includes(b.color));
 }
@@ -405,11 +430,51 @@ export function readyUserIdsOf(config: unknown): string[] {
   return arr.filter((x): x is string => typeof x === 'string');
 }
 
+/**
+ * Filtra a `config` enviada pelo CLIENTE na criação da sala.
+ *
+ * Antes disto o objeto do cliente ia inteiro para o jsonb, o que permitia
+ * injetar chaves que o servidor trata como suas: `matchmade: true` (a sala
+ * entrava na fila do "Jogo rápido" e passava a receber estranhos),
+ * `readyUserIds` (pulando o gate de "todos prontos") e regras fora de faixa
+ * (`pointsToWin: 1`) — que a edição de regras já limitava, mas a criação não.
+ *
+ * Aqui só passam as chaves conhecidas, com as MESMAS faixas do
+ * `updateRoomSettings`. Flags internas (`matchmade`, `readyUserIds`) nunca vêm
+ * do cliente: quem as define é o servidor.
+ */
+export function sanitizeRoomConfig(raw: unknown): Record<string, unknown> {
+  const c = (raw ?? {}) as Record<string, unknown>;
+  const expansion = c.expansion === 'sea' ? 'sea' : 'base';
+  const boardLayout = typeof c.boardLayout === 'string' && MAP_LIMIT[c.boardLayout] ? c.boardLayout : 'standard';
+  return {
+    boardLayout,
+    expansion,
+    ...(typeof c.scenario === 'string' ? { scenario: c.scenario.slice(0, 40) } : {}),
+    seed: seedOf(c),
+    pace: c.pace === 'fast' ? 'fast' : 'normal',
+    numberLayout: c.numberLayout === 'random' ? 'random' : 'balanced',
+    // Deserto no centro só existe no mapa 3–4.
+    desert: boardLayout === 'standard' && c.desert === 'center' ? 'center' : 'random',
+    pointsToWin: clampInt(typeof c.pointsToWin === 'number' ? c.pointsToWin : 10, 3, 15),
+    discardLimit: clampInt(typeof c.discardLimit === 'number' ? c.discardLimit : 7, 5, 15),
+    friendlyRobber: c.friendlyRobber === true,
+    balancedDice: c.balancedDice === true,
+    bots: botsOf(c),
+    readyUserIds: [],
+  };
+}
+
+/** Seed escolhida pelo anfitrião (uso interno — nunca vai para o cliente). */
+export function seedOf(config: unknown): number | null {
+  const s = (config as { seed?: unknown } | null)?.seed;
+  return typeof s === 'number' && Number.isFinite(s) ? s : null;
+}
+
 /** Regras da partida guardadas na config (com defaults). */
 function settingsOf(config: unknown): RoomSettings {
   const c = (config ?? {}) as Record<string, unknown>;
   return {
-    seed: typeof c.seed === 'number' ? c.seed : null,
     expansion: c.expansion === 'sea' ? 'sea' : 'base',
     scenario: typeof c.scenario === 'string' ? c.scenario : undefined,
     pace: (c.pace as Pace) === 'fast' ? 'fast' : 'normal',
@@ -664,7 +729,7 @@ export async function updateRoomSettings(code: string, hostUserId: string, patch
     boardLayout: nextLayout,
     expansion: nextExpansion,
     scenario: nextScenario,
-    seed: has('seed') ? (typeof p.seed === 'number' ? p.seed : null) : cur.seed,
+    seed: has('seed') ? (typeof p.seed === 'number' ? p.seed : null) : seedOf(r.config),
     pace: p.pace === 'fast' ? 'fast' : p.pace === 'normal' ? 'normal' : cur.pace,
     numberLayout: p.numberLayout === 'random' || p.numberLayout === 'balanced' ? p.numberLayout : cur.numberLayout,
     // Deserto no centro só existe no mapa 3–4.
@@ -682,7 +747,7 @@ export async function updateRoomSettings(code: string, hostUserId: string, patch
     nextLayout !== r.boardLayout ||
     nextExpansion !== cur.expansion ||
     nextScenario !== cur.scenario ||
-    newConfig.seed !== cur.seed ||
+    newConfig.seed !== seedOf(r.config) ||
     newConfig.pace !== cur.pace ||
     newConfig.numberLayout !== cur.numberLayout ||
     newConfig.desert !== cur.desert ||

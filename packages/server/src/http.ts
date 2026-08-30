@@ -23,6 +23,7 @@ import {
   listFriendRooms,
   listOpenRooms,
   listRejoinableRooms,
+  MAP_LIMIT,
   removeBot,
   setRoomReady,
   startRoom,
@@ -51,6 +52,10 @@ import {
 import { reportUser } from './reports.js';
 import type { RoomManager } from './room.js';
 import { metricsSnapshot } from './metrics.js';
+import { BUCKETS, RateLimiter, bucketFor, clientIp } from './rate-limit.js';
+
+/** Limitador de taxa das rotas /api (em memória — rodamos numa máquina só). */
+const limiter = new RateLimiter();
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -143,6 +148,24 @@ async function handleRequest(
 ): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const path = decodeURIComponent(url.pathname);
+
+  // --- rate limit (antes de qualquer I/O) ---
+  // Cada rota de API toca o Postgres, e a cota de compute do Neon é o teto real
+  // da produção: sem isto um laço simples queima a cota e derruba o login junto.
+  // Estáticos da SPA e /api/auth/* ficam de fora (o Better Auth tem o próprio).
+  const bucket = bucketFor(req.method ?? 'GET', path);
+  if (bucket) {
+    const ip = clientIp(req.headers, req.socket.remoteAddress ?? undefined);
+    const verdict = limiter.check(`${bucket}:${ip}`, BUCKETS[bucket]);
+    if (!verdict.allowed) {
+      res.writeHead(429, {
+        'content-type': 'application/json; charset=utf-8',
+        'retry-after': String(verdict.retryAfterSec),
+      });
+      res.end(JSON.stringify({ error: 'Muitas requisições. Tente de novo em instantes.' }));
+      return;
+    }
+  }
 
   // --- health check (usado pelo Fly) ---
   if (path === '/healthz' || path === '/api/health') {
@@ -573,12 +596,15 @@ async function handleRequest(
       config?: unknown;
     };
     const name = typeof b.name === 'string' && b.name.trim() ? b.name.trim().slice(0, 40) : 'Sala sem nome';
+    // `config` é filtrada por `sanitizeRoomConfig` dentro de createRoom; aqui só
+    // garantimos que o mapa é um dos conhecidos (ele define o limite de vagas).
+    const layout = typeof b.boardLayout === 'string' && MAP_LIMIT[b.boardLayout] ? b.boardLayout : 'standard';
     const room = await createRoom({
       hostUserId: u.id,
       name,
       isPrivate: b.isPrivate === true,
       maxPlayers: typeof b.maxPlayers === 'number' ? b.maxPlayers : 4,
-      boardLayout: typeof b.boardLayout === 'string' ? b.boardLayout : 'standard',
+      boardLayout: layout,
       config: b.config && typeof b.config === 'object' ? (b.config as Record<string, unknown>) : undefined,
     });
     sendJson(res, 201, { room });
@@ -592,21 +618,19 @@ async function handleRequest(
     const sub = roomMatch[2];
 
     if (!sub && req.method === 'GET') {
-      if (!getAuth()) {
-        sendJson(res, 503, { error: 'Salas indisponiveis (sem banco configurado).' });
-        return;
-      }
-      // viewer opcional: só para marcar isHost (não bloqueia ver o detalhe).
-      const auth = getAuth()!;
-      const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
-      const room = await getRoom(code, session?.user.id);
+      // Exige login: o detalhe traz o roster (quem está jogando) e serve de
+      // heartbeat da sala. O cliente só chama esta rota autenticado — quem cai
+      // aqui deslogado vê a tela de entrar, não a sala.
+      const u = await authedUser(req, res);
+      if (!u) return;
+      const room = await getRoom(code, u.id);
       if (!room) {
         sendJson(res, 404, { error: 'Sala não encontrada.' });
         return;
       }
       // Heartbeat: a tela de espera consulta esta rota em ciclo; enquanto um
       // membro a mantém aberta, adia a expiração da sala (item 6).
-      if (session?.user.id) await touchRoomActivity(code, session.user.id);
+      await touchRoomActivity(code, u.id);
       sendJson(res, 200, { room });
       return;
     }

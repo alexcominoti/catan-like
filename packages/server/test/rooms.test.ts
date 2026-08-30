@@ -9,6 +9,8 @@ import {
   mapLimit,
   botsOf,
   firstUnreadyName,
+  sanitizeRoomConfig,
+  seedOf,
   shufflePlayerOrder,
 } from '../src/rooms.js';
 
@@ -64,6 +66,107 @@ describe('shufflePlayerOrder (ordem de jogo sorteada)', () => {
     const input = [...seats];
     shufflePlayerOrder(input, 7);
     expect(input).toEqual(seats);
+  });
+});
+
+describe('sanitizeRoomConfig (config vinda do cliente)', () => {
+  it('mantém as regras legítimas que o cliente envia', () => {
+    const c = sanitizeRoomConfig({
+      boardLayout: 'large',
+      expansion: 'sea',
+      pace: 'fast',
+      numberLayout: 'random',
+      pointsToWin: 12,
+      discardLimit: 9,
+      friendlyRobber: true,
+      balancedDice: true,
+    });
+    expect(c).toMatchObject({
+      boardLayout: 'large',
+      expansion: 'sea',
+      pace: 'fast',
+      numberLayout: 'random',
+      pointsToWin: 12,
+      discardLimit: 9,
+      friendlyRobber: true,
+      balancedDice: true,
+    });
+  });
+
+  it('descarta as flags internas do servidor', () => {
+    // `matchmade` fazia a sala entrar na fila do Jogo rápido e receber estranhos;
+    // `readyUserIds` pulava o gate de "todos prontos".
+    const c = sanitizeRoomConfig({ matchmade: true, readyUserIds: ['outro-usuario'] });
+    expect(c.matchmade).toBeUndefined();
+    expect(c.readyUserIds).toEqual([]);
+  });
+
+  it('descarta chaves desconhecidas', () => {
+    const c = sanitizeRoomConfig({ isAdmin: true, qualquerCoisa: 'x' });
+    expect(c.isAdmin).toBeUndefined();
+    expect(c.qualquerCoisa).toBeUndefined();
+  });
+
+  it('limita as regras às mesmas faixas da edição', () => {
+    expect(sanitizeRoomConfig({ pointsToWin: 1 }).pointsToWin).toBe(3);
+    expect(sanitizeRoomConfig({ pointsToWin: 999 }).pointsToWin).toBe(15);
+    expect(sanitizeRoomConfig({ discardLimit: 0 }).discardLimit).toBe(5);
+    expect(sanitizeRoomConfig({ discardLimit: 100 }).discardLimit).toBe(15);
+  });
+
+  it('normaliza valores inválidos em vez de confiar neles', () => {
+    const c = sanitizeRoomConfig({
+      boardLayout: '../../etc',
+      expansion: 'hacked',
+      pace: 'instantaneo',
+      numberLayout: 'nenhum',
+      desert: 'center', // 'center' só vale no mapa standard
+      pointsToWin: 'dez',
+      friendlyRobber: 'sim',
+    });
+    expect(c).toMatchObject({
+      boardLayout: 'standard',
+      expansion: 'base',
+      pace: 'normal',
+      numberLayout: 'balanced',
+      desert: 'center',
+      pointsToWin: 10,
+      friendlyRobber: false,
+    });
+  });
+
+  it('deserto no centro cai fora quando o mapa não é o 3–4', () => {
+    expect(sanitizeRoomConfig({ boardLayout: 'large', desert: 'center' }).desert).toBe('random');
+  });
+
+  it('aceita a seed do anfitrião, mas só como número', () => {
+    expect(sanitizeRoomConfig({ seed: 42 }).seed).toBe(42);
+    expect(sanitizeRoomConfig({ seed: 'abc' }).seed).toBeNull();
+    expect(sanitizeRoomConfig({}).seed).toBeNull();
+  });
+
+  it('valida os bots (cor conhecida, dificuldade conhecida)', () => {
+    const c = sanitizeRoomConfig({
+      bots: [
+        { color: 'blue', name: 'Bot azul', difficulty: 'hard' },
+        { color: 'roxo-neon', name: 'Inválido', difficulty: 'medium' },
+        { color: 'white', name: 'Sem nível', difficulty: 'impossivel' },
+      ],
+    });
+    expect(c.bots).toEqual([
+      { color: 'blue', name: 'Bot azul', difficulty: 'hard' },
+      { color: 'white', name: 'Sem nível', difficulty: 'medium' },
+    ]);
+  });
+});
+
+describe('seedOf', () => {
+  it('lê a seed do anfitrião e ignora lixo', () => {
+    expect(seedOf({ seed: 7 })).toBe(7);
+    expect(seedOf({ seed: 'sete' })).toBeNull();
+    expect(seedOf({ seed: Infinity })).toBeNull();
+    expect(seedOf(null)).toBeNull();
+    expect(seedOf({})).toBeNull();
   });
 });
 

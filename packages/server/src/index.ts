@@ -27,6 +27,24 @@ function requireEnv(): void {
 
 requireEnv();
 
+/**
+ * Rede de seguranca do PROCESSO. Uma promise rejeitada sem catch derruba o Node
+ * por padrao — e com uma maquina so isso interrompe todas as partidas vivas.
+ * Uma falha isolada (uma acao esquisita, uma query que caiu) tem que virar log,
+ * nao queda: registramos e seguimos. `uncaughtException` e diferente — dali em
+ * diante o estado do processo e duvidoso, entao registramos e saimos para o Fly
+ * subir uma instancia limpa (as partidas voltam pelo snapshot).
+ */
+process.on('unhandledRejection', (reason) => {
+  // eslint-disable-next-line no-console
+  console.error('[trevalis] promise rejeitada sem tratamento:', reason);
+});
+process.on('uncaughtException', (err) => {
+  // eslint-disable-next-line no-console
+  console.error('[trevalis] FATAL: excecao nao capturada, reiniciando:', err);
+  process.exit(1);
+});
+
 const port = Number(process.env.PORT ?? 8080);
 // RoomManager compartilhado: a rota HTTP /start liga o GameRoom nele, o WS ja
 // encontra a partida rodando quando o jogador entra por `enter`.

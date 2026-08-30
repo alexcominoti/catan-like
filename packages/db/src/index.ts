@@ -27,7 +27,13 @@ export function getDb(): NodePgDatabase<typeof schema> {
   _pool = new pg.Pool({
     connectionString: url,
     // Neon e a maioria dos provedores gerenciados exigem TLS.
-    ssl: url.includes('localhost') ? undefined : { rejectUnauthorized: false },
+    // TLS com VERIFICACAO do certificado (o Neon usa CA publica, ja presente no
+    // bundle do Node). Sem isto qualquer certificado passa e a conexao com o
+    // banco fica sujeita a MITM. `DB_SSL_INSECURE=true` e a valvula de escape
+    // para um Postgres com certificado auto-assinado — nunca em producao.
+    ssl: url.includes('localhost')
+      ? undefined
+      : { rejectUnauthorized: process.env.DB_SSL_INSECURE !== 'true' },
     max: Number(process.env.DB_POOL_MAX ?? 10),
   });
   _db = drizzle(_pool, { schema });

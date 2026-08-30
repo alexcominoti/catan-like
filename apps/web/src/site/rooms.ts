@@ -33,9 +33,14 @@ export interface RoomSeatView {
   isReady: boolean;
 }
 
-/** Regras da partida que o anfitrião ajusta ao vivo. */
+/**
+ * Regras da partida que o anfitrião ajusta ao vivo.
+ *
+ * A `seed` é de mão única: o anfitrião pode ENVIÁ-LA num patch, mas ela nunca
+ * volta do servidor — quem a tivesse poderia recalcular o tabuleiro e a ordem
+ * do baralho antes da partida.
+ */
 export interface RoomSettings {
-  seed: number | null;
   /** Expansão/regras da partida ('base' | 'sea'). Default 'base'. */
   expansion?: string;
   /** Cenário dentro da expansão (Navegadores). Opcional. */

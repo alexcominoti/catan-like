@@ -8,6 +8,7 @@ import { EMPTY_ROOM_TTL_MS, RECONNECT_GRACE_MS, RoomManager, type LiveRoom } fro
 import { presence } from './presence.js';
 import { summarizeMatch, type MatchSummary } from './match.js';
 import { sanitizeChatText } from './chat.js';
+import { parseClientMessage, WS_MAX_PAYLOAD } from './validate.js';
 import { setWsCountProvider } from './metrics.js';
 import { planBotMove } from './bot-pool.js';
 import { hasDatabase } from '@trevalis/db';
@@ -180,13 +181,24 @@ function wireGameServer(wss: WebSocketServer, deps: GameServerDeps = {}): WebSoc
     });
 
     ws.on('message', (data) => {
-      let msg: ClientMessage;
+      let raw: unknown;
       try {
-        msg = JSON.parse(String(data)) as ClientMessage;
+        raw = JSON.parse(String(data));
       } catch {
         return;
       }
-      void handle(ws, conn, msg);
+      // Envelope validado ANTES de chegar ao motor: nada malformado passa daqui.
+      const msg = parseClientMessage(raw);
+      if (!msg) return;
+      // E, mesmo assim, o handler nunca pode derrubar o processo: sem este catch
+      // uma excecao viraria unhandled rejection e mataria o servidor inteiro.
+      void handle(ws, conn, msg).catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error('[trevalis][ws] erro ao tratar mensagem:', err);
+        try {
+          send(ws, { t: 'error', error: 'Não foi possível processar a sua ação.' });
+        } catch { /* socket ja fechado */ }
+      });
     });
 
     ws.on('close', () => {
@@ -475,7 +487,7 @@ function makeId(): string {
  * escolher — util em testes). Use para rodar SO o jogo, sem HTTP.
  */
 export function startServer(port = Number(process.env.PORT ?? 8080), deps?: GameServerDeps): WebSocketServer {
-  return wireGameServer(new WebSocketServer({ port }), deps);
+  return wireGameServer(new WebSocketServer({ port, maxPayload: WS_MAX_PAYLOAD }), deps);
 }
 
 /**
@@ -483,7 +495,10 @@ export function startServer(port = Number(process.env.PORT ?? 8080), deps?: Game
  * `WS_PATH`). E assim que rodamos em producao: HTTP (auth/API/SPA) + WS juntos.
  */
 export function attachGameServer(httpServer: HttpServer, deps?: GameServerDeps): WebSocketServer {
-  return wireGameServer(new WebSocketServer({ server: httpServer, path: WS_PATH }), deps);
+  return wireGameServer(
+    new WebSocketServer({ server: httpServer, path: WS_PATH, maxPayload: WS_MAX_PAYLOAD }),
+    deps,
+  );
 }
 
 // Reexportado para quem precisa criar o RoomManager compartilhado com o HTTP (index.ts).
