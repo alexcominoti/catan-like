@@ -12,6 +12,7 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { APIError } from 'better-auth/api';
 import { captcha } from 'better-auth/plugins';
 import { captchaEnabled, turnstileSecretKey } from './captcha.js';
+import { appUrl, trustedOrigins } from './origin.js';
 import { sanitizeUserUpdate } from './user-update.js';
 import { sql } from 'drizzle-orm';
 import { getDb, hasDatabase, schema, user as userTable } from '@trevalis/db';
@@ -23,34 +24,10 @@ export type Auth = ReturnType<typeof betterAuth>;
 
 let _auth: Auth | null = null;
 
-/** Origem publica do app (para links de e-mail e cookies). */
-function appUrl(): string {
-  return process.env.APP_URL ?? process.env.BETTER_AUTH_URL ?? 'http://localhost:8080';
-}
-
-/** Origens confiaveis (CSRF): APP_URL + WEB_ORIGIN + TRUSTED_ORIGINS (CSV). */
-function trustedOrigins(): string[] {
-  const set = new Set<string>([appUrl()]);
-  if (process.env.WEB_ORIGIN) set.add(process.env.WEB_ORIGIN);
-  for (const o of (process.env.TRUSTED_ORIGINS ?? '').split(',')) {
-    const t = o.trim();
-    if (t) set.add(t);
-  }
-  // DEV: aceita localhost <-> 127.0.0.1 e as portas comuns do Vite, para nao travar
-  // o cadastro/login por causa do host/porta usado no navegador. Producao NAO entra
-  // aqui (usa exatamente APP_URL + TRUSTED_ORIGINS).
-  if (process.env.NODE_ENV !== 'production') {
-    for (const o of [...set]) {
-      if (o.includes('://localhost')) set.add(o.replace('://localhost', '://127.0.0.1'));
-      else if (o.includes('://127.0.0.1')) set.add(o.replace('://127.0.0.1', '://localhost'));
-    }
-    for (const port of [5173, 5174, 8080]) {
-      set.add(`http://localhost:${port}`);
-      set.add(`http://127.0.0.1:${port}`);
-    }
-  }
-  return [...set];
-}
+// A lista de origens confiaveis mora em `origin.ts`: o Better Auth usa para o
+// CSRF das rotas de conta, e o HTTP/WebSocket usam para a checagem de `Origin`.
+// Uma definicao so — duas divergiriam com o tempo, e a que ficasse para tras
+// viraria o buraco.
 
 /**
  * Username já em uso (case-insensitive)? Opcionalmente ignora um userId (para a
@@ -86,7 +63,11 @@ function buildOptions(): BetterAuthOptions {
     database: drizzleAdapter(getDb(), { provider: 'pg', schema }),
     emailAndPassword: {
       enabled: true,
-      minPasswordLength: 8,
+      // 8 era o piso do aceitavel. O Better Auth so aplica este minimo no
+      // CADASTRO, no reset e na troca de senha — nunca no login (conferido em
+      // sign-up.mjs, password.mjs e update-user.mjs). Ou seja: subir para 10
+      // nao tranca ninguem que ja tem senha de 8; ela vale ate a pessoa trocar.
+      minPasswordLength: 10,
       requireEmailVerification: process.env.REQUIRE_EMAIL_VERIFICATION === 'true',
       sendResetPassword: async ({ user, url }) => {
         const lang = resolveLang({ user: user as { language?: string | null } });

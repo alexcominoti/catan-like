@@ -12,7 +12,7 @@
   "dependencies": {
     "@trevalis/engine": "*",
     "@trevalis/bot": "*",
-    "better-auth": "^1.2.0",
+    "better-auth": "~1.6.22",
     "lucide-react": "^0.456.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

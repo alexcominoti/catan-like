@@ -77,6 +77,23 @@ As variáveis **não-secretas** (`APP_URL`, `TRUSTED_ORIGINS`, `COOKIE_DOMAIN`,
 | `TURNSTILE_SITE_KEY` | secret | opcional (só liga com as DUAS) |
 | `TURNSTILE_SECRET_KEY` | secret | opcional (só liga com as DUAS) |
 | `METRICS_TOKEN` | secret | recomendado (sem ele, `/api/metrics` = 404) |
+| `MIGRATION_DATABASE_URL` | secret | opcional (role dona; ver abaixo) |
+
+### Separação de privilégios no Postgres
+
+Por padrão a aplicação e as migrations usam a mesma role — a dona do schema. Ou
+seja, a conexão que atende a internet também pode `DROP TABLE`. Para separar,
+rode [`docs/sql/runtime-role.sql`](sql/runtime-role.sql) e depois:
+
+```bash
+fly secrets set \
+  DATABASE_URL="postgresql://trevalis_app:SENHA@HOST/db?sslmode=verify-full" \
+  MIGRATION_DATABASE_URL="postgresql://DONA:SENHA@HOST/db?sslmode=verify-full" \
+  --app trevalis
+```
+
+`migrate.ts` usa `MIGRATION_DATABASE_URL` quando ela existe e cai em
+`DATABASE_URL` quando não — então dá para aplicar em duas etapas, sem parada.
 
 ### Proteção contra bots (Cloudflare Turnstile)
 

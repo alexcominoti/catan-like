@@ -17,7 +17,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 config({ path: join(__dirname, '..', '..', '..', '.env') });
 
 async function main(): Promise<void> {
-  const url = process.env.DATABASE_URL;
+  // Separacao de privilegios (Fase 2): a aplicacao conecta com uma role que so
+  // tem CRUD nas tabelas, e ALTERAR ESQUEMA fica com a role dona, usada apenas
+  // aqui — no `release_command` do Fly. Assim um SQL injection ou uma falha na
+  // aplicacao nao consegue DROP/ALTER, so ler e escrever linha.
+  //
+  // Compativel com o que ja existe: sem `MIGRATION_DATABASE_URL` cai na
+  // `DATABASE_URL` e o comportamento e exatamente o de hoje. Ver docs/DEPLOY.md
+  // para o SQL que cria a role.
+  const url = process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL nao definida.');
   const pool = new pg.Pool({
     connectionString: url,

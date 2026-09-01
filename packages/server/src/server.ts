@@ -9,6 +9,7 @@ import { presence } from './presence.js';
 import { summarizeMatch, type MatchSummary } from './match.js';
 import { sanitizeChatText } from './chat.js';
 import { parseClientMessage, WS_MAX_PAYLOAD } from './validate.js';
+import { wsOriginAllowed } from './origin.js';
 import { setWsCountProvider } from './metrics.js';
 import { planBotMove } from './bot-pool.js';
 import { hasDatabase } from '@trevalis/db';
@@ -496,7 +497,17 @@ export function startServer(port = Number(process.env.PORT ?? 8080), deps?: Game
  */
 export function attachGameServer(httpServer: HttpServer, deps?: GameServerDeps): WebSocketServer {
   return wireGameServer(
-    new WebSocketServer({ server: httpServer, path: WS_PATH, maxPayload: WS_MAX_PAYLOAD }),
+    new WebSocketServer({
+      server: httpServer,
+      path: WS_PATH,
+      maxPayload: WS_MAX_PAYLOAD,
+      // CSWSH: o `sameSite` do cookie NAO vale para o handshake de WebSocket.
+      // Sem esta checagem, qualquer pagina da web podia abrir um socket que o
+      // navegador autentica com o cookie da vitima e jogar no lugar dela — a
+      // conexao ja deriva o `userId` do cookie logo abaixo. Todo navegador manda
+      // `Origin` no handshake; ausente (loadtest, testes) segue passando.
+      verifyClient: ({ origin }: { origin: string }) => wsOriginAllowed(origin),
+    }),
     deps,
   );
 }

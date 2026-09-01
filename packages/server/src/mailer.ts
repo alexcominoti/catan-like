@@ -20,6 +20,19 @@ export interface Mail {
 
 export async function sendEmail(mail: Mail): Promise<void> {
   if (!resend) {
+    // Em PRODUCAO o stub nao pode existir: o corpo do e-mail carrega o link de
+    // redefinicao de senha e o de confirmacao de conta, e escrever isso no log
+    // transforma qualquer acesso aos logs (painel do Fly, um coletor externo,
+    // um print em suporte) em tomada de conta. Falha FECHADA e barulhenta —
+    // melhor o cadastro acusar erro do que vazar o link em silencio.
+    if (process.env.NODE_ENV === 'production') {
+      // eslint-disable-next-line no-console
+      console.error(
+        `[trevalis][email] RESEND_API_KEY ausente em producao — envio para ${mail.to} ABORTADO ` +
+          '(o link NAO foi logado). Configure o secret no Fly.',
+      );
+      throw new Error('Servico de e-mail indisponivel.');
+    }
     // eslint-disable-next-line no-console
     console.log(
       `[trevalis][email:stub] para=${mail.to} assunto="${mail.subject}"\n${mail.text}`,

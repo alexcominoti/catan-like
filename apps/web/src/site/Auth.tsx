@@ -172,7 +172,10 @@ export function Auth({ onAuthed }: { onAuthed: () => void }) {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              minLength={8}
+              // Espelha o servidor: 10 vale para senha NOVA (cadastro/reset).
+              // No login não há mínimo — quem criou a conta quando o piso era 8
+              // continua entrando; o navegador não pode barrar antes do envio.
+              minLength={mode === 'login' ? undefined : 10}
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
             />
           </label>

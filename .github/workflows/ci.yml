@@ -1,0 +1,89 @@
+# Portão de qualidade e segurança do Trevalis.
+#
+# Existe por causa da Fase 2 da auditoria: os alertas de dependência tinham
+# chegado a 10 sem ninguém notar, porque nada olhava. Aqui a regra fica explícita
+# e falha o PR — que é a única forma de não voltar a acumular.
+#
+# A separação importante é entre `--omit=dev` e o audit completo:
+#   - runtime (better-auth, ws, pg, drizzle-orm, resend, react) é o que vai para
+#     dentro da imagem e fica exposto na internet: alerta ali QUEBRA o build;
+#   - build/teste (vitest, vite, esbuild, drizzle-kit) não é embarcado — o
+#     Dockerfile roda `npm ci --omit=dev` no estágio final — então ali o job
+#     apenas AVISA, para não travar o deploy de uma correção por causa de uma
+#     falha que produção não carrega.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Só leitura: nenhum job aqui escreve no repositório.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Testes, tipos e build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Tipos
+        run: npm run typecheck
+
+      - name: Testes
+        run: npm test
+
+      - name: Build da SPA
+        run: npm run build:web
+
+  audit:
+    name: Dependências
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # O que roda em produção. Alerta aqui é para tratar na hora.
+      # NÃO usa `npm audit --omit=dev`: em monorepo com workspaces o npm não
+      # propaga o omit e devolve os mesmos alertas do audit completo — o portão
+      # nasceria vermelho. O script monta a árvore de produção e compara versão
+      # a versão. Ver scripts/audit-runtime.mjs.
+      - name: Runtime (bloqueia)
+        run: npm run audit:runtime
+
+      # Ferramenta de build/teste: fica fora da imagem final, então não bloqueia.
+      - name: Build/teste (informativo)
+        run: npm audit || true
+
+  secrets:
+    name: Varredura de segredos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks compara commits; sem o histórico ele não tem o que comparar.
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

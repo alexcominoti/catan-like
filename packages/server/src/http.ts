@@ -6,7 +6,7 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
-import { join, normalize, extname } from 'node:path';
+import { join, normalize, extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { toNodeHandler, fromNodeHeaders } from 'better-auth/node';
 import { eq, sql } from 'drizzle-orm';
@@ -57,6 +57,7 @@ import { metricsSnapshot } from './metrics.js';
 import { BUCKETS, RateLimiter, bucketFor, clientIp } from './rate-limit.js';
 import { securityHeaders } from './security-headers.js';
 import { captchaEnabled, turnstileSiteKey } from './captcha.js';
+import { blockedByOrigin } from './origin.js';
 
 /** Limitador de taxa das rotas /api (em memória — rodamos numa máquina só). */
 const limiter = new RateLimiter();
@@ -75,8 +76,11 @@ function headers(): Record<string, string> {
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 /** Diretorio com a SPA buildada (apps/web/dist). Configuravel via WEB_DIST. */
-const WEB_DIST =
-  process.env.WEB_DIST ?? join(__dirname, '..', '..', '..', 'apps', 'web', 'dist');
+// `resolve` deixa o caminho absoluto e sem `..`, para a comparação de contenção
+// mais abaixo ser feita sobre a forma canônica dos dois lados.
+const WEB_DIST = resolve(
+  process.env.WEB_DIST ?? join(__dirname, '..', '..', '..', 'apps', 'web', 'dist'),
+);
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -184,6 +188,17 @@ async function handleRequest(
       res.end(JSON.stringify({ error: 'Muitas requisições. Tente de novo em instantes.' }));
       return;
     }
+  }
+
+  // --- origem cruzada (CSRF, defesa em profundidade) ---
+  // O cookie `sameSite: 'lax'` já barra o POST disparado de outro site; isto é a
+  // segunda linha, para o Lax não ser a ÚNICA. Só barra quando o `Origin` veio e
+  // não confere: navegador sempre manda `Origin` em requisição de escrita, então
+  // "sem Origin" é cliente que não é navegador — sem cookie de terceiro, sem
+  // CSRF. Ver origin.ts.
+  if (path.startsWith('/api/') && blockedByOrigin(req.method, req.headers.origin)) {
+    sendJson(res, 403, { error: 'Origem nao permitida.' });
+    return;
   }
 
   // --- health check (usado pelo Fly) ---
@@ -797,8 +812,11 @@ async function handleRequest(
   // --- arquivos estaticos da SPA ---
   // Normaliza e impede path traversal para fora de WEB_DIST.
   const rel = normalize(path).replace(/^(\.\.[/\\])+/, '');
-  const target = join(WEB_DIST, rel);
-  if (target.startsWith(WEB_DIST)) {
+  const target = resolve(WEB_DIST, `.${rel.startsWith('/') ? rel : `/${rel}`}`);
+  // O separador no fim importa: `startsWith(WEB_DIST)` sozinho também aceitaria
+  // um irmão cujo nome apenas COMEÇA igual (`.../dist` liberando `.../dist-bkp`,
+  // `.../dist.old`). Exige-se o diretório em si ou algo abaixo dele.
+  if (target === WEB_DIST || target.startsWith(WEB_DIST + sep)) {
     if (path !== '/' && (await serveFile(res, target))) return;
     // Fallback de SPA: entrega index.html para rotas do cliente (history API).
     if (await serveFile(res, join(WEB_DIST, 'index.html'))) return;
