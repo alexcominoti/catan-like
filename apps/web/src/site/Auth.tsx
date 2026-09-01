@@ -51,6 +51,23 @@ export function Auth({ onAuthed }: { onAuthed: () => void }) {
     };
   }, []);
 
+  /**
+   * Descarta o token e pede um novo desafio.
+   *
+   * O token do Turnstile é de USO ÚNICO: a Cloudflare aceita a primeira
+   * validação e responde `timeout-or-duplicate` (ou seja, `success: false`) em
+   * qualquer reenvio do mesmo token. Por isso ele precisa ser trocado depois de
+   * TODA tentativa que o consumiu — inclusive as bem-sucedidas.
+   */
+  function resetCaptcha() {
+    try {
+      captchaWidget.current?.reset();
+    } catch {
+      // Widget já removido do DOM (ex.: o login concluído desmontou a tela).
+    }
+    setCaptchaToken(null);
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -95,11 +112,13 @@ export function Auth({ onAuthed }: { onAuthed: () => void }) {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('auth.err.unexpected'));
-      // Token do Turnstile é de uso único: falhou, gera outro para a retentativa.
-      captchaWidget.current?.reset();
-      setCaptchaToken(null);
     } finally {
       setBusy(false);
+      // Vale para o sucesso também, não só para a falha: depois do cadastro
+      // caímos na tela de login, e reaproveitar o token já gasto faria a
+      // Cloudflare recusá-lo — o primeiro login falharia com um erro de captcha
+      // sem qualquer relação com o que o jogador digitou.
+      resetCaptcha();
     }
   }
 

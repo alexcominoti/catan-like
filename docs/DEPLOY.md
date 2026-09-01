@@ -74,6 +74,44 @@ As variáveis **não-secretas** (`APP_URL`, `TRUSTED_ORIGINS`, `COOKIE_DOMAIN`,
 | `TRUSTED_ORIGINS` | env (fly.toml) | sim |
 | `COOKIE_DOMAIN` | env (fly.toml) | sim (apex + www) |
 | `REQUIRE_EMAIL_VERIFICATION` | env (fly.toml) | opcional |
+| `TURNSTILE_SITE_KEY` | secret | opcional (só liga com as DUAS) |
+| `TURNSTILE_SECRET_KEY` | secret | opcional (só liga com as DUAS) |
+| `METRICS_TOKEN` | secret | recomendado (sem ele, `/api/metrics` = 404) |
+
+### Proteção contra bots (Cloudflare Turnstile)
+
+Opcional e **desligado por padrão**: sem as duas chaves o cadastro/login segue
+como antes. Só faz sentido definir as duas juntas — com a secreta sozinha o
+servidor recusaria todo mundo, e por isso `captcha.ts` exige o par.
+
+```bash
+# Cloudflare > Turnstile > adicionar site (domínio trevalis.app)
+fly secrets set \
+  TURNSTILE_SITE_KEY="0x4AAA..." \
+  TURNSTILE_SECRET_KEY="0x4AAA..." \
+  --app trevalis
+```
+
+A *site key* é pública (o navegador a lê em `GET /api/config`); só a *secret
+key* é segredo. Ao ligar, a CSP passa a liberar `challenges.cloudflare.com`
+sozinha, e o widget aparece no login/cadastro/esqueci-a-senha.
+
+Para conferir depois do deploy, sem depender de olhar a tela:
+
+```bash
+# 1. a site key chegou ao cliente? (deve vir preenchida, não null)
+curl -s https://trevalis.app/api/config
+
+# 2. o servidor recusa um token forjado? (espera-se 403, não 200)
+curl -s -o /dev/null -w '%{http_code}\n' \
+  -X POST https://trevalis.app/api/auth/sign-in/email \
+  -H 'content-type: application/json' -H 'x-captcha-response: token-invalido' \
+  -d '{"email":"a@b.c","password":"seja-la-o-que-for"}'
+```
+
+Um `403` no passo 2 prova o caminho inteiro: o cabeçalho chegou, o plugin o leu
+e a Cloudflare respondeu. Se vier `400`, o token não chegou ao servidor; `200`
+significaria captcha inativo.
 
 > **Resend — verifique o domínio antes de exigir confirmação de e-mail.** Para
 > enviar de `no-reply@trevalis.app`, adicione o domínio em
