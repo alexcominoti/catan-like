@@ -17,7 +17,7 @@
  * Uso: node scripts/audit-runtime.mjs
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { satisfies } from 'semver';
@@ -50,7 +50,7 @@ function workspaces() {
     const base = padrao.replace(/\/\*$/, '');
     const baseDir = join(RAIZ, base);
     if (!existsSync(baseDir)) continue;
-    for (const nome of execFileSync('ls', [baseDir], { encoding: 'utf8' }).split('\n')) {
+    for (const nome of readdirSync(baseDir)) {
       if (nome && existsSync(join(baseDir, nome, 'package.json'))) dirs.push(join(baseDir, nome));
     }
   }
@@ -96,12 +96,27 @@ function arvoreDeProducao() {
 }
 
 function auditoria() {
+  // Em Windows o executavel e `npm.cmd`, e desde o Node 20 o `execFile` recusa
+  // um `.cmd` sem shell (CVE-2024-27980). Sem isto o script so rodava em Linux e
+  // quem desenvolve em Windows nao conseguia checar o portao antes de abrir o PR.
+  const ehWindows = process.platform === 'win32';
   let saida;
   try {
-    saida = execFileSync('npm', ['audit', '--json'], { encoding: 'utf8', cwd: RAIZ });
+    saida = execFileSync(ehWindows ? 'npm.cmd' : 'npm', ['audit', '--json'], {
+      encoding: 'utf8',
+      cwd: RAIZ,
+      shell: ehWindows,
+      maxBuffer: 32 * 1024 * 1024,
+    });
   } catch (err) {
     // `npm audit` sai com código != 0 quando encontra algo — a saída é válida.
     saida = err.stdout;
+  }
+  // Sem saida o npm nem chegou a rodar (fora do PATH, por exemplo). Falhar aqui
+  // dizendo o que houve e melhor que estourar num `JSON.parse(undefined)` cru.
+  if (!saida) {
+    console.error('Nao foi possivel executar `npm audit`. O npm esta no PATH?');
+    process.exit(2);
   }
   return JSON.parse(saida)?.vulnerabilities ?? {};
 }

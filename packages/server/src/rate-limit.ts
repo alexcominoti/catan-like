@@ -115,15 +115,23 @@ export class RateLimiter {
 }
 
 /**
- * IP do cliente. Atras do proxy do Fly o valor confiavel e `fly-client-ip` — o
- * `x-forwarded-for` cru NAO serve, porque o proprio cliente pode forjar o
- * primeiro salto e escapar do limite trocando de "IP" a cada requisicao.
+ * O UNICO cabecalho de IP em que se confia: atras do proxy do Fly e ele quem
+ * carrega o valor real. O `x-forwarded-for` cru NAO serve, porque o proprio
+ * cliente pode forjar o primeiro salto e escapar do limite trocando de "IP" a
+ * cada requisicao.
+ *
+ * Exportado porque o rate limit do Better Auth (auth.ts) precisa da MESMA
+ * resposta: duas nocoes de "IP do cliente" divergiriam com o tempo, e a que
+ * ficasse para tras viraria o buraco.
  */
+export const IP_HEADER = 'fly-client-ip';
+
+/** IP do cliente, com o endereco do socket como ultimo recurso. */
 export function clientIp(
   headers: Record<string, string | string[] | undefined>,
   socketAddr?: string,
 ): string {
-  const fly = headers['fly-client-ip'];
+  const fly = headers[IP_HEADER];
   const ip = Array.isArray(fly) ? fly[0] : fly;
   return (ip ?? socketAddr ?? 'desconhecido').trim();
 }

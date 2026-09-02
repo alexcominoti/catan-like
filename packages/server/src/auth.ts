@@ -13,6 +13,7 @@ import { APIError } from 'better-auth/api';
 import { captcha } from 'better-auth/plugins';
 import { captchaEnabled, turnstileSecretKey } from './captcha.js';
 import { appUrl, trustedOrigins } from './origin.js';
+import { IP_HEADER } from './rate-limit.js';
 import { sanitizeUserUpdate } from './user-update.js';
 import { sql } from 'drizzle-orm';
 import { getDb, hasDatabase, schema, user as userTable } from '@trevalis/db';
@@ -173,6 +174,17 @@ function buildOptions(): BetterAuthOptions {
       : [],
     advanced: {
       useSecureCookies: isProd,
+      // O rate limit INTERNO do Better Auth (acima) precisa do IP do cliente, e
+      // o padrao dele e `x-forwarded-for` — que atras do Fly NUNCA resolve: o
+      // proxy acrescenta o IP real ao que o cliente mandou, e a lib recusa o
+      // cabecalho com mais de um valor, justamente porque o primeiro salto e
+      // forjavel. Sem IP ela cai num balde unico por rota, e ai um cliente
+      // sozinho esgotava o limite de login de TODO mundo (o proprio Better Auth
+      // avisa isso no boot). `fly-client-ip` e escrito pelo proxy do Fly e nao
+      // da para forjar; e a mesma fonte que o nosso rate limit usa, em
+      // rate-limit.ts. Fora do Fly o cabecalho nao existe e a lib cai sozinha em
+      // 127.0.0.1 quando NODE_ENV nao e producao.
+      ipAddress: { ipAddressHeaders: [IP_HEADER] },
       defaultCookieAttributes: { sameSite: 'lax' },
       // Cookie compartilhado entre apex e www (ex.: COOKIE_DOMAIN=.trevalis.app),
       // para a sessao valer em https://trevalis.app E https://www.trevalis.app.
