@@ -48,6 +48,9 @@ RUN rm -rf node_modules/vite node_modules/vitest node_modules/@vitest \
     node_modules/postcss node_modules/rollup node_modules/@rollup \
     node_modules/@vitejs node_modules/esbuild node_modules/@esbuild \
     node_modules/typescript
+# A SPA ja foi buildada no estagio 1 e so o `dist` viaja; o node_modules do
+# apps/web nao roda nada em producao.
+RUN rm -rf apps/web/node_modules
 
 # ---------- 3. runtime ----------
 FROM node:22-slim AS runtime
@@ -55,7 +58,14 @@ ENV NODE_ENV=production
 ENV PORT=8080
 WORKDIR /app
 
-COPY --from=prod-deps /app/node_modules ./node_modules
+# /app INTEIRO, nao so o node_modules da raiz: o npm nem sempre iça a dependencia
+# para a raiz do monorepo — dependendo de como o lockfile foi gerado ele instala
+# em `packages/server/node_modules`. Copiar so a raiz deixou o `better-auth`
+# fora da imagem e derrubou a producao (v43): o servidor subia e morria em
+# ERR_MODULE_NOT_FOUND. Aqui vem a raiz E os node_modules dos workspaces, entao
+# a imagem para de depender do içamento. O `COPY packages` abaixo mescla o
+# codigo por cima sem apagar esses diretorios.
+COPY --from=prod-deps /app ./
 COPY package.json package-lock.json ./
 COPY packages ./packages
 COPY apps/web/package.json ./apps/web/package.json
